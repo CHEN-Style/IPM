@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IPM | Mid-platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        background-color: #0f172a; /* Deep slate baseline */
+      }
+      /* Floating window should NOT have the mid-platform deep background */
+      body.ui-floating {
+        background-color: transparent !important;
+      }
+      /* Custom scrollbar for professional look */
+      ::-webkit-scrollbar {
+        width: 5px;
+        height: 5px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(148, 163, 184, 0.2);
+        border-radius: 10px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(148, 163, 184, 0.4);
+      }
+
+      /* ===== Floating Tray Widget helpers (ported from DESIGN-GUIDE/flow-window-design-guide) ===== */
+      /* Custom Scrollbar hiding for cleaner UI */
+      .scrollbar-hide::-webkit-scrollbar {
+        display: none;
+      }
+      .scrollbar-hide {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+
+      /* Line clamp (Tailwind plugin equivalent) */
+      .line-clamp-1,
+      .line-clamp-2,
+      .line-clamp-3 {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .line-clamp-1 {
+        -webkit-line-clamp: 1;
+      }
+      .line-clamp-2 {
+        -webkit-line-clamp: 2;
+      }
+      .line-clamp-3 {
+        -webkit-line-clamp: 3;
+      }
+
+      /* Knowledge Panorama modal animation (ported from DESIGN-GUIDE/knowledge-panorama) */
+      @keyframes fade-in-up {
+        0% {
+          transform: translateY(12px);
+          opacity: 0;
+        }
+        100% {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+      .animate-fade-in-up {
+        animation: fade-in-up 0.22s ease-out forwards;
+      }
+
+      /* Snappy Animations for "Juicy" feel */
+      @keyframes pop-in {
+        0% {
+          transform: scale(0.3);
+          opacity: 0;
+        }
+        60% {
+          transform: scale(1.15);
+          opacity: 1;
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+
+      @keyframes land {
+        0% {
+          transform: scale(1.02);
+          border-color: #3b82f6;
+        }
+        40% {
+          transform: scale(0.97);
+        }
+        100% {
+          transform: scale(1);
+        }
+      }
+
+      @keyframes slide-up-fade {
+        0% {
+          transform: translateY(10px);
+          opacity: 0;
+        }
+        100% {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+
+      @keyframes shimmer {
+        0% {
+          background-position: -200% 0;
+        }
+        100% {
+          background-position: 200% 0;
+        }
+      }
+
+      @keyframes success-pulse {
+        0% {
+          box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+        }
+        70% {
+          box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+        }
+      }
+
+      @keyframes explode {
+        0% {
+          transform: translate(-50%, -50%) scale(0);
+          opacity: 1;
+        }
+        50% {
+          opacity: 1;
+        }
+        100% {
+          transform: translate(var(--tx), var(--ty)) scale(1) rotate(var(--rot));
+          opacity: 0;
+        }
+      }
+
+      @keyframes float-around {
+        0%,
+        100% {
+          transform: translateY(0) rotate(0deg);
+        }
+        50% {
+          transform: translateY(-5px) rotate(5deg);
+        }
+      }
+
+      .animate-pop-in {
+        animation: pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+      }
+      .animate-land {
+        animation: land 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+      }
+      .animate-slide-up {
+        animation: slide-up-fade 0.3s ease-out forwards;
+      }
+      .animate-shimmer {
+        background: linear-gradient(
+          90deg,
+          rgba(255, 255, 255, 0) 0%,
+          rgba(255, 255, 255, 0.4) 50%,
+          rgba(255, 255, 255, 0) 100%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite linear;
+      }
+      .animate-success-pulse {
+        animation: success-pulse 0.6s ease-out forwards;
+      }
+      .particle {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        pointer-events: none;
+        animation: explode 0.8s ease-out forwards;
+      }
+      .animate-float {
+        animation: float-around 3s ease-in-out infinite;
+      }
+    </style>
+  </head>
+  <body class="text-slate-900 overflow-hidden">
+    <div id="root"></div>
+    <script type="module" src="/src/renderer.jsx"></script>
+  </body>
+</html>

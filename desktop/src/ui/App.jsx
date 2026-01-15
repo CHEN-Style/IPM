@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Sidebar from './components/Sidebar.jsx';
 import DetailPanel from './components/DetailPanel.jsx';
 import FloatingMode from './components/floating/FloatingMode.jsx';
@@ -9,6 +9,7 @@ import OverviewPage from './components/OverviewPage.jsx';
 
 const App = () => {
   const [activeNav, setActiveNav] = useState('mydata');
+  const [myDataSection, setMyDataSection] = useState('home'); // home | projects | cases | study
   const [selectedDoc, setSelectedDoc] = useState(null); // 右侧详情后续接入
   const [sidebarPinned, setSidebarPinned] = useState(() => {
     try {
@@ -46,6 +47,94 @@ const App = () => {
     // Pinned always means expanded
     if (sidebarPinned) setSidebarCollapsed(false);
   }, [sidebarPinned]);
+
+  const [pageFade, setPageFade] = useState('in'); // in | out (white overlay)
+  const [displayNav, setDisplayNav] = useState(activeNav);
+  const fadeTimerRef = useRef(null);
+
+  const fadeEligible = useMemo(() => new Set(['overview', 'mydata', 'knowledge']), []);
+
+  useEffect(() => {
+    if (fadeTimerRef.current) {
+      clearTimeout(fadeTimerRef.current);
+      fadeTimerRef.current = null;
+    }
+
+    if (displayNav === activeNav) return;
+    const fromOk = fadeEligible.has(displayNav);
+    const toOk = fadeEligible.has(activeNav);
+    if (!fromOk || !toOk) {
+      setDisplayNav(activeNav);
+      setPageFade('in');
+      return;
+    }
+
+    setPageFade('out');
+    fadeTimerRef.current = setTimeout(() => {
+      setDisplayNav(activeNav);
+      setPageFade('out'); // keep overlay visible then fade out
+      requestAnimationFrame(() => setPageFade('in'));
+    }, 160);
+  }, [activeNav, displayNav, fadeEligible]);
+
+  useEffect(() => {
+    return () => {
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    };
+  }, []);
+
+  const [workspaceStats, setWorkspaceStats] = useState(() => ({
+    loading: true,
+    projects: { count: null, active: null },
+    cases: { count: null, active: null },
+    study: { count: null, active: 1 },
+  }));
+
+  const refreshWorkspaceStats = useCallback(async () => {
+    setWorkspaceStats((s) => ({ ...s, loading: true }));
+    try {
+      const [projectsList, casesList] = await Promise.all([
+        window.ipm?.projects?.list?.().catch(() => []),
+        window.ipm?.cases?.list?.().catch(() => []),
+      ]);
+      const projects = Array.isArray(projectsList) ? projectsList : [];
+      const cases = Array.isArray(casesList) ? casesList : [];
+
+      let studyCount = null;
+      try {
+        const res = await window.ipm?.explorer?.list?.('', '', { domain: 'study' });
+        const entries = Array.isArray(res?.entries) ? res.entries : [];
+        studyCount = entries.filter((e) => e?.kind === 'dir' && !['meta', 'snippets', 'temp'].includes(String(e?.name || ''))).length;
+      } catch {
+        studyCount = null;
+      }
+
+      setWorkspaceStats({
+        loading: false,
+        projects: { count: projects.length, active: projects.filter((p) => p?.status === 'active').length },
+        cases: { count: cases.length, active: cases.filter((p) => p?.status === 'active').length },
+        study: { count: studyCount, active: 1 },
+      });
+    } catch {
+      setWorkspaceStats((s) => ({ ...s, loading: false }));
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshWorkspaceStats();
+  }, []);
+
+  useEffect(() => {
+    // Keep overview / mydata-home cards fresh after creating/deleting projects/cases.
+    if (activeNav === 'overview') void refreshWorkspaceStats();
+    if (activeNav === 'mydata' && myDataSection === 'home') void refreshWorkspaceStats();
+  }, [activeNav, myDataSection, refreshWorkspaceStats]);
+
+  const openMyDataDomain = (domain) => {
+    const d = String(domain || '').toLowerCase();
+    if (d === 'cases' || d === 'projects' || d === 'study') setMyDataSection(d);
+    setActiveNav('mydata');
+  };
 
   if (uiMode === 'floating') {
     return (
@@ -86,17 +175,24 @@ const App = () => {
             setSidebarCollapsed(true);
           }}
         >
-          {activeNav === 'settings' ? (
+          <div className="flex-1 min-h-0 relative">
+            <div
+              className={`absolute inset-0 bg-white transition-opacity duration-200 ease-in-out pointer-events-none z-10 ${
+                pageFade === 'out' ? 'opacity-100' : 'opacity-0'
+              }`}
+            />
+            {displayNav === 'settings' ? (
             <SettingsPage />
-          ) : activeNav === 'overview' ? (
-            <OverviewPage />
-          ) : activeNav === 'knowledge' ? (
+            ) : displayNav === 'overview' ? (
+              <OverviewPage stats={workspaceStats} onOpenDomain={openMyDataDomain} />
+            ) : displayNav === 'knowledge' ? (
             <KnowledgePanorama />
-          ) : activeNav === 'mydata' ? (
-            <MyDataPage />
+            ) : displayNav === 'mydata' ? (
+              <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} />
           ) : (
-            <MyDataPage />
+              <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} />
           )}
+          </div>
         </main>
 
         {/* Column 3: Contextual Detail Panel */}

@@ -26,6 +26,7 @@ const DropTray = ({
   state,
   fileName,
   onFileDrop,
+  onFilesDrop,
   onDragEnter,
   onDragLeave,
   isCompact = false,
@@ -69,10 +70,15 @@ const DropTray = ({
       if (disabled) return;
       const files = e.dataTransfer.files;
       if (files && files.length > 0) {
-        onFileDrop?.(files[0]);
+        const arr = Array.from(files);
+        if (onFilesDrop) {
+          onFilesDrop(arr);
+        } else {
+          onFileDrop?.(arr[0]);
+        }
       }
     },
-    [onFileDrop, disabled],
+    [onFileDrop, onFilesDrop, disabled],
   );
 
   const handleDragOver = (e) => {
@@ -94,7 +100,12 @@ const DropTray = ({
   const handleInputChange = (e) => {
     if (disabled) return;
     if (e.target.files && e.target.files.length > 0) {
-      onFileDrop?.(e.target.files[0]);
+      const arr = Array.from(e.target.files);
+      if (onFilesDrop) {
+        onFilesDrop(arr);
+      } else {
+        onFileDrop?.(arr[0]);
+      }
     }
   };
 
@@ -130,7 +141,7 @@ const DropTray = ({
         ${heightClass || (isCompact ? 'h-20' : 'h-32')}
       `}
     >
-      <input type="file" ref={inputRef} onChange={handleInputChange} className="hidden" disabled={disabled} />
+      <input type="file" ref={inputRef} onChange={handleInputChange} className="hidden" disabled={disabled} multiple />
 
       {/* Shimmer overlay for processing state */}
       {state === TrayState.PROCESSING && (

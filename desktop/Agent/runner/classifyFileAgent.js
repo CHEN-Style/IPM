@@ -14,7 +14,7 @@ export async function classifyFileOnce(input) {
     .withStructuredOutput(ClassifyFileOutputSchema)
     .invoke([
       new SystemMessage(systemPrompt),
-      new HumanMessage(userPrompt({ fileName: parsed.fileName, ext: parsed.ext, folders: parsed.folders })),
+      new HumanMessage(userPrompt({ fileName: parsed.fileName, ext: parsed.ext, sourceDir: parsed.sourceDir, folders: parsed.folders })),
     ]);
 
   // Ensure targetRelPath is one of candidates (hard guard)

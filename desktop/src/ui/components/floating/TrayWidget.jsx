@@ -26,6 +26,7 @@ const TrayWidget = ({
   const captureNoticeTimerRef = useRef(null);
   const [lastSaved, setLastSaved] = useState(null);
   const [undo, setUndo] = useState(null); // { relPath, secondsLeft, timerId }
+  const [batchProgress, setBatchProgress] = useState(null); // { current: number, total: number, fileName: string }
   const lastClipboardRef = useRef('');
   const lastImageTokenRef = useRef('');
 
@@ -130,7 +131,7 @@ const TrayWidget = ({
 
   const hasTarget = !disabled && (activeDomain === 'study' ? true : Boolean(activeProjectId));
 
-  const autoUpload = async (file) => {
+  const autoUploadSingle = async (file, { allowUndo = true } = {}) => {
     if (!hasTarget) return;
     const srcPath = getSrcPathFromFile(file);
     if (!srcPath) {
@@ -144,23 +145,62 @@ const TrayWidget = ({
       setLastSaved(relPath || null);
       setTrayState(TrayState.COMPLETED);
 
-      // start undo countdown (3s)
-      if (undo?.timerId) window.clearInterval(undo.timerId);
-      let seconds = 3;
-      const timerId = window.setInterval(() => {
-        seconds -= 1;
-        setUndo((u) => (u ? { ...u, secondsLeft: seconds } : u));
-        if (seconds <= 0) {
-          window.clearInterval(timerId);
-          setUndo(null);
-          handleReset();
-        }
-      }, 1000);
-      setUndo({ relPath, secondsLeft: seconds, timerId });
+      if (allowUndo) {
+        // start undo countdown (3s)
+        if (undo?.timerId) window.clearInterval(undo.timerId);
+        let seconds = 3;
+        const timerId = window.setInterval(() => {
+          seconds -= 1;
+          setUndo((u) => (u ? { ...u, secondsLeft: seconds } : u));
+          if (seconds <= 0) {
+            window.clearInterval(timerId);
+            setUndo(null);
+            handleReset();
+          }
+        }, 1000);
+        setUndo({ relPath, secondsLeft: seconds, timerId });
+      }
     } catch (e) {
       console.error(e);
       window.alert(`保存失败：${e?.message || String(e)}`);
       setTrayState(TrayState.IDLE);
+    }
+  };
+
+  const autoUploadBatch = async (files) => {
+    if (!hasTarget) return;
+    const arr = Array.isArray(files) ? files.filter(Boolean) : [];
+    if (!arr.length) return;
+
+    // Batch mode: serial upload, no undo (避免状态冲突)
+    if (undo?.timerId) window.clearInterval(undo.timerId);
+    setUndo(null);
+    setLastSaved(null);
+    setCurrentFile(null);
+
+    setTrayState(TrayState.PROCESSING);
+    try {
+      for (let i = 0; i < arr.length; i += 1) {
+        const f = arr[i];
+        const name = f?.name || 'file';
+        setBatchProgress({ current: i + 1, total: arr.length, fileName: name });
+
+        const srcPath = getSrcPathFromFile(f);
+        if (!srcPath) {
+          throw new Error('未获取到文件路径，请重新拖拽或点击选择文件');
+        }
+
+        await window.ipm?.floating?.copyToTemp(activeProjectId, srcPath, name, { domain: activeDomain });
+      }
+
+      setTrayState(TrayState.COMPLETED);
+      window.setTimeout(() => handleReset(), 1500);
+    } catch (e) {
+      console.error(e);
+      window.alert(`保存失败：${e?.message || String(e)}`);
+      setTrayState(TrayState.IDLE);
+    } finally {
+      setBatchProgress(null);
     }
   };
 
@@ -303,10 +343,39 @@ const TrayWidget = ({
     });
     if (uploadMode === 'auto') {
       // 先斩后奏：直接上传，保留 compact 状态，由用户手动放大
-      void autoUpload(file);
+      void autoUploadSingle(file);
       return;
     }
     setTrayState(TrayState.FILE_STAGED);
+  };
+
+  const handleFilesDrop = (files) => {
+    if (!hasTarget) return;
+    const arr = Array.isArray(files) ? files.filter(Boolean) : [];
+    if (!arr.length) return;
+
+    // multi-file only supported in auto mode; confirm mode keeps old behavior (single file)
+    if (uploadMode !== 'auto') {
+      if (arr.length > 1) {
+        window.alert('当前模式需要逐个确认：请一次拖入一个文件。');
+      }
+      handleFileDrop(arr[0]);
+      return;
+    }
+
+    // File drop overrides snippet confirm
+    if (pendingSnippet || pendingShot) {
+      if (snippetTimerRef.current) {
+        window.clearTimeout(snippetTimerRef.current);
+        snippetTimerRef.current = null;
+      }
+      setPendingSnippet(null);
+      setSnippetStatus('idle');
+      setPendingShot(null);
+      setShotStatus('idle');
+    }
+
+    void autoUploadBatch(arr);
   };
 
   const handleReset = () => {
@@ -580,7 +649,10 @@ const TrayWidget = ({
                 (trayState === TrayState.IDLE && (isCompact ? '拖入保存' : '等待内容...')) ||
                 (trayState === TrayState.DRAGGING && '松开以放入') ||
                 (trayState === TrayState.FILE_STAGED && '确认保存') ||
-                (trayState === TrayState.PROCESSING && '处理中...') ||
+                (trayState === TrayState.PROCESSING &&
+                  (batchProgress
+                    ? `正在上传 ${batchProgress.current}/${batchProgress.total}：${batchProgress.fileName}`
+                    : '处理中...')) ||
                 (trayState === TrayState.COMPLETED && '已保存')}
             </span>
             {uploadMode === 'auto' && undo?.secondsLeft ? (
@@ -617,7 +689,7 @@ const TrayWidget = ({
             e.preventDefault();
             const files = e.dataTransfer?.files;
             if (files && files.length > 0) {
-              handleFileDrop(files[0]);
+              handleFilesDrop(Array.from(files));
             }
           }}
         >
@@ -757,6 +829,7 @@ const TrayWidget = ({
               state={trayState}
               fileName={currentFile?.name || null}
               onFileDrop={handleFileDrop}
+              onFilesDrop={handleFilesDrop}
               onDragEnter={handleDragEnter}
               onDragLeave={handleDragLeave}
               isCompact={isCompact}

@@ -77,6 +77,8 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
   const [renameRelPath, setRenameRelPath] = useState('');
   const [renameOldName, setRenameOldName] = useState('');
   const [renameNewName, setRenameNewName] = useState('');
+  const aiUploadInputRef = useRef(null);
+  const [aiUpload, setAiUpload] = useState({ running: false, current: 0, total: 0, fileName: '' });
 
   // When coming back from floating window, the main window is shown again but cwd doesn't change,
   // so our normal "enter folder -> refresh" effect won't run. We refresh on window focus/visibility.
@@ -701,6 +703,50 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
     }
   };
 
+  const uploadFilesAndAiClassify = async (files) => {
+    // Requirement: only files (no folders), allow multi-select, serial, reuse floating/copyToTemp
+    if (cwd.type !== 'project') {
+      setNotice({ variant: 'warn', message: '仅支持在项目/案件/学习中使用（不支持本地文件夹视图）' });
+      return;
+    }
+    if (!window.ipm?.floating?.copyToTemp) {
+      setNotice({ variant: 'error', message: 'floating/copyToTemp 未就绪：请重启应用（不要只刷新页面）' });
+      return;
+    }
+    const arr = Array.isArray(files) ? files.filter(Boolean) : [];
+    if (!arr.length) return;
+
+    setErrorText('');
+    setAiUpload({ running: true, current: 0, total: arr.length, fileName: '' });
+    try {
+      for (let i = 0; i < arr.length; i += 1) {
+        const f = arr[i];
+        const name = String(f?.name || 'file');
+        const srcPath = String(
+          f?.path || (window.ipm?.files?.getPathForFile ? window.ipm.files.getPathForFile(f) : '') || '',
+        );
+        setAiUpload({ running: true, current: i + 1, total: arr.length, fileName: name });
+        if (!srcPath) throw new Error('未获取到文件路径：请在桌面应用中重新选择文件（不要在浏览器里打开 UI 页面）');
+        await window.ipm.floating.copyToTemp(cwd.name, srcPath, name, domainOpts);
+      }
+
+      setNotice({ variant: 'success', message: `已放入 temp 并触发 AI 分类（${arr.length} 个）。稍后可在「AI 暂存区」查看建议。` });
+      await refreshEntries();
+      // AI 推荐写入是异步的：做一次轻微延迟刷新
+      window.setTimeout(() => refreshGhosts().catch(() => {}), 700);
+      window.setTimeout(() => refreshGhosts().catch(() => {}), 1500);
+    } catch (e) {
+      setNotice({ variant: 'error', message: e?.message || String(e) });
+    } finally {
+      setAiUpload({ running: false, current: 0, total: 0, fileName: '' });
+    }
+  };
+
+  const pickFilesAndAiClassify = () => {
+    if (aiUpload.running) return;
+    aiUploadInputRef.current?.click?.();
+  };
+
   const uploadFilesTo = async (destRelPath, folderName) => {
     if (cwd.type !== 'project' && cwd.type !== 'local') return;
     setErrorText('');
@@ -933,6 +979,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
     openMenu(e.clientX, e.clientY, [
       { label: '新建文件夹', onClick: () => openNewFolder() },
       { label: '上传文件', onClick: () => uploadFiles() },
+      { label: '上传并AI分类', onClick: () => pickFilesAndAiClassify() },
     ]);
   };
 
@@ -1052,6 +1099,19 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
   return (
     <div className="flex-1 flex flex-col h-full bg-white relative" onClick={closeMenu}>
       <ToastBubble notice={notice} onClear={() => setNotice(null)} autoCloseMs={4000} />
+      {/* Hidden file input for “Upload & AI classify” (Electron gives file.path) */}
+      <input
+        ref={aiUploadInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const arr = Array.from(e.target.files || []);
+          // reset so selecting same file twice still triggers change
+          e.target.value = '';
+          void uploadFilesAndAiClassify(arr);
+        }}
+      />
       {/* Header */}
       <header className="px-8 py-6 border-b border-slate-100 flex items-center justify-between shrink-0">
         <div className="min-w-0 flex items-center gap-4">
@@ -1061,8 +1121,8 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
                 ? `学习${cwd.type === 'project' && cwd.relPath ? ` / ${cwd.relPath}` : ''}`
                 : isRoot
                   ? entityLabelAll
-                  : cwd.type === 'local'
-                    ? `本地文件夹：${String(cwd.rootPath || '').split(/[/\\]+/).filter(Boolean).slice(-1)[0] || String(cwd.rootPath || '')}`
+                : cwd.type === 'local'
+                  ? `本地文件夹：${String(cwd.rootPath || '').split(/[/\\]+/).filter(Boolean).slice(-1)[0] || String(cwd.rootPath || '')}`
                     : `${entityLabel}文件：${title}`}
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -1070,8 +1130,8 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
                 ? `路径：userfile/study${cwd.type === 'project' && cwd.relPath ? ` / ${cwd.relPath}` : ''}`
                 : isRoot
                   ? `共 ${projects.length} 个${entityLabel}`
-                  : cwd.type === 'local'
-                    ? `路径：${cwd.rootPath || ''}${cwd.relPath ? ` / ${cwd.relPath}` : ''}`
+                : cwd.type === 'local'
+                  ? `路径：${cwd.rootPath || ''}${cwd.relPath ? ` / ${cwd.relPath}` : ''}`
                     : `当前${entityLabel}：${cwd.name}${cwd.relPath ? ` / ${cwd.relPath}` : ''}`}
             </p>
           </div>
@@ -1191,8 +1251,22 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
                 type="button"
                 onClick={uploadFiles}
                 className="px-4 py-1.5 bg-slate-900 text-white rounded text-sm font-medium hover:bg-slate-800 transition-colors shadow-sm"
+                disabled={aiUpload.running}
               >
                 上传文件
+              </button>
+              <button
+                type="button"
+                onClick={pickFilesAndAiClassify}
+                disabled={aiUpload.running || cwd.type !== 'project'}
+                className={`px-4 py-1.5 rounded text-sm font-medium transition-colors shadow-sm ${
+                  aiUpload.running || cwd.type !== 'project'
+                    ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                }`}
+                title="选择一个或多个文件，逐个放入 temp，并逐个触发 AI 分类推荐"
+              >
+                {aiUpload.running ? `上传并AI分类 ${aiUpload.current}/${aiUpload.total}` : '上传并AI分类'}
               </button>
             </div>
           )}

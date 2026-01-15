@@ -7,10 +7,13 @@ export const FolderCandidateSchema = z.object({
 });
 
 export const ClassifyFileInputSchema = z.object({
-  projectName: z.string().min(1),
+  // projects/cases: non-empty name; study: may be empty (fixed root)
+  projectName: z.string().optional().default(''),
   sourceRelPath: z.string().min(1),
   fileName: z.string().min(1),
   ext: z.string().optional().default(''),
+  // Optional hint from temp-source-record.json (absolute dir path on user machine)
+  sourceDir: z.string().optional().default(''),
   folders: z.array(FolderCandidateSchema).min(1),
 });
 

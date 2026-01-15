@@ -91,10 +91,11 @@ const getWorkspaceRoot = (domain) => {
 
 const getBizFolderDefaultDescriptions = () => {
   return {
-    收到资料: '外部收到的资料：客户提供的合同/协议/附件、沟通记录截图等（建议保持原始文件不改动）。',
-    过程文档: '内部过程文档：律师撰写/修改中的工作稿、备忘录、版本迭代文件等（可频繁更新）。',
-    调研研究: '针对具体问题的调研与研究：法规检索、专题研究、文章/报告草稿、类案分析等。',
-    交付成果: '对外交付成果：定稿文件、正式出具材料、交付给客户的版本（建议按日期/版本管理）。',
+    收到资料:
+      '外部收到的资料：客户提供的合同/协议/附件、沟通记录截图等，这类文件有可能文件名是较乱的，尤其是图片和截图。\n路径中包含“wechat”，“WXWork”的大概率是收到的资料',
+    过程文档: '内部过程文档：律师撰写/修改中的工作稿、备忘录、版本迭代文件等（可频繁更新）。通常文件名中存在类似“v1”，（1）的文件都为过程文档',
+    调研研究: '针对具体问题的调研与研究：法规检索、专题研究、文章/报告草稿、类案分析等。\n路径中包含Downloads的文件有概率为调研研究文件。',
+    交付成果: '对外交付成果：定稿文件、正式出具材料、交付给客户的版本，如果文件名中出现多余后缀，前缀比如“v1”，“（1）”等，那么这个文件一定不是交付文件，请排除。',
   };
 };
 
@@ -142,6 +143,7 @@ const asPosixRel = (p) => String(p || '').split(path.sep).join('/');
 const getProjectMetaDir = (projectDir) => path.join(projectDir, 'meta');
 const getProjectLogPath = (projectDir) => path.join(getProjectMetaDir(projectDir), 'log.jsonl');
 const getProjectStructurePath = (projectDir) => path.join(getProjectMetaDir(projectDir), 'structure.json');
+const getTempSourceRecordPath = (projectDir) => path.join(getProjectMetaDir(projectDir), 'temp-source-record.json');
 
 const getSnippetsDir = (projectDir) => path.join(projectDir, 'snippets');
 const getSnippetsMetaDir = (projectDir) => path.join(getSnippetsDir(projectDir), 'snippets-meta');
@@ -260,11 +262,15 @@ const triggerAutoClassifyToAiStorage = async ({ domain, projectName, projectDir,
       return;
     }
 
+    const tempSourceInfo = getTempSourceInfoByRelPath(projectDir, sourceRelPath);
+    const sourceDir = tempSourceInfo?.sourceDir || '';
+
     const decision = await classifyFileOnce({
       projectName,
       sourceRelPath,
       fileName,
       ext,
+      sourceDir,
       folders,
     });
     agentLog('INFO', 'decision', { domain: d, projectName, sourceRelPath, targetRelPath: decision.targetRelPath, ms: Date.now() - startedAt });
@@ -472,6 +478,82 @@ const safeReadJson = (filePath, fallback = null) => {
   } catch {
     return fallback;
   }
+};
+
+// Record source info for files copied into temp/, keyed by sourceRelPath (temp/xxx)
+const upsertTempSourceRecord = (projectDir, projectName, entry) => {
+  const recordPath = getTempSourceRecordPath(projectDir);
+  const nowIso = new Date().toISOString();
+  const doc = safeReadJson(recordPath, null) || {
+    schemaVersion: 1,
+    projectName: projectName || '',
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    items: [],
+  };
+
+  doc.schemaVersion = doc.schemaVersion || 1;
+  doc.projectName = doc.projectName || projectName || '';
+  doc.items = Array.isArray(doc.items) ? doc.items : [];
+
+  const sourceRelPath = normalizeRelPathPosix(entry?.sourceRelPath || '');
+  if (!sourceRelPath) return null;
+
+  const normalized = {
+    sourceRelPath,
+    sourcePath: String(entry?.sourcePath || ''),
+    sourceDir: String(entry?.sourceDir || ''),
+    fileName: String(entry?.fileName || ''),
+    sourceSizeBytes: Number.isFinite(entry?.sourceSizeBytes) ? entry.sourceSizeBytes : null,
+    capturedAt: entry?.capturedAt || nowIso,
+  };
+
+  const idx = doc.items.findIndex((x) => normalizeRelPathPosix(x?.sourceRelPath || '') === sourceRelPath);
+  if (idx >= 0) {
+    doc.items[idx] = { ...(doc.items[idx] || {}), ...normalized };
+  } else {
+    doc.items.push(normalized);
+  }
+
+  // prevent unbounded growth
+  const MAX_ITEMS = 500;
+  if (doc.items.length > MAX_ITEMS) {
+    doc.items = doc.items.slice(doc.items.length - MAX_ITEMS);
+  }
+
+  doc.updatedAt = nowIso;
+  atomicWriteFileSync(recordPath, JSON.stringify(doc, null, 2), 'utf-8');
+  return normalized;
+};
+
+const deleteTempSourceRecordByRelPath = (projectDir, sourceRelPathRaw) => {
+  const sourceRelPath = normalizeRelPathPosix(sourceRelPathRaw || '');
+  if (!sourceRelPath) return false;
+  const recordPath = getTempSourceRecordPath(projectDir);
+  const doc = safeReadJson(recordPath, null);
+  if (!doc || typeof doc !== 'object') return false;
+  const items = Array.isArray(doc.items) ? doc.items : [];
+  const next = items.filter((x) => normalizeRelPathPosix(x?.sourceRelPath || '') !== sourceRelPath);
+  if (next.length === items.length) return false;
+  doc.items = next;
+  doc.updatedAt = new Date().toISOString();
+  atomicWriteFileSync(recordPath, JSON.stringify(doc, null, 2), 'utf-8');
+  return true;
+};
+
+const getTempSourceInfoByRelPath = (projectDir, sourceRelPathRaw) => {
+  const sourceRelPath = normalizeRelPathPosix(sourceRelPathRaw || '');
+  if (!sourceRelPath) return null;
+  const recordPath = getTempSourceRecordPath(projectDir);
+  const doc = safeReadJson(recordPath, null);
+  const items = doc && typeof doc === 'object' && Array.isArray(doc.items) ? doc.items : [];
+  const hit = items.find((x) => normalizeRelPathPosix(x?.sourceRelPath || '') === sourceRelPath);
+  if (!hit || typeof hit !== 'object') return null;
+  return {
+    sourceRelPath,
+    sourcePath: typeof hit.sourcePath === 'string' ? hit.sourcePath : '',
+    sourceDir: typeof hit.sourceDir === 'string' ? hit.sourceDir : '',
+  };
 };
 
 const safeRenameSync = (fromPath, toPath) => {
@@ -1228,9 +1310,23 @@ app.whenReady().then(() => {
     const destPath = ensureUniqueDestPath(tempDir, safeName);
     fs.copyFileSync(srcPath, destPath);
 
+    // Record source info immediately (independent of AI success/failure)
+    const sourceRelPath = path.relative(projectDir, destPath).split(path.sep).join('/');
+    try {
+      upsertTempSourceRecord(projectDir, projectName, {
+        sourceRelPath,
+        sourcePath: srcPath,
+        sourceDir: path.dirname(srcPath),
+        fileName: safeName,
+        sourceSizeBytes: st.size,
+        capturedAt: new Date().toISOString(),
+      });
+    } catch {
+      // ignore
+    }
+
     // Trigger AI classification (non-blocking): ONLY uses fileName/ext + structure.json
     try {
-      const sourceRelPath = path.relative(projectDir, destPath).split(path.sep).join('/');
       agentLog('INFO', 'floating upload saved to temp', { projectName, sourceRelPath });
       void triggerAutoClassifyToAiStorage({ domain, projectName, projectDir, sourceRelPath });
     } catch {
@@ -1259,6 +1355,11 @@ app.whenReady().then(() => {
       throw new Error('仅允许删除 temp 目录下的文件');
     }
     safeRmSync(targetAbs);
+    try {
+      deleteTempSourceRecordByRelPath(projectDir, relPath);
+    } catch {
+      // ignore
+    }
     return { ok: true, projectName, domain, deleted: true };
   });
 

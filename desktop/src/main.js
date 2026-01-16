@@ -7,6 +7,17 @@ import { classifyFileOnce } from '../Agent/index.js';
 import { upsertAiSuggestion, listAiSuggestions, setAiSuggestionStatus } from '../Agent/storage/aiStorage.js';
 import { registerLocalFoldersIpc } from './main/modules/localFolders.js';
 import { registerLocalExplorerIpc } from './main/modules/localExplorer.js';
+import { registerAppIpc } from './main/ipc/app.js';
+import { registerPrefsIpc } from './main/ipc/prefs.js';
+import { registerMetaIpc } from './main/ipc/meta.js';
+import { registerAiStorageIpc } from './main/ipc/aiStorage.js';
+import { registerExplorerIpc } from './main/ipc/explorer.js';
+import { registerProjectsIpc } from './main/ipc/projects.js';
+import { registerCasesIpc } from './main/ipc/cases.js';
+import { registerSnippetsIpc } from './main/ipc/snippets.js';
+import { registerScreenshotsIpc } from './main/ipc/screenshots.js';
+import { registerFloatingIpc } from './main/ipc/floating.js';
+import { registerUiIpc } from './main/ipc/ui.js';
 
 const shouldAgentLog = () => {
   const v = String(process.env.IPM_AGENT_LOG || '').trim();
@@ -1049,6 +1060,8 @@ const migrateLegacyScreenshotFolderIfNeeded = (projectDir) => {
 
 let mainWindow = null;
 let floatingWindow = null;
+const mainWindowRef = { current: null };
+const floatingWindowRef = { current: null };
 let clipboardWatchTimer = null;
 let lastClipboardText = '';
 let lastClipboardImageHash = '';
@@ -1175,7 +1188,9 @@ const createMainWindow = () => {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    mainWindowRef.current = null;
   });
+  mainWindowRef.current = mainWindow;
 };
 
 const createFloatingWindow = () => {
@@ -1205,12 +1220,14 @@ const createFloatingWindow = () => {
   // DevTools 默认不开，避免打扰（需要时可以手动打开）
   floatingWindow.on('closed', () => {
     floatingWindow = null;
+    floatingWindowRef.current = null;
     stopClipboardWatcher();
     // 如果用户直接关掉浮窗，则回到中台
     if (mainWindow) mainWindow.show();
   });
 
   startClipboardWatcher();
+  floatingWindowRef.current = floatingWindow;
   return floatingWindow;
 };
 
@@ -1236,1733 +1253,197 @@ app.whenReady().then(() => {
   registerLocalFoldersIpc({ ipcMain, dialog, getStatePath });
   registerLocalExplorerIpc({ ipcMain, dialog, shell, getStatePath });
 
-  ipcMain.handle('app/ping', async () => {
-    return {
-      ok: true,
-      now: new Date().toISOString(),
-      version: app.getVersion(),
-      userDataPath: app.getPath('userData'),
-      userFileRoot: getUserFileRoot(),
-      projectsRoot: getProjectsRoot(),
-      casesRoot: getCasesRoot(),
-      studyRoot: getStudyRoot(),
-      currentProject: readState().currentProject ?? null,
-      currentCase: readState().currentCase ?? null,
-    };
+  // ===== Core IPC (split out of main.js to keep it maintainable) =====
+  registerAppIpc({ ipcMain, app, getUserFileRoot, getProjectsRoot, getCasesRoot, getStudyRoot, readState });
+  registerPrefsIpc({ ipcMain, readState, writeState, normalizeFloatingUploadMode });
+  registerMetaIpc({
+    ipcMain,
+    getWorkspaceDirOrThrow,
+    normalizeRelPathPosix,
+    isProtectedRelPath,
+    isSystemFolderRelPath,
+    ensureProjectStructure,
+    syncStructureJson,
+    safeReadJson,
+    getProjectStructurePath,
+    atomicWriteFileSync,
+    appendJsonl,
+    getProjectLogPath,
+  });
+  registerAiStorageIpc({
+    ipcMain,
+    getWorkspaceDirOrThrow,
+    normalizeRelPathPosix,
+    listAiSuggestions,
+    setAiSuggestionStatus,
+    ensureSourceIsTempOrThrow,
+    ensureTargetFolderIsAllowedOrThrow,
+    resolveInside,
+    sanitizeFileName,
+    ensureUniqueDestPath,
+    appendJsonl,
+    getProjectLogPath,
   });
 
-  // ===== UI Window Switching (only window management; no business integration) =====
-  ipcMain.handle('ui/openFloating', async () => {
-    if (!mainWindow) createMainWindow();
-    const fw = createFloatingWindow();
-    fw.show();
-    fw.focus();
-    // 进入悬浮窗时隐藏中台主窗
-    if (mainWindow) mainWindow.hide();
-    return { ok: true };
+  registerExplorerIpc({
+    ipcMain,
+    dialog,
+    shell,
+    sanitizeProjectName,
+    normalizeRelPathPosix,
+    normalizeWorkspaceDomain,
+    getWorkspaceRoot,
+    getStudyRoot,
+    STUDY_WORKSPACE_NAME,
+    getWorkspaceDirOrThrow,
+    resolveInside,
+    asPosixRel,
+    isProtectedRelPath,
+    isProtectedFolderNameRelPath,
+    trashOrRm,
+    waitUntilGoneSync,
+    sanitizeFileName,
+    ensureUniqueDestPath,
+    ensureUniqueDirPath,
+    confirmAutoSuffix,
+    ensureProjectStructure,
+    syncStructureJson,
+    safeReadJson,
+    getProjectStructurePath,
+    remapStructureDocRelPaths,
+    migrateLegacySnippetRecordFilesIfNeeded,
+    migrateLegacyScreenshotFolderIfNeeded,
+    migrateLegacyItemsJsonIfNeeded,
+    removeRecordItemsByContentRelPath,
+    getClipboardRecordPath,
+    getScreenshotRecordPath,
+    listAiSuggestions,
+    setAiSuggestionStatus,
   });
 
-  ipcMain.handle('ui/resizeFloating', async (_evt, payload) => {
-    if (!floatingWindow || floatingWindow.isDestroyed()) return { ok: false, reason: 'no_floating_window' };
-    const w = Math.max(200, Math.min(900, Number(payload?.width) || 0));
-    const h = Math.max(180, Math.min(900, Number(payload?.height) || 0));
-    if (!w || !h) return { ok: false, reason: 'invalid_size' };
-    // Resize content area so there is no extra transparent region that blocks clicks
-    floatingWindow.setContentSize(Math.round(w), Math.round(h));
-    return { ok: true, width: Math.round(w), height: Math.round(h) };
+  registerProjectsIpc({
+    ipcMain,
+    shell,
+    readState,
+    writeState,
+    getProjectsRoot,
+    sanitizeProjectName,
+    normalizeProjectStatus,
+    isTombstoneProjectName,
+    isEmptyDirSync,
+    safeRmSync,
+    quarantineProjectDirSync,
+    looksLikeValidProjectDirSync,
+    makeWritableRecursiveSync,
+    enqueueDeleteDir,
+    ensureProjectStructure,
+    syncStructureJson,
+    getProjectDirOrThrow,
+    sleepSync,
+    trashOrRm,
   });
 
-  ipcMain.handle('ui/backToMain', async () => {
-    if (mainWindow) {
-      mainWindow.show();
-      mainWindow.focus();
-    } else {
-      createMainWindow();
-    }
-    if (floatingWindow) {
-      floatingWindow.close();
-      floatingWindow = null;
-    }
-    return { ok: true };
+  registerCasesIpc({
+    ipcMain,
+    shell,
+    readState,
+    writeState,
+    getCasesRoot,
+    sanitizeProjectName,
+    normalizeProjectStatus,
+    isTombstoneProjectName,
+    isEmptyDirSync,
+    safeRmSync,
+    quarantineProjectDirSync,
+    looksLikeValidProjectDirSync,
+    makeWritableRecursiveSync,
+    enqueueDeleteDir,
+    ensureProjectStructure,
+    syncStructureJson,
+    getWorkspaceDirOrThrow,
+    sleepSync,
+    trashOrRm,
   });
 
-  // ===== Floating: file copy to temp (no business indexing yet) =====
-  ipcMain.handle('floating/copyToTemp', async (_evt, payload) => {
-    const { name: projectName, projectDir, domain } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const srcPath = String(payload?.srcPath ?? '');
-    if (!srcPath) throw new Error('源文件路径不能为空');
-    if (!fs.existsSync(srcPath)) throw new Error('源文件不存在');
-    const st = fs.statSync(srcPath);
-    if (!st.isFile()) throw new Error('源路径不是文件');
-
-    const rawName = payload?.fileName ? String(payload.fileName) : path.basename(srcPath);
-    const safeName = sanitizeFileName(rawName) || 'file';
-
-    const tempDir = ensureTempDir(projectDir);
-    // temp/ might be created lazily; keep structure.json in sync (best-effort)
-    if (!fs.existsSync(getProjectStructurePath(projectDir))) {
-      try {
-        syncStructureJson(projectDir, projectName);
-      } catch {
-        // ignore
-      }
-    }
-    const destPath = ensureUniqueDestPath(tempDir, safeName);
-    fs.copyFileSync(srcPath, destPath);
-
-    // Record source info immediately (independent of AI success/failure)
-    const sourceRelPath = path.relative(projectDir, destPath).split(path.sep).join('/');
-    try {
-      upsertTempSourceRecord(projectDir, projectName, {
-        sourceRelPath,
-        sourcePath: srcPath,
-        sourceDir: path.dirname(srcPath),
-        fileName: safeName,
-        sourceSizeBytes: st.size,
-        capturedAt: new Date().toISOString(),
-      });
-    } catch {
-      // ignore
-    }
-
-    // Trigger AI classification (non-blocking): ONLY uses fileName/ext + structure.json
-    try {
-      agentLog('INFO', 'floating upload saved to temp', { projectName, sourceRelPath });
-      void triggerAutoClassifyToAiStorage({ domain, projectName, projectDir, sourceRelPath });
-    } catch {
-      // ignore
-    }
-
-    return {
-      ok: true,
-      projectName,
-      domain,
-      savedRelPath: path.relative(projectDir, destPath).split(path.sep).join('/'),
-    };
+  registerSnippetsIpc({
+    ipcMain,
+    getWorkspaceDirOrThrow,
+    ensureProjectStructure,
+    migrateLegacySnippetRecordFilesIfNeeded,
+    migrateLegacyItemsJsonIfNeeded,
+    ensureClipboardSnippetsDir,
+    getClipboardRecordPath,
+    getProjectLogPath,
+    formatStamp,
+    makeShortId,
+    ensureUniqueDestPath,
+    sanitizeFileName,
+    safeReadJson,
+    atomicWriteFileSync,
+    appendJsonl,
+    emitClipboardRecordChanged,
+    ensureClipboardRecordDoc,
+    normalizeRelPathPosix,
+    resolveInside,
+    trashOrRm,
   });
 
-  ipcMain.handle('floating/deleteRelPath', async (_evt, payload) => {
-    const { name: projectName, projectDir, domain } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const relPath = String(payload?.relPath ?? '');
-    if (!relPath) throw new Error('目标路径不能为空');
-    const target = resolveInside(projectDir, relPath);
-    if (!fs.existsSync(target)) return { ok: true, projectName, deleted: false };
-    // Only allow undo deletion inside temp/
-    const tempDir = ensureTempDir(projectDir);
-    const tempAbs = path.resolve(tempDir);
-    const targetAbs = path.resolve(target);
-    if (!(targetAbs === tempAbs || targetAbs.startsWith(tempAbs + path.sep))) {
-      throw new Error('仅允许删除 temp 目录下的文件');
-    }
-    safeRmSync(targetAbs);
-    try {
-      deleteTempSourceRecordByRelPath(projectDir, relPath);
-    } catch {
-      // ignore
-    }
-    return { ok: true, projectName, domain, deleted: true };
+  registerScreenshotsIpc({
+    ipcMain,
+    clipboardImageCache,
+    getWorkspaceDirOrThrow,
+    ensureProjectStructure,
+    migrateLegacySnippetRecordFilesIfNeeded,
+    migrateLegacyScreenshotFolderIfNeeded,
+    migrateLegacyItemsJsonIfNeeded,
+    ensureScreenshotsDir,
+    getScreenshotRecordPath,
+    getProjectLogPath,
+    formatStamp,
+    makeShortId,
+    ensureUniqueDestPath,
+    sanitizeFileName,
+    safeReadJson,
+    atomicWriteFileSync,
+    appendJsonl,
   });
 
-  // ===== Snippets: clipboard text -> txt + snippets/snippets-meta/clipboard-record.json index =====
-  ipcMain.handle('snippets/saveClipboardText', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const text = String(payload?.text ?? '');
-    const trimmed = text.trim();
-    if (!trimmed) throw new Error('剪贴板内容为空');
-
-    // Ensure dirs/files
-    ensureProjectStructure(projectName, payload?.domain);
-    migrateLegacySnippetRecordFilesIfNeeded(projectDir, projectName);
-    const snippetsDir = ensureClipboardSnippetsDir(projectDir);
-    migrateLegacyItemsJsonIfNeeded(projectDir, projectName);
-    const recordPath = getClipboardRecordPath(projectDir);
-    const logPath = getProjectLogPath(projectDir);
-
-    // Write txt file (one snippet -> one file)
-    const now = new Date();
-    const stamp = formatStamp(now);
-    const baseName = `${stamp}-${makeShortId()}.txt`;
-    const filePath = ensureUniqueDestPath(snippetsDir, sanitizeFileName(baseName) || 'snippet.txt');
-    fs.writeFileSync(filePath, text, 'utf-8');
-
-    const relPath = asPosixRel(path.relative(projectDir, filePath));
-    const id = `snip_${stamp}_${makeShortId()}`;
-    const preview = trimmed.length > 200 ? `${trimmed.slice(0, 200)}…` : trimmed;
-    const title = trimmed.split(/\r?\n/)[0].slice(0, 40) || '知识碎片';
-
-    const doc = safeReadJson(recordPath, null) || {
-      schemaVersion: 1,
-      projectName,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-      items: [],
-    };
-    doc.schemaVersion = doc.schemaVersion || 1;
-    doc.projectName = doc.projectName || projectName;
-    doc.items = Array.isArray(doc.items) ? doc.items : [];
-
-    const item = {
-      id,
-      type: 'snippet',
-      createdAt: now.toISOString(),
-      title,
-      summary: '',
-      tags: ['temp'],
-      pinned: false,
-      archived: false,
-      content: {
-        format: 'text',
-        relPath,
-        preview,
-      },
-      source: {
-        kind: 'clipboardText',
-      },
-    };
-    doc.items.unshift(item);
-    doc.updatedAt = now.toISOString();
-    atomicWriteFileSync(recordPath, JSON.stringify(doc, null, 2), 'utf-8');
-
-    try {
-      appendJsonl(logPath, {
-        ts: now.toISOString(),
-        event: 'snippet.clipboard.saved',
-        projectName,
-        id,
-        relPath,
-        size: text.length,
-      });
-    } catch {
-      // ignore logging errors in MVP
-    }
-
-    try {
-      emitClipboardRecordChanged({ projectName, type: 'created', id, relPath });
-    } catch {
-      // ignore
-    }
-
-    return { ok: true, projectName, id, relPath };
+  registerFloatingIpc({
+    ipcMain,
+    getWorkspaceDirOrThrow,
+    sanitizeFileName,
+    ensureTempDir,
+    getProjectStructurePath,
+    syncStructureJson,
+    ensureUniqueDestPath,
+    upsertTempSourceRecord,
+    triggerAutoClassifyToAiStorage,
+    agentLog,
+    resolveInside,
+    safeRmSync,
+    deleteTempSourceRecordByRelPath,
   });
 
-  // ===== Snippets: clipboard-record.json CRUD (for snippet linker persistence) =====
-  ipcMain.handle('snippets/clipboardRecord/list', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    ensureProjectStructure(projectName, payload?.domain);
-    migrateLegacySnippetRecordFilesIfNeeded(projectDir, projectName);
-    migrateLegacyItemsJsonIfNeeded(projectDir, projectName);
-    const doc = ensureClipboardRecordDoc(projectDir, projectName);
-    doc.schemaVersion = doc.schemaVersion || 1;
-    doc.projectName = doc.projectName || projectName;
-    doc.items = Array.isArray(doc.items) ? doc.items : [];
-    return { ok: true, projectName, record: doc };
+  registerUiIpc({
+    ipcMain,
+    createMainWindow,
+    createFloatingWindow,
+    mainWindowRef,
+    floatingWindowRef,
   });
 
-  ipcMain.handle('snippets/clipboardRecord/updateMeta', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const id = String(payload?.id || '');
-    const patch = payload?.patch && typeof payload.patch === 'object' ? payload.patch : {};
-    if (!id) throw new Error('id 不能为空');
+  // ui/* moved to `src/main/ipc/ui.js`
+  // floating/* moved to `src/main/ipc/floating.js`
 
-    ensureProjectStructure(projectName, payload?.domain);
-    migrateLegacySnippetRecordFilesIfNeeded(projectDir, projectName);
-    migrateLegacyItemsJsonIfNeeded(projectDir, projectName);
-    const recordPath = getClipboardRecordPath(projectDir);
-    const doc = ensureClipboardRecordDoc(projectDir, projectName);
-    doc.items = Array.isArray(doc.items) ? doc.items : [];
-    const idx = doc.items.findIndex((x) => String(x?.id || '') === id);
-    if (idx < 0) throw new Error('未找到该知识碎片');
+  // snippets/* moved to `src/main/ipc/snippets.js`
+  // screenshots/* moved to `src/main/ipc/screenshots.js`
 
-    const item = doc.items[idx];
-    if (typeof patch.title === 'string') {
-      item.title = patch.title;
-    }
-    if (Array.isArray(patch.tags)) {
-      item.tags = patch.tags.map((t) => String(t)).filter(Boolean);
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, 'importance')) {
-      const v = patch.importance;
-      if (v === null || v === undefined || v === '') {
-        item.importance = undefined;
-      } else {
-        const s = String(v).toLowerCase();
-        if (s !== 'low' && s !== 'medium' && s !== 'high') throw new Error('importance 必须为 low/medium/high');
-        item.importance = s;
-      }
-    }
+  // prefs/* moved to `src/main/ipc/prefs.js`
 
-    if (Object.prototype.hasOwnProperty.call(patch, 'linkedTo')) {
-      const v = patch.linkedTo;
-      if (v === null) {
-        item.linkedTo = null;
-      } else if (v && typeof v === 'object') {
-        const relPath = normalizeRelPathPosix(v.relPath || '');
-        const kind = String(v.kind || '').toLowerCase();
-        if (!relPath) throw new Error('linkedTo.relPath 不能为空');
-        if (relPath === 'snippets' || relPath.startsWith('snippets/') || relPath === 'meta' || relPath.startsWith('meta/')) {
-          throw new Error('禁止关联到系统目录（snippets/meta）');
-        }
-        if (kind !== 'file' && kind !== 'dir') throw new Error('linkedTo.kind 必须为 file 或 dir');
-        item.linkedTo = { relPath, kind };
-      } else {
-        throw new Error('linkedTo 格式不正确');
-      }
-    }
+  // projects/* moved to `src/main/ipc/projects.js`
+  // cases/* moved to `src/main/ipc/cases.js`
 
-    const now = new Date().toISOString();
-    item.updatedAt = now;
-    doc.updatedAt = now;
-    atomicWriteFileSync(recordPath, JSON.stringify(doc, null, 2), 'utf-8');
-
-    try {
-      emitClipboardRecordChanged({ projectName, type: 'updated', id });
-    } catch {
-      // ignore
-    }
-    return { ok: true, projectName, item };
-  });
-
-  ipcMain.handle('snippets/clipboardRecord/updateContent', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const id = String(payload?.id || '');
-    const text = String(payload?.text ?? '');
-    if (!id) throw new Error('id 不能为空');
-
-    ensureProjectStructure(projectName, payload?.domain);
-    migrateLegacySnippetRecordFilesIfNeeded(projectDir, projectName);
-    migrateLegacyItemsJsonIfNeeded(projectDir, projectName);
-    const recordPath = getClipboardRecordPath(projectDir);
-    const doc = ensureClipboardRecordDoc(projectDir, projectName);
-    doc.items = Array.isArray(doc.items) ? doc.items : [];
-    const idx = doc.items.findIndex((x) => String(x?.id || '') === id);
-    if (idx < 0) throw new Error('未找到该知识碎片');
-
-    const item = doc.items[idx];
-    const relPath = normalizeRelPathPosix(item?.content?.relPath || '');
-    if (!relPath) throw new Error('content.relPath 缺失');
-    if (!(relPath === 'snippets/clipboard' || relPath.startsWith('snippets/clipboard/')) || !relPath.toLowerCase().endsWith('.txt')) {
-      throw new Error('仅允许更新 snippets/clipboard 下的 .txt 内容');
-    }
-
-    const target = resolveInside(projectDir, relPath);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, text, 'utf-8');
-
-    const trimmed = String(text || '').trim();
-    const preview = trimmed.length > 200 ? `${trimmed.slice(0, 200)}…` : trimmed;
-    item.content = item.content && typeof item.content === 'object' ? item.content : { format: 'text', relPath, preview: '' };
-    item.content.preview = preview;
-
-    const now = new Date().toISOString();
-    item.updatedAt = now;
-    doc.updatedAt = now;
-    atomicWriteFileSync(recordPath, JSON.stringify(doc, null, 2), 'utf-8');
-
-    try {
-      emitClipboardRecordChanged({ projectName, type: 'updated', id, relPath });
-    } catch {
-      // ignore
-    }
-    return { ok: true, projectName, item };
-  });
-
-  ipcMain.handle('snippets/clipboardRecord/delete', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const id = String(payload?.id || '');
-    if (!id) throw new Error('id 不能为空');
-
-    ensureProjectStructure(projectName, payload?.domain);
-    migrateLegacySnippetRecordFilesIfNeeded(projectDir, projectName);
-    migrateLegacyItemsJsonIfNeeded(projectDir, projectName);
-    const recordPath = getClipboardRecordPath(projectDir);
-    const doc = ensureClipboardRecordDoc(projectDir, projectName);
-    doc.items = Array.isArray(doc.items) ? doc.items : [];
-    const idx = doc.items.findIndex((x) => String(x?.id || '') === id);
-    if (idx < 0) return { ok: true, projectName, deleted: false };
-
-    const item = doc.items[idx];
-    const relPath = normalizeRelPathPosix(item?.content?.relPath || '');
-    // remove from record
-    doc.items.splice(idx, 1);
-    const now = new Date().toISOString();
-    doc.updatedAt = now;
-    atomicWriteFileSync(recordPath, JSON.stringify(doc, null, 2), 'utf-8');
-
-    // delete content file (best-effort)
-    if (relPath && (relPath === 'snippets/clipboard' || relPath.startsWith('snippets/clipboard/')) && relPath.toLowerCase().endsWith('.txt')) {
-      try {
-        const target = resolveInside(projectDir, relPath);
-        if (fs.existsSync(target) && fs.statSync(target).isFile()) {
-          await trashOrRm(target);
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    try {
-      emitClipboardRecordChanged({ projectName, type: 'deleted', id, relPath });
-    } catch {
-      // ignore
-    }
-    return { ok: true, projectName, deleted: true };
-  });
-
-  // ===== Screenshots: clipboard image -> png + snippets/screenshots + snippets/snippets-meta/screenshots-record.json index =====
-  ipcMain.handle('screenshots/saveClipboardImage', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const token = String(payload?.token ?? '');
-    if (!token) throw new Error('截图 token 为空');
-    const cached = clipboardImageCache.get(token);
-    if (!cached?.png) throw new Error('截图已过期，请重新截图');
-
-    ensureProjectStructure(projectName, payload?.domain);
-    migrateLegacySnippetRecordFilesIfNeeded(projectDir, projectName);
-    migrateLegacyScreenshotFolderIfNeeded(projectDir);
-    migrateLegacyItemsJsonIfNeeded(projectDir, projectName);
-    const screenshotsDir = ensureScreenshotsDir(projectDir);
-    const recordPath = getScreenshotRecordPath(projectDir);
-    const logPath = getProjectLogPath(projectDir);
-
-    const now = new Date();
-    const stamp = formatStamp(now);
-    const baseName = `${stamp}-${makeShortId()}.png`;
-    const filePath = ensureUniqueDestPath(screenshotsDir, sanitizeFileName(baseName) || 'screenshot.png');
-    fs.writeFileSync(filePath, cached.png);
-    const relPath = asPosixRel(path.relative(projectDir, filePath));
-
-    const id = `shot_${stamp}_${makeShortId()}`;
-    const doc = safeReadJson(recordPath, null) || {
-      schemaVersion: 1,
-      projectName,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-      items: [],
-    };
-    doc.schemaVersion = doc.schemaVersion || 1;
-    doc.projectName = doc.projectName || projectName;
-    doc.items = Array.isArray(doc.items) ? doc.items : [];
-
-    const item = {
-      id,
-      type: 'screenshot',
-      createdAt: now.toISOString(),
-      title: '截图',
-      summary: '',
-      tags: [],
-      pinned: false,
-      archived: false,
-      content: {
-        format: 'png',
-        relPath,
-        width: cached.width || 0,
-        height: cached.height || 0,
-      },
-      source: {
-        kind: 'clipboardImage',
-      },
-    };
-    doc.items.unshift(item);
-    doc.updatedAt = now.toISOString();
-    atomicWriteFileSync(recordPath, JSON.stringify(doc, null, 2), 'utf-8');
-
-    try {
-      appendJsonl(logPath, {
-        ts: now.toISOString(),
-        event: 'screenshot.clipboard.saved',
-        projectName,
-        id,
-        relPath,
-        bytes: cached.png.length,
-        width: cached.width || 0,
-        height: cached.height || 0,
-      });
-    } catch {
-      // ignore
-    }
-
-    // one-time token
-    clipboardImageCache.delete(token);
-    return { ok: true, projectName, id, relPath };
-  });
-
-  // ===== Preferences (persisted in userfile/_app/state.json) =====
-  ipcMain.handle('prefs/get', async () => {
-    const state = readState();
-    const prefs = state.prefs && typeof state.prefs === 'object' ? state.prefs : {};
-    return {
-      ok: true,
-      prefs: {
-        floatingUploadMode: normalizeFloatingUploadMode(prefs.floatingUploadMode || 'confirm'),
-      },
-    };
-  });
-
-  ipcMain.handle('prefs/set', async (_evt, payload) => {
-    const patch = payload?.patch && typeof payload.patch === 'object' ? payload.patch : {};
-    const state = readState();
-    state.prefs = state.prefs && typeof state.prefs === 'object' ? state.prefs : {};
-    if (Object.prototype.hasOwnProperty.call(patch, 'floatingUploadMode')) {
-      state.prefs.floatingUploadMode = normalizeFloatingUploadMode(patch.floatingUploadMode);
-    }
-    writeState(state);
-    return {
-      ok: true,
-      prefs: {
-        floatingUploadMode: normalizeFloatingUploadMode(state.prefs.floatingUploadMode || 'confirm'),
-      },
-    };
-  });
-
-  ipcMain.handle('projects/list', async () => {
-    const root = getProjectsRoot();
-    const entries = fs.readdirSync(root, { withFileTypes: true });
-    const state = readState();
-    const statusMap = state.projectStatuses && typeof state.projectStatuses === 'object' ? state.projectStatuses : {};
-    const out = [];
-    for (const e of entries) {
-      if (!e.isDirectory()) continue;
-      const name = e.name;
-      if (isTombstoneProjectName(name)) {
-        // best-effort cleanup of tombstones; never show in UI
-        const fullPath = path.join(root, name);
-        if (isEmptyDirSync(fullPath)) {
-          try {
-            safeRmSync(fullPath);
-          } catch {
-            // ignore
-          }
-        }
-        continue;
-      }
-      const fullPath = path.join(root, name);
-      // Clean up ghost project dirs that may remain as empty stubs after deletion (Windows edge cases).
-      if (isEmptyDirSync(fullPath)) {
-        try {
-          safeRmSync(fullPath);
-        } catch {
-          // If we cannot delete, quarantine it so the name becomes available for re-creation.
-          try {
-            quarantineProjectDirSync(root, name);
-          } catch {
-            // ignore
-          }
-        }
-        continue;
-      }
-      out.push({
-        name,
-        path: fullPath,
-        status: normalizeProjectStatus(statusMap[name] || 'active'),
-      });
-    }
-    out.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
-    return out;
-  });
-
-  ipcMain.handle('projects/setStatus', async (_evt, payload) => {
-    const name = sanitizeProjectName(payload?.name);
-    if (!name) throw new Error('项目名不能为空');
-    const projDir = path.join(getProjectsRoot(), name);
-    if (!fs.existsSync(projDir)) throw new Error(`项目不存在：${name}`);
-    const status = normalizeProjectStatus(payload?.status);
-    const state = readState();
-    state.projectStatuses = state.projectStatuses && typeof state.projectStatuses === 'object' ? state.projectStatuses : {};
-    state.projectStatuses[name] = status;
-    writeState(state);
-    return { ok: true, name, status };
-  });
-
-  ipcMain.handle('projects/create', async (_evt, payload) => {
-    const name = sanitizeProjectName(payload?.name);
-    if (!name) throw new Error('项目名不能为空');
-    const projectsRoot = getProjectsRoot();
-    const projDir = path.join(projectsRoot, name);
-    if (fs.existsSync(projDir)) {
-      // If it's a ghost / invalid dir (or empty), clean/quarantine it so user can re-create same name.
-      const isGhost = isEmptyDirSync(projDir) || !looksLikeValidProjectDirSync(projDir);
-      if (!isGhost) {
-        throw new Error(`项目已存在：${name}`);
-      }
-      
-      // ENHANCED: Make writable first (Windows EPERM fix)
-      try {
-        makeWritableRecursiveSync(projDir);
-      } catch {
-        // ignore
-      }
-      
-      // Try multiple strategies to remove ghost folder
-      let cleared = false;
-      
-      // Strategy 1: Direct hard delete
-      try {
-        safeRmSync(projDir);
-        if (!fs.existsSync(projDir)) {
-          cleared = true;
-        }
-      } catch {
-        // ignore, try next strategy
-      }
-      
-      // Strategy 2: Move to recycle bin
-      if (!cleared) {
-        try {
-          await shell.trashItem(projDir);
-          if (!fs.existsSync(projDir)) {
-            cleared = true;
-          }
-        } catch {
-          // ignore, try next strategy
-        }
-      }
-      
-      // Strategy 3: Quarantine (rename) to free the name
-      if (!cleared && fs.existsSync(projDir)) {
-        try {
-          const tombstone = quarantineProjectDirSync(projectsRoot, name);
-          cleared = !fs.existsSync(projDir);
-          // Try to delete tombstone in background
-          if (cleared) {
-            try {
-              enqueueDeleteDir(tombstone);
-            } catch {
-              // ignore
-            }
-          }
-        } catch {
-          // ignore
-        }
-      }
-      
-      // Final check: if original name still exists, we cannot proceed
-      if (fs.existsSync(projDir)) {
-        throw new Error(`发现残留项目目录但无法清理：${name}。请稍后重试、重启应用，或手动删除该文件夹。`);
-      }
-    }
-    const proj = ensureProjectStructure(name);
-    // best-effort: seed structure.json immediately on creation
-    try {
-      syncStructureJson(proj.path, name);
-    } catch {
-      // ignore
-    }
-    // auto set current on creation
-    const state = readState();
-    state.currentProject = name;
-    state.projectStatuses = state.projectStatuses && typeof state.projectStatuses === 'object' ? state.projectStatuses : {};
-    state.projectStatuses[name] = normalizeProjectStatus(state.projectStatuses[name] || 'active');
-    writeState(state);
-    return proj;
-  });
-
-  ipcMain.handle('projects/getCurrent', async () => {
-    return readState().currentProject ?? null;
-  });
-
-  ipcMain.handle('projects/setCurrent', async (_evt, payload) => {
-    const name = sanitizeProjectName(payload?.name);
-    if (!name) throw new Error('项目名不能为空');
-    const projDir = path.join(getProjectsRoot(), name);
-    if (!fs.existsSync(projDir)) throw new Error(`项目不存在：${name}`);
-    const state = readState();
-    state.currentProject = name;
-    writeState(state);
-    return { ok: true, currentProject: name };
-  });
-
-  ipcMain.handle('projects/delete', async (_evt, payload) => {
-    const { name, projectDir } = getProjectDirOrThrow(payload?.name);
-    const root = getProjectsRoot();
-
-    if (!fs.existsSync(projectDir)) {
-      // Already gone, just clean up state
-      const state = readState();
-      if (state.currentProject === name) {
-        state.currentProject = null;
-      }
-      if (state.projectStatuses && typeof state.projectStatuses === 'object') {
-        delete state.projectStatuses[name];
-      }
-      writeState(state);
-      return { ok: true };
-    }
-
-    // STRATEGY A: Try to rename (quarantine) first to free the name immediately
-    let tombstonePath = null;
-    let renameSucceeded = false;
-    
-    // Try up to 3 times to rename (with aggressive permission fixes)
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        if (fs.existsSync(projectDir) && path.dirname(projectDir) === root) {
-          // Aggressive prep: make writable + wait
-          try {
-            makeWritableRecursiveSync(projectDir);
-          } catch {
-            // ignore
-          }
-          
-          if (attempt > 0) {
-            sleepSync(80 * attempt); // Brief delay for filesystem to settle
-          }
-          
-          tombstonePath = quarantineProjectDirSync(root, name);
-          
-          // Verify rename actually succeeded
-          if (!fs.existsSync(projectDir) && fs.existsSync(tombstonePath)) {
-            renameSucceeded = true;
-            break;
-          } else {
-            // Rename returned but didn't work? Roll back if needed
-            if (fs.existsSync(tombstonePath) && fs.existsSync(projectDir)) {
-              try {
-                safeRmSync(tombstonePath);
-              } catch {
-                // ignore
-              }
-            }
-            tombstonePath = null;
-          }
-        }
-      } catch (e) {
-        // Retry on next iteration
-        tombstonePath = null;
-      }
-    }
-
-    // STRATEGY B: If rename failed, try direct deletion + verify it's gone
-    if (!renameSucceeded) {
-      // Make writable before delete
-      try {
-        makeWritableRecursiveSync(projectDir);
-      } catch {
-        // ignore
-      }
-
-      // Try recycle bin first (often works better than fs.rmSync on Windows)
-      try {
-        await shell.trashItem(projectDir);
-        if (!fs.existsSync(projectDir)) {
-          // Success! Original name is now free.
-          const state = readState();
-          if (state.currentProject === name) {
-            state.currentProject = null;
-          }
-          if (state.projectStatuses && typeof state.projectStatuses === 'object') {
-            delete state.projectStatuses[name];
-          }
-          writeState(state);
-          return { ok: true };
-        }
-      } catch {
-        // ignore, try hard delete
-      }
-
-      // Try hard delete
-      try {
-        safeRmSync(projectDir);
-        // Wait a bit and verify
-        sleepSync(100);
-        if (!fs.existsSync(projectDir)) {
-          // Success! Original name is now free.
-          const state = readState();
-          if (state.currentProject === name) {
-            state.currentProject = null;
-          }
-          if (state.projectStatuses && typeof state.projectStatuses === 'object') {
-            delete state.projectStatuses[name];
-          }
-          writeState(state);
-          return { ok: true };
-        }
-      } catch {
-        // ignore
-      }
-
-      // Both rename and delete failed => cannot proceed safely
-      throw new Error(`无法删除项目文件夹：${name}。\n\n可能原因：\n1. 文件夹被其他程序占用\n2. 权限不足\n3. Windows资源管理器正在访问该文件夹\n\n建议：\n- 关闭可能访问该文件夹的程序\n- 或重启应用后重试`);
-    }
-
-    // Rename succeeded! Now the original name is FREE.
-    // Delete the tombstone in background (don't block user).
-
-    // Best-effort: attempt immediate delete of tombstone (prefer recycle bin)
-    try {
-      await trashOrRm(tombstonePath);
-    } catch {
-      try {
-        safeRmSync(tombstonePath);
-      } catch {
-        // ignore; will retry in background
-      }
-    }
-
-    // If tombstone still exists, enqueue for background deletion
-    if (fs.existsSync(tombstonePath)) {
-      try {
-        enqueueDeleteDir(tombstonePath);
-      } catch {
-        // ignore
-      }
-    }
-
-    // CRITICAL: Double-check that original name is truly free (Windows edge case: may recreate empty stub)
-    if (fs.existsSync(projectDir)) {
-      try {
-        makeWritableRecursiveSync(projectDir);
-        if (isEmptyDirSync(projectDir)) {
-          // Remove empty ghost folder immediately
-          safeRmSync(projectDir);
-          if (fs.existsSync(projectDir)) {
-            // Still there? Quarantine it again
-            try {
-              const ghost = quarantineProjectDirSync(root, name);
-              enqueueDeleteDir(ghost);
-            } catch {
-              enqueueDeleteDir(projectDir);
-            }
-          }
-        } else {
-          // Non-empty ghost? Quarantine (should never happen, but failsafe)
-          try {
-            const ghost = quarantineProjectDirSync(root, name);
-            enqueueDeleteDir(ghost);
-          } catch {
-            enqueueDeleteDir(projectDir);
-          }
-        }
-      } catch {
-        // Best effort
-        try {
-          enqueueDeleteDir(projectDir);
-        } catch {
-          // ignore
-        }
-      }
-    }
-
-    // Clean up app state
-    const state = readState();
-    if (state.currentProject === name) {
-      state.currentProject = null;
-    }
-    if (state.projectStatuses && typeof state.projectStatuses === 'object') {
-      delete state.projectStatuses[name];
-    }
-    writeState(state);
-    return { ok: true };
-  });
-
-  // ===== Cases (案件) =====
-  ipcMain.handle('cases/list', async () => {
-    const root = getCasesRoot();
-    const entries = fs.readdirSync(root, { withFileTypes: true });
-    const state = readState();
-    const statusMap = state.caseStatuses && typeof state.caseStatuses === 'object' ? state.caseStatuses : {};
-    const out = [];
-    for (const e of entries) {
-      if (!e.isDirectory()) continue;
-      const name = e.name;
-      if (isTombstoneProjectName(name)) {
-        const fullPath = path.join(root, name);
-        if (isEmptyDirSync(fullPath)) {
-          try {
-            safeRmSync(fullPath);
-          } catch {
-            // ignore
-          }
-        }
-        continue;
-      }
-      const fullPath = path.join(root, name);
-      if (isEmptyDirSync(fullPath)) {
-        try {
-          safeRmSync(fullPath);
-        } catch {
-          try {
-            quarantineProjectDirSync(root, name);
-          } catch {
-            // ignore
-          }
-        }
-        continue;
-      }
-      out.push({
-        name,
-        path: fullPath,
-        status: normalizeProjectStatus(statusMap[name] || 'active'),
-      });
-    }
-    out.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
-    return out;
-  });
-
-  ipcMain.handle('cases/setStatus', async (_evt, payload) => {
-    const name = sanitizeProjectName(payload?.name);
-    if (!name) throw new Error('名称不能为空');
-    const dir = path.join(getCasesRoot(), name);
-    if (!fs.existsSync(dir)) throw new Error(`目录不存在：${name}`);
-    const status = normalizeProjectStatus(payload?.status);
-    const state = readState();
-    state.caseStatuses = state.caseStatuses && typeof state.caseStatuses === 'object' ? state.caseStatuses : {};
-    state.caseStatuses[name] = status;
-    writeState(state);
-    return { ok: true, name, status };
-  });
-
-  ipcMain.handle('cases/create', async (_evt, payload) => {
-    const name = sanitizeProjectName(payload?.name);
-    if (!name) throw new Error('名称不能为空');
-    const root = getCasesRoot();
-    const dir = path.join(root, name);
-    if (fs.existsSync(dir)) {
-      const isGhost = isEmptyDirSync(dir) || !looksLikeValidProjectDirSync(dir);
-      if (!isGhost) {
-        throw new Error(`已存在：${name}`);
-      }
-      try {
-        makeWritableRecursiveSync(dir);
-      } catch {
-        // ignore
-      }
-
-      let cleared = false;
-      try {
-        safeRmSync(dir);
-        if (!fs.existsSync(dir)) cleared = true;
-      } catch {
-        // ignore
-      }
-
-      if (!cleared) {
-        try {
-          await shell.trashItem(dir);
-          if (!fs.existsSync(dir)) cleared = true;
-        } catch {
-          // ignore
-        }
-      }
-
-      if (!cleared && fs.existsSync(dir)) {
-        try {
-          const tombstone = quarantineProjectDirSync(root, name);
-          cleared = !fs.existsSync(dir);
-          if (cleared) {
-            try {
-              enqueueDeleteDir(tombstone);
-            } catch {
-              // ignore
-            }
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      if (fs.existsSync(dir)) {
-        throw new Error(`发现残留目录但无法清理：${name}。请稍后重试、重启应用，或手动删除该文件夹。`);
-      }
-    }
-
-    const created = ensureProjectStructure(name, 'cases');
-    try {
-      syncStructureJson(created.path, name);
-    } catch {
-      // ignore
-    }
-    const state = readState();
-    state.currentCase = name;
-    state.caseStatuses = state.caseStatuses && typeof state.caseStatuses === 'object' ? state.caseStatuses : {};
-    state.caseStatuses[name] = normalizeProjectStatus(state.caseStatuses[name] || 'active');
-    writeState(state);
-    return created;
-  });
-
-  ipcMain.handle('cases/getCurrent', async () => {
-    return readState().currentCase ?? null;
-  });
-
-  ipcMain.handle('cases/setCurrent', async (_evt, payload) => {
-    const name = sanitizeProjectName(payload?.name);
-    if (!name) throw new Error('名称不能为空');
-    const dir = path.join(getCasesRoot(), name);
-    if (!fs.existsSync(dir)) throw new Error(`目录不存在：${name}`);
-    const state = readState();
-    state.currentCase = name;
-    writeState(state);
-    return { ok: true, currentCase: name };
-  });
-
-  ipcMain.handle('cases/delete', async (_evt, payload) => {
-    const { name, projectDir } = getWorkspaceDirOrThrow(payload?.name, 'cases');
-    const root = getCasesRoot();
-
-    if (!fs.existsSync(projectDir)) {
-      const state = readState();
-      if (state.currentCase === name) state.currentCase = null;
-      if (state.caseStatuses && typeof state.caseStatuses === 'object') delete state.caseStatuses[name];
-      writeState(state);
-      return { ok: true };
-    }
-
-    let tombstonePath = null;
-    let renameSucceeded = false;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        if (fs.existsSync(projectDir) && path.dirname(projectDir) === root) {
-          try {
-            makeWritableRecursiveSync(projectDir);
-          } catch {
-            // ignore
-          }
-          if (attempt > 0) sleepSync(80 * attempt);
-          tombstonePath = quarantineProjectDirSync(root, name);
-          if (!fs.existsSync(projectDir) && fs.existsSync(tombstonePath)) {
-            renameSucceeded = true;
-            break;
-          }
-          if (fs.existsSync(tombstonePath) && fs.existsSync(projectDir)) {
-            try {
-              safeRmSync(tombstonePath);
-            } catch {
-              // ignore
-            }
-          }
-          tombstonePath = null;
-        }
-      } catch {
-        tombstonePath = null;
-      }
-    }
-
-    if (!renameSucceeded) {
-      try {
-        makeWritableRecursiveSync(projectDir);
-      } catch {
-        // ignore
-      }
-
-      try {
-        await shell.trashItem(projectDir);
-        if (!fs.existsSync(projectDir)) {
-          const state = readState();
-          if (state.currentCase === name) state.currentCase = null;
-          if (state.caseStatuses && typeof state.caseStatuses === 'object') delete state.caseStatuses[name];
-          writeState(state);
-          return { ok: true };
-        }
-      } catch {
-        // ignore
-      }
-
-      try {
-        safeRmSync(projectDir);
-        sleepSync(100);
-        if (!fs.existsSync(projectDir)) {
-          const state = readState();
-          if (state.currentCase === name) state.currentCase = null;
-          if (state.caseStatuses && typeof state.caseStatuses === 'object') delete state.caseStatuses[name];
-          writeState(state);
-          return { ok: true };
-        }
-      } catch {
-        // ignore
-      }
-
-      throw new Error(`无法删除案件文件夹：${name}。\n\n可能原因：\n1. 文件夹被其他程序占用\n2. 权限不足\n3. Windows资源管理器正在访问该文件夹\n\n建议：\n- 关闭可能访问该文件夹的程序\n- 或重启应用后重试`);
-    }
-
-    try {
-      await trashOrRm(tombstonePath);
-    } catch {
-      try {
-        safeRmSync(tombstonePath);
-      } catch {
-        // ignore
-      }
-    }
-
-    if (fs.existsSync(tombstonePath)) {
-      try {
-        enqueueDeleteDir(tombstonePath);
-      } catch {
-        // ignore
-      }
-    }
-
-    if (fs.existsSync(projectDir)) {
-      try {
-        makeWritableRecursiveSync(projectDir);
-        if (isEmptyDirSync(projectDir)) {
-          safeRmSync(projectDir);
-          if (fs.existsSync(projectDir)) {
-            try {
-              const ghost = quarantineProjectDirSync(root, name);
-              enqueueDeleteDir(ghost);
-            } catch {
-              enqueueDeleteDir(projectDir);
-            }
-          }
-        } else {
-          try {
-            const ghost = quarantineProjectDirSync(root, name);
-            enqueueDeleteDir(ghost);
-          } catch {
-            enqueueDeleteDir(projectDir);
-          }
-        }
-      } catch {
-        try {
-          enqueueDeleteDir(projectDir);
-        } catch {
-          // ignore
-        }
-      }
-    }
-
-    const state = readState();
-    if (state.currentCase === name) state.currentCase = null;
-    if (state.caseStatuses && typeof state.caseStatuses === 'object') delete state.caseStatuses[name];
-    writeState(state);
-    return { ok: true };
-  });
-
-  ipcMain.handle('explorer/list', async (_evt, payload) => {
-    const projectName = sanitizeProjectName(payload?.projectName);
-    // Normalize relPath to a safe posix-style relative path.
-    // This prevents subtle Windows path separator issues (e.g. "\"), extra slashes,
-    // or leading/trailing whitespace from breaking directory expansion in Explorer View.
-    const relPath = normalizeRelPathPosix(payload?.relPath ?? '');
-    const domain = normalizeWorkspaceDomain(payload?.domain);
-    const isStudyRoot = domain === 'study' && !projectName;
-    if (!projectName && !isStudyRoot) throw new Error('名称不能为空');
-
-    const effectiveName = isStudyRoot ? STUDY_WORKSPACE_NAME : projectName;
-    const projectDir = isStudyRoot ? getStudyRoot() : path.join(getWorkspaceRoot(domain), projectName);
-    if (!fs.existsSync(projectDir)) throw new Error(`目录不存在：${effectiveName}`);
-
-    // Lazy init for legacy projects: ensure new meta layout exists, and migrate old meta/items.json once.
-    try {
-      ensureProjectStructure(isStudyRoot ? '' : effectiveName, domain);
-      if (domain !== 'study') {
-        migrateLegacySnippetRecordFilesIfNeeded(projectDir, effectiveName);
-        migrateLegacyScreenshotFolderIfNeeded(projectDir);
-        migrateLegacyItemsJsonIfNeeded(projectDir, effectiveName);
-      }
-    } catch {
-      // ignore
-    }
-
-    const dir = resolveInside(projectDir, relPath);
-    if (!fs.existsSync(dir)) throw new Error('目录不存在');
-
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    const mapped = entries.map((e) => {
-      const fullPath = path.join(dir, e.name);
-      const st = fs.statSync(fullPath);
-      const kind = e.isDirectory() ? 'dir' : e.isFile() ? 'file' : 'other';
-      return {
-        name: e.name,
-        kind,
-        relPath: path.relative(projectDir, fullPath).split(path.sep).join('/'),
-        sizeBytes: kind === 'file' ? st.size : 0,
-        mtimeMs: st.mtimeMs,
-      };
-    });
-
-    const dirRank = (entry) => {
-      if (entry.kind !== 'dir') return 1000;
-      const rp = normalizeRelPathPosix(entry.relPath);
-      // Keep system folders always at the bottom of the folder list.
-      if (rp === 'temp') return 900;
-      if (rp === 'snippets') return 910;
-      if (rp === 'meta') return 920;
-      return 0;
-    };
-    mapped.sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
-      const ra = dirRank(a);
-      const rb = dirRank(b);
-      if (ra !== rb) return ra - rb;
-      return a.name.localeCompare(b.name, 'zh-Hans-CN');
-    });
-
-    return {
-      projectName: effectiveName,
-      relPath,
-      entries: mapped,
-    };
-  });
-
-  // ===== Explorer: read text file (limited, for snippet cards) =====
-  ipcMain.handle('explorer/readText', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const relPath = normalizeRelPathPosix(payload?.relPath ?? '');
-    if (!relPath) throw new Error('目标路径不能为空');
-
-    // Security/constraint (Step 2 MVP): only allow reading snippet clipboard txt files
-    if (!(relPath === 'snippets/clipboard' || relPath.startsWith('snippets/clipboard/'))) {
-      throw new Error('仅允许读取 snippets/clipboard 下的文本文件');
-    }
-    if (!relPath.toLowerCase().endsWith('.txt')) {
-      throw new Error('仅允许读取 .txt 文件');
-    }
-
-    const target = resolveInside(projectDir, relPath);
-    if (!fs.existsSync(target)) throw new Error('目标不存在');
-    const st = fs.statSync(target);
-    if (!st.isFile()) throw new Error('目标不是文件');
-
-    const maxBytes = Math.max(1024, Math.min(1024 * 1024, Number(payload?.maxBytes) || 256 * 1024));
-    const buf = fs.readFileSync(target);
-    const truncated = buf.length > maxBytes;
-    const sliced = truncated ? buf.subarray(0, maxBytes) : buf;
-    const text = sliced.toString('utf-8');
-
-    return { ok: true, projectName, relPath, text, truncated };
-  });
-
-  // ===== Explorer: open a file with OS default application =====
-  ipcMain.handle('explorer/open', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const relPath = String(payload?.relPath ?? '');
-    if (!relPath) throw new Error('目标路径不能为空');
-    const target = resolveInside(projectDir, relPath);
-    if (!fs.existsSync(target)) throw new Error('目标不存在');
-    const st = fs.statSync(target);
-    if (!st.isFile()) throw new Error('仅支持打开文件（不支持打开文件夹）');
-
-    // shell.openPath returns '' on success, otherwise an error message string.
-    const errMsg = await shell.openPath(target);
-    if (errMsg) throw new Error(`打开失败：${errMsg}`);
-    return { ok: true, projectName, relPath: asPosixRel(relPath) };
-  });
-
-  // ===== Meta: folder info (from meta/structure.json) =====
-  ipcMain.handle('meta/getFolderInfo', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const relPath = normalizeRelPathPosix(payload?.relPath ?? '');
-
-    // Ensure structure exists and is reasonably up to date (best-effort)
-    try {
-      ensureProjectStructure(projectName, payload?.domain);
-      syncStructureJson(projectDir, projectName);
-    } catch {
-      // ignore
-    }
-
-    const doc = safeReadJson(getProjectStructurePath(projectDir), null);
-    const folders = doc && typeof doc === 'object' && doc.folders && typeof doc.folders === 'object' ? doc.folders : {};
-    const meta = folders[relPath] && typeof folders[relPath] === 'object' ? folders[relPath] : null;
-    return {
-      ok: true,
-      projectName,
-      relPath,
-      folder: meta,
-      structureUpdatedAt: doc?.updatedAt || null,
-    };
-  });
-
-  ipcMain.handle('meta/setFolderDescription', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const relPath = normalizeRelPathPosix(payload?.relPath ?? '');
-    const description = String(payload?.description ?? '');
-
-    if (isProtectedRelPath(relPath) || isSystemFolderRelPath(relPath)) {
-      throw new Error('该目录为系统目录，禁止编辑简介');
-    }
-
-    // Ensure structure exists & contains folder entries
-    ensureProjectStructure(projectName, payload?.domain);
-    let doc = null;
-    try {
-      doc = syncStructureJson(projectDir, projectName);
-    } catch {
-      doc = safeReadJson(getProjectStructurePath(projectDir), null);
-    }
-    if (!doc || typeof doc !== 'object') throw new Error('structure.json 不可用');
-    doc.folders = doc.folders && typeof doc.folders === 'object' ? doc.folders : {};
-    if (!doc.folders[relPath]) {
-      throw new Error('文件夹不存在或未被结构索引收录');
-    }
-
-    const now = new Date().toISOString();
-    const folder = doc.folders[relPath] && typeof doc.folders[relPath] === 'object' ? doc.folders[relPath] : {};
-    folder.description = description;
-    folder.updatedAt = now;
-    doc.folders[relPath] = folder;
-    doc.updatedAt = now;
-
-    atomicWriteFileSync(getProjectStructurePath(projectDir), JSON.stringify(doc, null, 2), 'utf-8');
-
-    try {
-      appendJsonl(getProjectLogPath(projectDir), {
-        ts: now,
-        event: 'folder.description.updated',
-        projectName,
-        relPath,
-        size: description.length,
-      });
-    } catch {
-      // ignore
-    }
-
-    return { ok: true, projectName, relPath, folder };
-  });
-
-  // ===== AI Storage (staging area): ghost files & accept/reject =====
-  ipcMain.handle('aiStorage/list', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const status = payload?.status ? String(payload.status) : '';
-    const folderRelPath = payload?.folderRelPath ? normalizeRelPathPosix(payload.folderRelPath) : '';
-    const items = listAiSuggestions(projectDir, projectName, { status, folderRelPath });
-    return { ok: true, projectName, suggestions: items };
-  });
-
-  ipcMain.handle('aiStorage/reject', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const sourceRelPath = normalizeRelPathPosix(payload?.sourceRelPath ?? '');
-    if (!sourceRelPath) throw new Error('sourceRelPath 不能为空');
-    const updated = setAiSuggestionStatus(projectDir, projectName, sourceRelPath, { status: 'rejected', rejectedAt: new Date().toISOString() });
-    if (!updated) throw new Error('未找到对应暂存记录');
-    return { ok: true, projectName, suggestion: updated };
-  });
-
-  ipcMain.handle('aiStorage/accept', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const sourceRelPath = normalizeRelPathPosix(payload?.sourceRelPath ?? '');
-    if (!sourceRelPath) throw new Error('sourceRelPath 不能为空');
-
-    // Find suggestion
-    const items = listAiSuggestions(projectDir, projectName, {});
-    const s = items.find((x) => normalizeRelPathPosix(x?.sourceRelPath) === sourceRelPath);
-    if (!s) throw new Error('未找到对应暂存记录');
-    if (String(s.status) !== 'pending') return { ok: true, projectName, already: true, suggestion: s };
-
-    // Guards
-    const srcRel = ensureSourceIsTempOrThrow(sourceRelPath);
-    const targetRel = ensureTargetFolderIsAllowedOrThrow(projectDir, s.suggestedFolderRelPath);
-
-    const srcAbs = resolveInside(projectDir, srcRel);
-    if (!fs.existsSync(srcAbs)) throw new Error('源文件不存在（可能已被移动或删除）');
-    const st = fs.statSync(srcAbs);
-    if (!st.isFile()) throw new Error('源路径不是文件');
-
-    const targetDirAbs = resolveInside(projectDir, targetRel);
-    if (!fs.existsSync(targetDirAbs)) throw new Error('目标目录不存在');
-    const targetSt = fs.statSync(targetDirAbs);
-    if (!targetSt.isDirectory()) throw new Error('目标不是目录');
-
-    const baseName = sanitizeFileName(path.basename(srcAbs)) || 'file';
-    const destAbs = ensureUniqueDestPath(targetDirAbs, baseName);
-    fs.renameSync(srcAbs, destAbs);
-    const movedToRelPath = asPosixRel(path.relative(projectDir, destAbs));
-
-    const now = new Date().toISOString();
-    const updated = setAiSuggestionStatus(projectDir, projectName, sourceRelPath, {
-      status: 'accepted',
-      acceptedAt: now,
-      movedToRelPath,
-      targetRelPath: targetRel,
-    });
-
-    try {
-      appendJsonl(getProjectLogPath(projectDir), {
-        ts: now,
-        event: 'aiStorage.accepted',
-        projectName,
-        sourceRelPath,
-        targetRelPath: targetRel,
-        movedToRelPath,
-      });
-    } catch {
-      // ignore
-    }
-
-    return { ok: true, projectName, movedToRelPath, suggestion: updated };
-  });
-
-  ipcMain.handle('aiStorage/acceptAll', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const folderRelPath = payload?.folderRelPath ? normalizeRelPathPosix(payload.folderRelPath) : '';
-    const all = listAiSuggestions(projectDir, projectName, { status: 'pending', folderRelPath });
-    let accepted = 0;
-    let failed = 0;
-    for (const s of all) {
-      try {
-        // reuse accept logic by direct invocation of internal operations
-        const sourceRelPath = normalizeRelPathPosix(s.sourceRelPath || '');
-        if (!sourceRelPath) continue;
-        // Guards
-        const srcRel = ensureSourceIsTempOrThrow(sourceRelPath);
-        const targetRel = ensureTargetFolderIsAllowedOrThrow(projectDir, s.suggestedFolderRelPath);
-        const srcAbs = resolveInside(projectDir, srcRel);
-        if (!fs.existsSync(srcAbs)) throw new Error('源文件不存在');
-        const st = fs.statSync(srcAbs);
-        if (!st.isFile()) throw new Error('源不是文件');
-        const targetDirAbs = resolveInside(projectDir, targetRel);
-        if (!fs.existsSync(targetDirAbs) || !fs.statSync(targetDirAbs).isDirectory()) throw new Error('目标目录不存在');
-        const baseName = sanitizeFileName(path.basename(srcAbs)) || 'file';
-        const destAbs = ensureUniqueDestPath(targetDirAbs, baseName);
-        fs.renameSync(srcAbs, destAbs);
-        const movedToRelPath = asPosixRel(path.relative(projectDir, destAbs));
-        const now = new Date().toISOString();
-        setAiSuggestionStatus(projectDir, projectName, sourceRelPath, {
-          status: 'accepted',
-          acceptedAt: now,
-          movedToRelPath,
-          targetRelPath: targetRel,
-        });
-        accepted += 1;
-      } catch {
-        failed += 1;
-      }
-    }
-    return { ok: true, projectName, accepted, failed };
-  });
-
-  ipcMain.handle('aiStorage/rejectAll', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const folderRelPath = payload?.folderRelPath ? normalizeRelPathPosix(payload.folderRelPath) : '';
-    const all = listAiSuggestions(projectDir, projectName, { status: 'pending', folderRelPath });
-    const now = new Date().toISOString();
-    let rejected = 0;
-    for (const s of all) {
-      const sourceRelPath = normalizeRelPathPosix(s.sourceRelPath || '');
-      if (!sourceRelPath) continue;
-      const updated = setAiSuggestionStatus(projectDir, projectName, sourceRelPath, { status: 'rejected', rejectedAt: now });
-      if (updated) rejected += 1;
-    }
-    return { ok: true, projectName, rejected };
-  });
-
-  ipcMain.handle('explorer/mkdir', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const relPath = String(payload?.relPath ?? '');
-    const folderName = sanitizeFileName(payload?.folderName);
-    if (!folderName) throw new Error('文件夹名称不能为空');
-
-    const dir = resolveInside(projectDir, relPath);
-    if (!fs.existsSync(dir)) throw new Error('目录不存在');
-
-    const relPosix = normalizeRelPathPosix(path.join(relPath, folderName));
-    if (isProtectedFolderNameRelPath(relPosix)) {
-      throw new Error('业务/系统固定目录禁止创建/覆盖');
-    }
-
-    const desired = resolveInside(projectDir, path.join(relPath, folderName));
-    if (fs.existsSync(desired)) {
-      const ok = await confirmAutoSuffix();
-      if (!ok) return { ok: false, projectName, conflict: true };
-      const { fullPath, name } = ensureUniqueDirPath(dir, folderName);
-      fs.mkdirSync(fullPath, { recursive: true });
-      try {
-        syncStructureJson(projectDir, projectName);
-      } catch {
-        // ignore
-      }
-      return { ok: true, projectName, createdName: name };
-    }
-
-    fs.mkdirSync(desired, { recursive: true });
-    try {
-      syncStructureJson(projectDir, projectName);
-    } catch {
-      // ignore
-    }
-    return { ok: true, projectName, createdName: folderName };
-  });
-
-  ipcMain.handle('explorer/delete', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const entryRelPath = String(payload?.relPath ?? '');
-    if (!entryRelPath) throw new Error('目标路径不能为空');
-    const relPosix = normalizeRelPathPosix(entryRelPath);
-    if (isProtectedFolderNameRelPath(relPosix)) {
-      throw new Error('系统目录禁止删除（如需删除请直接删除整个项目）');
-    }
-    const target = resolveInside(projectDir, entryRelPath);
-    if (!fs.existsSync(target)) throw new Error('目标不存在');
-    let wasDir = false;
-    try {
-      wasDir = fs.statSync(target).isDirectory();
-    } catch {
-      wasDir = false;
-    }
-
-    // Allow deleting files under temp/ (but not folders) to support user cleanup of staging files.
-    const isTempChild = relPosix.startsWith('temp/');
-    if (!isTempChild && isProtectedRelPath(relPosix)) {
-      throw new Error('该目录为系统元数据目录，禁止删除');
-    }
-    if (isTempChild && wasDir) {
-      throw new Error('temp 目录下不允许删除文件夹');
-    }
-    await trashOrRm(target);
-    if (!waitUntilGoneSync(target)) {
-      throw new Error('删除尚未完成，请稍后重试');
-    }
-
-    // If user deleted a staged temp file, mark pending AI suggestion as source_deleted to avoid stale ghosts.
-    if (isTempChild && !wasDir) {
-      try {
-        const all = listAiSuggestions(projectDir, projectName, {});
-        const s = all.find((x) => normalizeRelPathPosix(x?.sourceRelPath) === relPosix);
-        if (s && String(s.status) === 'pending') {
-          setAiSuggestionStatus(projectDir, projectName, relPosix, { status: 'source_deleted', deletedAt: new Date().toISOString() });
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    // If user deletes snippet/screenshot content files via explorer, keep records in sync (best-effort).
-    try {
-      // Ensure new layout exists for legacy projects
-      ensureProjectStructure(projectName, payload?.domain);
-      migrateLegacySnippetRecordFilesIfNeeded(projectDir, projectName);
-      migrateLegacyScreenshotFolderIfNeeded(projectDir);
-      migrateLegacyItemsJsonIfNeeded(projectDir, projectName);
-      const rp = relPosix;
-
-      // Clipboard snippets content deletion => update clipboard record
-      if ((rp === 'snippets/clipboard' || rp.startsWith('snippets/clipboard/')) && !(rp === 'snippets/snippets-meta' || rp.startsWith('snippets/snippets-meta/'))) {
-        removeRecordItemsByContentRelPath(getClipboardRecordPath(projectDir), projectName, rp, wasDir);
-      }
-
-      // Screenshot snippets content deletion => update screenshot record
-      if ((rp === 'snippets/screenshots' || rp.startsWith('snippets/screenshots/')) && !(rp === 'snippets/snippets-meta' || rp.startsWith('snippets/snippets-meta/'))) {
-        removeRecordItemsByContentRelPath(getScreenshotRecordPath(projectDir), projectName, rp, wasDir);
-      }
-    } catch {
-      // ignore in MVP
-    }
-
-    try {
-      syncStructureJson(projectDir, projectName);
-    } catch {
-      // ignore
-    }
-    return { ok: true, projectName };
-  });
-
-  ipcMain.handle('explorer/upload', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const destRelPath = String(payload?.destRelPath ?? '');
-    const destDir = resolveInside(projectDir, destRelPath);
-    if (!fs.existsSync(destDir)) throw new Error('目标目录不存在');
-
-    const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: '选择要上传的文件',
-      properties: ['openFile', 'multiSelections'],
-    });
-    if (canceled) return { ok: true, projectName, copied: 0 };
-
-    // Check conflicts first (same filename+ext)
-    const planned = filePaths.map((srcPath) => {
-      const baseName = path.basename(srcPath);
-      const safeName = sanitizeFileName(baseName) || 'file';
-      return { srcPath, safeName };
-    });
-    const conflicts = planned
-      .map((p) => p.safeName)
-      .filter((name, idx, arr) => arr.indexOf(name) !== idx || fs.existsSync(path.join(destDir, name)));
-    const uniqConflicts = Array.from(new Set(conflicts));
-    if (uniqConflicts.length) {
-      const ok = await confirmAutoSuffix();
-      if (!ok) return { ok: false, projectName, copied: 0, conflict: true, conflicts: uniqConflicts };
-    }
-
-    let copied = 0;
-    for (const p of planned) {
-      const targetPath = uniqConflicts.length ? ensureUniqueDestPath(destDir, p.safeName) : path.join(destDir, p.safeName);
-      fs.copyFileSync(p.srcPath, targetPath);
-      copied += 1;
-    }
-    return { ok: true, projectName, copied };
-  });
-
-  ipcMain.handle('explorer/rename', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const entryRelPath = String(payload?.relPath ?? '');
-    const newNameRaw = String(payload?.newName ?? '');
-    if (!entryRelPath) throw new Error('目标路径不能为空');
-    if (isProtectedFolderNameRelPath(entryRelPath)) {
-      throw new Error('系统目录禁止重命名');
-    }
-    if (isProtectedRelPath(entryRelPath)) {
-      throw new Error('该目录为系统元数据目录，禁止重命名');
-    }
-    const target = resolveInside(projectDir, entryRelPath);
-    if (!fs.existsSync(target)) throw new Error('目标不存在');
-
-    const st = fs.statSync(target);
-    const parentDir = path.dirname(target);
-    const newName = sanitizeFileName(newNameRaw);
-    if (!newName) throw new Error('新名称不能为空');
-
-    let desired = path.join(parentDir, newName);
-    // Same name (no-op)
-    if (path.resolve(desired) === path.resolve(target)) {
-      return { ok: true, projectName, renamedTo: path.basename(target) };
-    }
-    if (fs.existsSync(desired)) {
-      const ok = await confirmAutoSuffix();
-      if (!ok) return { ok: false, projectName, conflict: true };
-      if (st.isDirectory()) {
-        const { fullPath, name } = ensureUniqueDirPath(parentDir, newName);
-        desired = fullPath;
-        try {
-          const prev = safeReadJson(getProjectStructurePath(projectDir), null);
-          const fromRel = asPosixRel(entryRelPath);
-          const toRel = asPosixRel(path.relative(projectDir, desired));
-          const seeded = remapStructureDocRelPaths(prev, fromRel, toRel);
-          fs.renameSync(target, desired);
-          syncStructureJson(projectDir, projectName, seeded);
-        } catch {
-          fs.renameSync(target, desired);
-          try {
-            syncStructureJson(projectDir, projectName);
-          } catch {
-            // ignore
-          }
-        }
-        return { ok: true, projectName, renamedTo: name };
-      }
-      const unique = ensureUniqueDestPath(parentDir, newName);
-      fs.renameSync(target, unique);
-      return { ok: true, projectName, renamedTo: path.basename(unique) };
-    }
-
-    if (st.isDirectory()) {
-      try {
-        const prev = safeReadJson(getProjectStructurePath(projectDir), null);
-        const fromRel = asPosixRel(entryRelPath);
-        const toRel = asPosixRel(path.relative(projectDir, desired));
-        const seeded = remapStructureDocRelPaths(prev, fromRel, toRel);
-        fs.renameSync(target, desired);
-        syncStructureJson(projectDir, projectName, seeded);
-      } catch {
-        fs.renameSync(target, desired);
-        try {
-          syncStructureJson(projectDir, projectName);
-        } catch {
-          // ignore
-        }
-      }
-    } else {
-      fs.renameSync(target, desired);
-    }
-    return { ok: true, projectName, renamedTo: newName };
-  });
-
-  ipcMain.handle('explorer/move', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
-    const srcRelPath = String(payload?.srcRelPath ?? '');
-    const destDirRelPath = String(payload?.destDirRelPath ?? '');
-    if (!srcRelPath) throw new Error('源路径不能为空');
-    if (isProtectedFolderNameRelPath(srcRelPath)) {
-      throw new Error('系统目录禁止移动');
-    }
-    if (isProtectedRelPath(srcRelPath) || isProtectedRelPath(destDirRelPath)) {
-      throw new Error('该目录为系统元数据目录，禁止移动');
-    }
-
-    const srcPath = resolveInside(projectDir, srcRelPath);
-    if (!fs.existsSync(srcPath)) throw new Error('源目标不存在');
-
-    const destDirPath = resolveInside(projectDir, destDirRelPath);
-    if (!fs.existsSync(destDirPath)) throw new Error('目标目录不存在');
-    const destDirStat = fs.statSync(destDirPath);
-    if (!destDirStat.isDirectory()) throw new Error('目标不是目录');
-
-    const st = fs.statSync(srcPath);
-    const baseName = path.basename(srcPath);
-    let desired = path.join(destDirPath, baseName);
-
-    // no-op: moving into same folder
-    if (path.resolve(desired) === path.resolve(srcPath)) {
-      return { ok: true, projectName, movedTo: srcRelPath };
-    }
-
-    // prevent moving a folder into itself/descendant
-    if (st.isDirectory()) {
-      const srcAbs = path.resolve(srcPath);
-      const destAbs = path.resolve(destDirPath);
-      // drop into itself => treat as no-op
-      if (destAbs === srcAbs) {
-        return { ok: true, projectName, movedTo: srcRelPath };
-      }
-      if (destAbs.startsWith(srcAbs + path.sep)) {
-        throw new Error('不能将文件夹移动到其自身或子目录中');
-      }
-    }
-
-    if (fs.existsSync(desired)) {
-      const ok = await confirmAutoSuffix();
-      if (!ok) return { ok: false, projectName, conflict: true };
-      if (st.isDirectory()) {
-        const { fullPath, name } = ensureUniqueDirPath(destDirPath, baseName);
-        desired = fullPath;
-        try {
-          const prev = safeReadJson(getProjectStructurePath(projectDir), null);
-          const fromRel = asPosixRel(srcRelPath);
-          const toRel = asPosixRel(path.relative(projectDir, desired));
-          const seeded = remapStructureDocRelPaths(prev, fromRel, toRel);
-          fs.renameSync(srcPath, desired);
-          syncStructureJson(projectDir, projectName, seeded);
-        } catch {
-          fs.renameSync(srcPath, desired);
-          try {
-            syncStructureJson(projectDir, projectName);
-          } catch {
-            // ignore
-          }
-        }
-        return {
-          ok: true,
-          projectName,
-          movedTo: asPosixRel(path.relative(projectDir, desired)),
-          movedName: name,
-        };
-      }
-      const unique = ensureUniqueDestPath(destDirPath, baseName);
-      fs.renameSync(srcPath, unique);
-      return {
-        ok: true,
-        projectName,
-        movedTo: asPosixRel(path.relative(projectDir, unique)),
-        movedName: path.basename(unique),
-      };
-    }
-
-    if (st.isDirectory()) {
-      try {
-        const prev = safeReadJson(getProjectStructurePath(projectDir), null);
-        const fromRel = asPosixRel(srcRelPath);
-        const toRel = asPosixRel(path.relative(projectDir, desired));
-        const seeded = remapStructureDocRelPaths(prev, fromRel, toRel);
-        fs.renameSync(srcPath, desired);
-        syncStructureJson(projectDir, projectName, seeded);
-      } catch {
-        fs.renameSync(srcPath, desired);
-        try {
-          syncStructureJson(projectDir, projectName);
-        } catch {
-          // ignore
-        }
-      }
-    } else {
-      fs.renameSync(srcPath, desired);
-    }
-    return {
-      ok: true,
-      projectName,
-      movedTo: asPosixRel(path.relative(projectDir, desired)),
-      movedName: baseName,
-    };
-  });
+  // explorer/* moved to `src/main/ipc/explorer.js`
 
   createMainWindow();
 

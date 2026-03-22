@@ -1,5 +1,6 @@
 import React from 'react';
-import { Ban, Check, ChevronDown, ChevronRight, Wand2 } from 'lucide-react';
+import { Ban, Check, ChevronDown, ChevronRight, Search, Wand2 } from 'lucide-react';
+import ClassifyPipeline from './ClassifyPipeline.jsx';
 
 const AIGhostOverview = ({
   show,
@@ -18,6 +19,9 @@ const AIGhostOverview = ({
   onEnterFolder,
   onAcceptItem,
   onRejectItem,
+  onViewTrace,
+  pipelineQueued,
+  pipelineClassifying,
 }) => {
   if (!show) return null;
 
@@ -34,9 +38,16 @@ const AIGhostOverview = ({
               <Wand2 size={16} className="text-amber-600" />
             </div>
             <div className="min-w-0 text-left">
-              <div className="text-sm font-semibold text-slate-800 truncate">
-                AI 暂存区：待处理 {pendingGhostCount} 个
-                {ghostLoading ? <span className="ml-2 text-[11px] text-slate-400 font-medium">同步中...</span> : null}
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-semibold text-slate-800 truncate">
+                  AI 暂存区：待处理 {pendingGhostCount} 个
+                </span>
+                <ClassifyPipeline
+                  queued={pipelineQueued}
+                  classifying={pipelineClassifying}
+                  pendingGhostCount={pendingGhostCount}
+                />
+                {ghostLoading ? <span className="text-[11px] text-slate-400 font-medium">同步中...</span> : null}
               </div>
               <div className="text-[11px] text-slate-400 truncate">分布在 {pendingGhostFolderCount} 个文件夹（点击展开）</div>
             </div>
@@ -160,6 +171,16 @@ const AIGhostOverview = ({
                               >
                                 <span className="inline-flex items-center gap-1.5">
                                   <Ban size={12} /> 放弃
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                className="px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-violet-600 rounded hover:bg-violet-50 hover:border-violet-200 transition-colors"
+                                onClick={() => onViewTrace?.(it.sourceRelPath)}
+                                title="查看 AI 分类过程"
+                              >
+                                <span className="inline-flex items-center gap-1.5">
+                                  <Search size={12} /> 过程
                                 </span>
                               </button>
                             </div>

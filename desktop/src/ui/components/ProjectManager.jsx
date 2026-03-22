@@ -18,7 +18,10 @@ import useContextMenu from './project-manager/hooks/useContextMenu.js';
 import useFileActions from './project-manager/hooks/useFileActions.js';
 import useProjectActions from './project-manager/hooks/useProjectActions.js';
 import useResumeRefresh from './project-manager/hooks/useResumeRefresh.js';
-import { folderDecor, fmtBytes, fmtTime } from './project-manager/utils.js';
+import useTraceView from './project-manager/hooks/useTraceView.js';
+import useClassifyPipeline from './project-manager/hooks/useClassifyPipeline.js';
+import ClassifyTraceView from './project-manager/ClassifyTraceView.jsx';
+import { fileDecor, folderDecor, fmtBytes, fmtTime } from './project-manager/utils.js';
 
 const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
   const raw = String(domain || 'projects').toLowerCase();
@@ -31,6 +34,8 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
   const entityApi = isCases ? window.ipm?.cases : isStudy ? null : window.ipm?.projects;
 
   const [notice, setNotice] = useState(null); // {variant,message}
+  const [fileFilters, setFileFilters] = useState([]);
+  const [filterPersistent, setFilterPersistent] = useState(false);
   const {
     projects,
     currentProject,
@@ -91,6 +96,9 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
     setNotice,
     setErrorText,
   });
+
+  const { traceOpen, traceLoading, traceData, openTrace, closeTrace } = useTraceView({ cwd, domainOpts });
+  const pipelineState = useClassifyPipeline({ cwd, refreshGhosts, refreshEntries });
 
   const { localFolders, refreshLocalFolders, importLocalFolder, removeLocalFolder } = useLocalFolders({ normalizedDomain, setNotice });
   const {
@@ -230,6 +238,109 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
     }
     return `当前${entityLabel}：${cwd.name}${cwd.relPath ? ` / ${cwd.relPath}` : ''}`;
   }, [isStudy, isRoot, isLocalCwd, cwd, projects.length, entityLabel]);
+  const fileFilterOptions = useMemo(
+    () => [
+      { value: 'all', label: '全部类型' },
+      { value: 'folder', label: '仅文件夹' },
+      { value: 'doc', label: 'Word 文档' },
+      { value: 'ppt', label: 'PPT 演示' },
+      { value: 'excel', label: 'Excel 表格' },
+      { value: 'pdf', label: 'PDF' },
+      { value: 'text', label: '文本' },
+      { value: 'image', label: '图片' },
+      { value: 'video', label: '视频' },
+      { value: 'audio', label: '音频' },
+      { value: 'archive', label: '压缩包' },
+      { value: 'code', label: '代码' },
+    ],
+    []
+  );
+  const fileFilterExts = useMemo(
+    () => ({
+      doc: ['doc', 'docx', 'rtf', 'odt'],
+      ppt: ['ppt', 'pptx', 'key', 'odp'],
+      excel: ['xls', 'xlsx', 'csv', 'ods'],
+      pdf: ['pdf'],
+      text: ['txt', 'md', 'markdown', 'log'],
+      image: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg', 'tiff', 'heic'],
+      video: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'flv', 'm4v'],
+      audio: ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a'],
+      archive: ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'tgz'],
+      code: ['js', 'jsx', 'ts', 'tsx', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rs', 'php', 'rb', 'swift', 'kt', 'html', 'css', 'scss', 'less', 'sql', 'sh', 'bat', 'ps1', 'json', 'yml', 'yaml'],
+    }),
+    []
+  );
+  const breadcrumbs = useMemo(() => {
+    const items = [];
+    const relParts = String(cwd.relPath || '')
+      .split(/[/\\]+/)
+      .filter(Boolean);
+    if (isRoot) {
+      return [{ id: 'root', label: entityLabelAll, relPath: '', kind: 'root', active: true }];
+    }
+    if (isLocalCwd) {
+      const rootLabel =
+        String(cwd.rootPath || '')
+          .split(/[/\\]+/)
+          .filter(Boolean)
+          .slice(-1)[0] || '本地文件夹';
+      items.push({ id: 'local-root', label: rootLabel, relPath: '', kind: 'local-root' });
+      relParts.forEach((part, index) => {
+        items.push({
+          id: `local-${index}`,
+          label: part,
+          relPath: relParts.slice(0, index + 1).join('/'),
+          kind: 'local-path',
+        });
+      });
+      if (items.length) items[items.length - 1].active = true;
+      return items;
+    }
+    const rootLabel = isStudy ? '学习' : entityLabelAll;
+    items.push({ id: 'root', label: rootLabel, relPath: '', kind: 'root' });
+    if (!isStudy) {
+      const projectLabel = cwd.name || title || entityLabel;
+      items.push({ id: 'project', label: projectLabel, relPath: '', kind: 'project' });
+    }
+    relParts.forEach((part, index) => {
+      items.push({
+        id: `path-${index}`,
+        label: part,
+        relPath: relParts.slice(0, index + 1).join('/'),
+        kind: 'path',
+      });
+    });
+    if (items.length) items[items.length - 1].active = true;
+    return items;
+  }, [isRoot, isLocalCwd, isStudy, cwd, entityLabelAll, title, entityLabel]);
+  const handleNavigateBreadcrumb = (crumb) => {
+    if (!crumb || crumb.active) return;
+    if (isLocalCwd) {
+      if (crumb.kind === 'local-root') {
+        setCwd({ ...cwd, relPath: '' });
+        return;
+      }
+      if (typeof crumb.relPath === 'string') {
+        setCwd({ ...cwd, relPath: crumb.relPath });
+      }
+          return;
+        }
+    if (crumb.kind === 'root') {
+      if (isStudy) {
+        setCwd({ type: 'project', name: '', relPath: '' });
+        return;
+      }
+      goRoot();
+          return;
+        }
+    if (crumb.kind === 'project') {
+      setCwd({ ...cwd, relPath: '' });
+        return;
+      }
+    if (typeof crumb.relPath === 'string') {
+      setCwd({ ...cwd, relPath: crumb.relPath });
+    }
+  };
 
   // Reset navigation context when switching domain.
   useEffect(() => {
@@ -260,6 +371,12 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
   }, [normalizedDomain, cwd.type, cwd.name, cwd.rootPath, cwd.relPath]);
 
   useResumeRefresh({ normalizedDomain, cwd, refreshProjects, refreshEntries, refreshGhosts });
+
+  useEffect(() => {
+    if (!filterPersistent) {
+      setFileFilters([]);
+    }
+  }, [filterPersistent, normalizedDomain, cwd.type, cwd.name, cwd.rootPath, cwd.relPath]);
 
   const {
     dragOverFolderRelPath,
@@ -305,15 +422,24 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
       <HeaderBar
         title={headerTitle}
         subtitle={headerSubtitle}
+        breadcrumbs={breadcrumbs}
+        onNavigateBreadcrumb={handleNavigateBreadcrumb}
         showBackHome={typeof onBackHome === 'function'}
         onBackHome={onBackHome}
-        showGoRoot={!(isStudy ? cwd.type === 'project' && !cwd.relPath : isRoot)}
+        showGoRoot={cwd.type === 'project' && !cwd.relPath}
         onGoRoot={goRoot}
         viewMode={viewMode}
         onSetViewMode={setViewModeSafe}
         isRoot={isRoot}
         showGoParent={!isRoot && Boolean(cwd.relPath)}
         onGoParent={goParent}
+        showRootPlaceholder={isRoot}
+        filterTypes={fileFilters}
+        filterOptions={fileFilterOptions}
+        filterPersistent={filterPersistent}
+        onSetFilterTypes={setFileFilters}
+        onSetFilterPersistent={setFilterPersistent}
+        onClearFilter={() => setFileFilters([])}
         onImportLocalFolder={importLocalFolder}
         pendingGhostCount={pendingGhostsInCwd.length}
         onAcceptAllGhostsHere={acceptAllGhostsHere}
@@ -335,7 +461,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
       {/* Content */}
       <div className="flex-1 overflow-y-auto" onContextMenu={handleBlankContextMenu}>
         <AIGhostOverview
-          show={!isRoot && showOverviewBar}
+          show={!isRoot && (showOverviewBar || pipelineState.isActive)}
           overviewOpen={overviewOpen}
           pendingGhostCount={pendingGhostCount}
           pendingGhostFolderCount={pendingGhostFolderCount}
@@ -351,6 +477,9 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
           onEnterFolder={(folderRelPath) => setCwd({ ...cwd, relPath: folderRelPath })}
           onAcceptItem={acceptGhost}
           onRejectItem={rejectGhost}
+          onViewTrace={openTrace}
+          pipelineQueued={pipelineState.queued}
+          pipelineClassifying={pipelineState.classifying}
         />
 
         {isRoot ? (
@@ -384,6 +513,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
                   onOpenFile={openFileByRelPath}
             onAcceptGhost={acceptGhost}
             onRejectGhost={rejectGhost}
+            onViewTrace={openTrace}
                   onDragStartEntry={onDragStartEntry}
                   onDragEndAny={onDragEndAny}
                   onDragOverFolder={onDragOverFolder}
@@ -393,6 +523,9 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
             fmtTime={fmtTime}
             fmtBytes={fmtBytes}
             folderDecor={folderDecor}
+            fileDecor={fileDecor}
+            fileFilter={isRoot ? [] : fileFilters}
+            fileFilterExts={fileFilterExts}
             onBlankContextMenu={handleBlankContextMenu}
             tree={tree}
             onToggleTree={toggleTreeDir}
@@ -506,6 +639,14 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
           </div>
         </div>
       ) : null}
+
+      {/* AI Classify Trace Viewer */}
+      <ClassifyTraceView
+        open={traceOpen}
+        loading={traceLoading}
+        data={traceData}
+        onClose={closeTrace}
+      />
     </div>
   );
 };

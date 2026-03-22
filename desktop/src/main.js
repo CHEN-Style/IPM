@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
-import { classifyFileOnce } from '../Agent/index.js';
+import { classifyFile } from '../Agent/index.js';
 import { upsertAiSuggestion, listAiSuggestions, setAiSuggestionStatus } from '../Agent/storage/aiStorage.js';
 import { registerLocalFoldersIpc } from './main/modules/localFolders.js';
 import { registerLocalExplorerIpc } from './main/modules/localExplorer.js';
@@ -18,6 +18,7 @@ import { registerSnippetsIpc } from './main/ipc/snippets.js';
 import { registerScreenshotsIpc } from './main/ipc/screenshots.js';
 import { registerFloatingIpc } from './main/ipc/floating.js';
 import { registerUiIpc } from './main/ipc/ui.js';
+import { ClassifyTracker } from './main/classifyTracker.js';
 
 const shouldAgentLog = () => {
   const v = String(process.env.IPM_AGENT_LOG || '').trim();
@@ -30,32 +31,11 @@ const shouldAgentLog = () => {
 const agentLog = (level, msg, extra = null) => {
   if (!shouldAgentLog()) return;
   const ts = new Date().toISOString();
-  const prefix = `[IPM][Agent][${level}]`;
-  const toAsciiSafe = (v) => {
-    const escapeStr = (s) =>
-      String(s).replace(/[^\x20-\x7E]/g, (ch) => {
-        const cp = ch.codePointAt(0);
-        if (!cp) return '';
-        if (cp <= 0xffff) return `\\u${cp.toString(16).padStart(4, '0')}`;
-        return `\\u{${cp.toString(16)}}`;
-      });
-    if (v === null || v === undefined) return v;
-    if (typeof v === 'string') return escapeStr(v);
-    if (typeof v === 'number' || typeof v === 'boolean') return v;
-    if (Array.isArray(v)) return v.map(toAsciiSafe);
-    if (typeof v === 'object') {
-      const out = {};
-      for (const [k, val] of Object.entries(v)) {
-        out[escapeStr(k)] = toAsciiSafe(val);
-      }
-      return out;
-    }
-    return escapeStr(String(v));
-  };
+  const prefix = `${ts} [IPM][Agent][${level}]`;
   if (extra !== null && extra !== undefined) {
-    console.log(`${ts} ${prefix} ${msg}`, toAsciiSafe(extra));
+    console.log(`${prefix} ${msg}`, extra);
   } else {
-    console.log(`${ts} ${prefix} ${msg}`);
+    console.log(`${prefix} ${msg}`);
   }
 };
 
@@ -257,34 +237,46 @@ const ensureSourceIsTempOrThrow = (sourceRelPath) => {
   return rp;
 };
 
+const classifyTracker = new ClassifyTracker();
+
 const triggerAutoClassifyToAiStorage = async ({ domain, projectName, projectDir, sourceRelPath }) => {
   const startedAt = Date.now();
+  const fileName = path.basename(String(sourceRelPath || ''));
+  classifyTracker.trackQueued(projectName, sourceRelPath, fileName);
   try {
-    const fileName = path.basename(String(sourceRelPath || ''));
     const ext = path.extname(fileName || '').replace(/^\./, '').toLowerCase();
     // Ensure structure exists (best-effort). structure.json excludes system folders by design.
     const d = normalizeWorkspaceDomain(domain);
     // IMPORTANT: study uses the workspace root; its "projectName" is a display name only.
     ensureProjectStructure(d === 'study' ? '' : projectName, d);
     const folders = buildFolderCandidatesFromStructure(projectDir, projectName);
-    agentLog('INFO', 'trigger', { domain: d, projectName, sourceRelPath, fileName, ext, folderCandidates: folders.length });
+    agentLog('INFO', `▶ 开始分类 | 文件: ${fileName} | 项目: ${projectName} | 候选文件夹: ${folders.length}`);
     if (!folders.length) {
-      agentLog('WARN', 'skip: no folder candidates from structure.json', { projectName, structurePath: getProjectStructurePath(projectDir) });
+      agentLog('WARN', `⏭ 跳过分类 — structure.json 中无候选文件夹 | 项目: ${projectName}`);
+      classifyTracker.trackFailed(projectName, sourceRelPath, '无候选文件夹');
       return;
     }
 
     const tempSourceInfo = getTempSourceInfoByRelPath(projectDir, sourceRelPath);
     const sourceDir = tempSourceInfo?.sourceDir || '';
 
-    const decision = await classifyFileOnce({
+    classifyTracker.trackClassifying(projectName, sourceRelPath);
+    const decision = await classifyFile({
       projectName,
+      projectDir,
       sourceRelPath,
       fileName,
       ext,
       sourceDir,
       folders,
     });
-    agentLog('INFO', 'decision', { domain: d, projectName, sourceRelPath, targetRelPath: decision.targetRelPath, ms: Date.now() - startedAt });
+    const elapsed = Date.now() - startedAt;
+    const route = decision.classifiedBy === 'fast-path' ? '⚡ 快速通道' : '🤖 Agent';
+    const toolInfo = decision.toolCallCount > 0 ? ` | tool calls: ${decision.toolCallCount}` : '';
+    agentLog('INFO', `${route} → ${decision.targetRelPath} | confidence: ${decision.confidence}${toolInfo} | ${elapsed}ms`);
+    if (decision.rationale) {
+      agentLog('INFO', `   理由: ${decision.rationale}`);
+    }
 
     // Stage result to ai-storage.json (no file move here)
     const written = upsertAiSuggestion(projectDir, projectName, {
@@ -294,12 +286,20 @@ const triggerAutoClassifyToAiStorage = async ({ domain, projectName, projectDir,
       suggestedFolderRelPath: decision.targetRelPath,
       status: 'pending',
       rationale: decision.rationale || '',
+      confidence: decision.confidence ?? 0,
+      classifiedBy: decision.classifiedBy || '',
       agentMeta: decision.agentMeta || {},
+      trace: decision.trace || [],
     });
-    agentLog('INFO', 'ai-storage upserted', { domain: d, projectName, sourceRelPath: written.sourceRelPath, suggestedFolderRelPath: written.suggestedFolderRelPath });
+    agentLog('INFO', `✓ 已写入暂存区 | ${written.sourceRelPath} → ${written.suggestedFolderRelPath}`);
+    classifyTracker.trackClassified(projectName, sourceRelPath, {
+      targetRelPath: decision.targetRelPath,
+      confidence: decision.confidence,
+    });
   } catch (e) {
     const msg = e?.message || String(e);
     agentLog('ERROR', 'failed', { domain: normalizeWorkspaceDomain(domain), projectName, sourceRelPath, error: msg, stack: e?.stack || '' });
+    classifyTracker.trackFailed(projectName, sourceRelPath, msg);
   }
 };
 
@@ -1283,6 +1283,16 @@ app.whenReady().then(() => {
     ensureUniqueDestPath,
     appendJsonl,
     getProjectLogPath,
+  });
+
+  ipcMain.handle('classify:getSnapshot', async (_evt, payload) => {
+    const projectName = String(payload?.projectName || '');
+    return { ok: true, ...classifyTracker.getSnapshot(projectName) };
+  });
+  ipcMain.handle('classify:clearCompleted', async (_evt, payload) => {
+    const projectName = String(payload?.projectName || '');
+    classifyTracker.clearCompleted(projectName);
+    return { ok: true };
   });
 
   registerExplorerIpc({

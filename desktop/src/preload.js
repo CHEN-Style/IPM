@@ -113,5 +113,15 @@ contextBridge.exposeInMainWorld('ipm', {
     reject: (projectName, sourceRelPath, opts = {}) => ipcRenderer.invoke('aiStorage/reject', { projectName, sourceRelPath, ...opts }),
     acceptAll: (projectName, opts = {}) => ipcRenderer.invoke('aiStorage/acceptAll', { projectName, ...opts }),
     rejectAll: (projectName, opts = {}) => ipcRenderer.invoke('aiStorage/rejectAll', { projectName, ...opts }),
+    getTrace: (projectName, sourceRelPath, opts = {}) => ipcRenderer.invoke('aiStorage/getTrace', { projectName, sourceRelPath, ...opts }),
+  },
+  classify: {
+    getSnapshot: (projectName) => ipcRenderer.invoke('classify:getSnapshot', { projectName }),
+    clearCompleted: (projectName) => ipcRenderer.invoke('classify:clearCompleted', { projectName }),
+    onStatusChanged: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('classify:status-changed', handler);
+      return () => ipcRenderer.removeListener('classify:status-changed', handler);
+    },
   },
 });

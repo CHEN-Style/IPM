@@ -1,5 +1,5 @@
 import React from 'react';
-import { Ban, Check, Folder, Info, Wand2 } from 'lucide-react';
+import { Ban, Check, Folder, Info, Search, Wand2 } from 'lucide-react';
 import ExplorerTree from './ExplorerTree.jsx';
 
 const EntryTable = ({
@@ -15,6 +15,7 @@ const EntryTable = ({
   onOpenFile,
   onAcceptGhost,
   onRejectGhost,
+  onViewTrace,
   onDragStartEntry,
   onDragEndAny,
   onDragOverFolder,
@@ -24,12 +25,30 @@ const EntryTable = ({
   fmtTime,
   fmtBytes,
   folderDecor,
+  fileDecor,
+  fileFilter,
+  fileFilterExts,
   onBlankContextMenu,
   tree,
   onToggleTree,
   onLoadTree,
 }) => {
   const isProjectCwd = cwd?.type === 'project';
+  const getExt = (name) => {
+    const base = String(name || '');
+    const idx = base.lastIndexOf('.');
+    if (idx <= 0 || idx === base.length - 1) return '';
+    return base.slice(idx + 1).toLowerCase();
+  };
+  const getTypeLabel = (entry) => {
+    if (entry.kind === 'ghost') return '幽灵文件';
+    if (entry.kind === 'dir') return '文件夹';
+    if (entry.kind === 'file') {
+      const ext = getExt(entry.name);
+      return ext ? ext.toUpperCase() : '无后缀';
+    }
+    return '其他';
+  };
   const list = [
     ...(entries || []),
     ...(pendingGhostsInCwd || []).map((g) => ({
@@ -39,6 +58,21 @@ const EntryTable = ({
       _ghost: g,
     })),
   ];
+  const activeFilters = Array.isArray(fileFilter) ? fileFilter : [];
+  const hasFilters = activeFilters.length > 0;
+  const onlyFolder = activeFilters.length === 1 && activeFilters[0] === 'folder';
+  const filterList = list.filter((entry) => {
+    if (!hasFilters) return true;
+    if (entry.kind === 'dir') return activeFilters.includes('folder');
+    if (entry.kind !== 'file' && entry.kind !== 'ghost') return false;
+    if (onlyFolder) return false;
+    const ext = getExt(entry.name);
+    return activeFilters.some((type) => {
+      if (type === 'folder') return false;
+      const allow = fileFilterExts?.[type] || [];
+      return allow.includes(ext);
+    });
+  });
 
   return (
     <div className="px-8 py-4 relative">
@@ -67,7 +101,7 @@ const EntryTable = ({
               </tr>
             )}
             {!loading &&
-              list.map((e) => (
+              filterList.map((e) => (
                 <tr
                   key={e.relPath}
                   onContextMenu={e.kind === 'ghost' ? undefined : (evt) => onContextMenuEntry?.(evt, e)}
@@ -102,7 +136,15 @@ const EntryTable = ({
                 >
                   <td className="py-3.5 pl-4 rounded-l border-y border-transparent">
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded ${e.kind === 'dir' ? folderDecor?.(e.relPath).boxClass : 'bg-slate-100'}`}>
+                      <div
+                        className={`p-2 rounded ${
+                          e.kind === 'dir'
+                            ? folderDecor?.(e.relPath).boxClass
+                            : e.kind === 'file'
+                              ? fileDecor?.(e.name).boxClass
+                              : 'bg-slate-100'
+                        }`}
+                      >
                         {e.kind === 'dir' ? (
                           (() => {
                             const { Icon, iconClass } = folderDecor?.(e.relPath) || {};
@@ -112,7 +154,11 @@ const EntryTable = ({
                         ) : e.kind === 'ghost' ? (
                           <Wand2 size={16} className="text-amber-600" />
                         ) : (
-                          <Folder size={16} className="text-slate-400" />
+                          (() => {
+                            const { Icon, iconClass } = fileDecor?.(e.name) || {};
+                            const Comp = Icon || Folder;
+                            return <Comp size={16} className={iconClass || 'text-slate-400'} />;
+                          })()
                         )}
                       </div>
                       <div className="text-sm font-medium text-slate-800">{e.name}</div>
@@ -123,9 +169,7 @@ const EntryTable = ({
                       ) : null}
                     </div>
                   </td>
-                  <td className="py-3.5 text-xs text-slate-500 border-y border-transparent">
-                    {e.kind === 'ghost' ? '幽灵文件' : e.kind === 'dir' ? '文件夹' : e.kind === 'file' ? '文件' : '其他'}
-                  </td>
+                  <td className="py-3.5 text-xs text-slate-500 border-y border-transparent">{getTypeLabel(e)}</td>
                   <td className="py-3.5 text-xs text-slate-400 font-medium border-y border-transparent">
                     {e.kind === 'ghost' ? '-' : fmtTime?.(e.mtimeMs)}
                   </td>
@@ -159,6 +203,18 @@ const EntryTable = ({
                         >
                           <Ban size={12} /> 放弃
                         </button>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-violet-600 rounded hover:bg-violet-50 hover:border-violet-200 transition-colors"
+                          onClick={(evt) => {
+                            evt.preventDefault();
+                            evt.stopPropagation();
+                            onViewTrace?.(e._ghost?.sourceRelPath);
+                          }}
+                          title="查看 AI 分类过程"
+                        >
+                          <Search size={12} /> 过程
+                        </button>
                       </div>
                     ) : e.kind === 'dir' && isProjectCwd ? (
                       <button
@@ -179,7 +235,7 @@ const EntryTable = ({
                   </td>
                 </tr>
               ))}
-            {!loading && !list.length && !errorText && (
+            {!loading && !filterList.length && !errorText && (
               <tr>
                 <td colSpan={5} className="py-10 text-center text-sm text-slate-400">
                   目录为空（右键空白处可新建文件夹/上传文件）

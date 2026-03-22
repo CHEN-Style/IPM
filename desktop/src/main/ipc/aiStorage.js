@@ -142,6 +142,32 @@ export function registerAiStorageIpc({
     }
     return { ok: true, projectName, rejected };
   });
+
+  ipcMain.handle('aiStorage/getTrace', async (_evt, payload) => {
+    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    const sourceRelPath = normalizeRelPathPosix(payload?.sourceRelPath ?? '');
+    if (!sourceRelPath) throw new Error('sourceRelPath 不能为空');
+    const items = listAiSuggestions(projectDir, projectName, {});
+    const s = items.find((x) => normalizeRelPathPosix(x?.sourceRelPath) === sourceRelPath);
+    if (!s) throw new Error('未找到对应暂存记录');
+    return {
+      ok: true,
+      projectName,
+      trace: Array.isArray(s.trace) ? s.trace : [],
+      suggestion: {
+        sourceRelPath: s.sourceRelPath,
+        fileName: s.fileName,
+        ext: s.ext,
+        suggestedFolderRelPath: s.suggestedFolderRelPath,
+        status: s.status,
+        rationale: s.rationale,
+        confidence: s.confidence,
+        classifiedBy: s.classifiedBy,
+        agentMeta: s.agentMeta,
+        toolCallCount: s.toolCallCount,
+      },
+    };
+  });
 }
 
 

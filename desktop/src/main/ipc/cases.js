@@ -21,6 +21,7 @@ export function registerCasesIpc({
   getWorkspaceDirOrThrow,
   sleepSync,
   trashOrRm,
+  closeProjectDb,
 }) {
   if (!ipcMain) throw new Error('registerCasesIpc: ipcMain is required');
 
@@ -167,6 +168,8 @@ export function registerCasesIpc({
   ipcMain.handle('cases/delete', async (_evt, payload) => {
     const { name, projectDir } = getWorkspaceDirOrThrow(payload?.name, 'cases');
     const root = getCasesRoot();
+
+    try { closeProjectDb?.(projectDir); } catch { /* ignore */ }
 
     if (!fs.existsSync(projectDir)) {
       const state = readState();

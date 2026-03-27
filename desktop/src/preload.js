@@ -110,10 +110,30 @@ contextBridge.exposeInMainWorld('ipm', {
   aiStorage: {
     list: (projectName, opts = {}) => ipcRenderer.invoke('aiStorage/list', { projectName, ...opts }),
     accept: (projectName, sourceRelPath, opts = {}) => ipcRenderer.invoke('aiStorage/accept', { projectName, sourceRelPath, ...opts }),
-    reject: (projectName, sourceRelPath, opts = {}) => ipcRenderer.invoke('aiStorage/reject', { projectName, sourceRelPath, ...opts }),
+    reject: (projectName, sourceRelPath, opts = {}) => ipcRenderer.invoke('aiStorage/reject', { projectName, sourceRelPath, userFeedback: opts.userFeedback || null, ...opts }),
     acceptAll: (projectName, opts = {}) => ipcRenderer.invoke('aiStorage/acceptAll', { projectName, ...opts }),
     rejectAll: (projectName, opts = {}) => ipcRenderer.invoke('aiStorage/rejectAll', { projectName, ...opts }),
     getTrace: (projectName, sourceRelPath, opts = {}) => ipcRenderer.invoke('aiStorage/getTrace', { projectName, sourceRelPath, ...opts }),
+  },
+  classifyRules: {
+    list: (projectName, opts = {}) => ipcRenderer.invoke('classifyRules/list', { projectName, ...opts }),
+    add: (projectName, rule, opts = {}) => ipcRenderer.invoke('classifyRules/add', { projectName, rule, ...opts }),
+    update: (projectName, ruleId, patch, opts = {}) => ipcRenderer.invoke('classifyRules/update', { projectName, ruleId, patch, ...opts }),
+    delete: (projectName, ruleId, opts = {}) => ipcRenderer.invoke('classifyRules/delete', { projectName, ruleId, ...opts }),
+    reorder: (projectName, ruleIds, opts = {}) => ipcRenderer.invoke('classifyRules/reorder', { projectName, ruleIds, ...opts }),
+  },
+  preferences: {
+    list: (projectName, opts = {}) => ipcRenderer.invoke('preferences/list', { projectName, ...opts }),
+    add: (projectName, pref, opts = {}) => ipcRenderer.invoke('preferences/add', { projectName, pref, ...opts }),
+    update: (projectName, prefId, patch, opts = {}) => ipcRenderer.invoke('preferences/update', { projectName, prefId, patch, ...opts }),
+    delete: (projectName, prefId, opts = {}) => ipcRenderer.invoke('preferences/delete', { projectName, prefId, ...opts }),
+    parseNaturalLanguage: (projectName, text, opts = {}) =>
+      ipcRenderer.invoke('preferences/parseNaturalLanguage', { projectName, text, ...opts }),
+  },
+  classifyEvents: {
+    list: (projectName, opts = {}) => ipcRenderer.invoke('classifyEvents/list', { projectName, ...opts }),
+    updateFeedback: (projectName, eventId, feedback, opts = {}) =>
+      ipcRenderer.invoke('classifyEvents/updateFeedback', { projectName, eventId, feedback, ...opts }),
   },
   classify: {
     getSnapshot: (projectName) => ipcRenderer.invoke('classify:getSnapshot', { projectName }),
@@ -122,6 +142,33 @@ contextBridge.exposeInMainWorld('ipm', {
       const handler = (_e, data) => callback(data);
       ipcRenderer.on('classify:status-changed', handler);
       return () => ipcRenderer.removeListener('classify:status-changed', handler);
+    },
+  },
+  agent: {
+    sendMessage: (projectName, domain, message) =>
+      ipcRenderer.invoke('projectAgent/sendMessage', { projectName, domain, message }),
+    executePlan: (projectName, domain, plan, selectedIds) =>
+      ipcRenderer.invoke('projectAgent/executePlan', { projectName, domain, plan, selectedIds }),
+    cancelPlan: (projectName, domain) =>
+      ipcRenderer.invoke('projectAgent/cancelPlan', { projectName, domain }),
+    endSession: (projectName, domain) =>
+      ipcRenderer.invoke('projectAgent/endSession', { projectName, domain }),
+    getSessionInfo: (projectName, domain) =>
+      ipcRenderer.invoke('projectAgent/getSessionInfo', { projectName, domain }),
+    resumeSession: (projectName, domain, sessionId) =>
+      ipcRenderer.invoke('projectAgent/resumeSession', { projectName, domain, sessionId }),
+    listSessions: (projectName, domain, opts = {}) =>
+      ipcRenderer.invoke('projectAgent/listSessions', { projectName, domain, ...opts }),
+    loadSession: (projectName, domain, sessionId) =>
+      ipcRenderer.invoke('projectAgent/loadSession', { projectName, domain, sessionId }),
+    deleteSession: (projectName, domain, sessionId) =>
+      ipcRenderer.invoke('projectAgent/deleteSession', { projectName, domain, sessionId }),
+    undoAction: (projectName, domain, actionId) =>
+      ipcRenderer.invoke('projectAgent/undoAction', { projectName, domain, actionId }),
+    onStreamEvent: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('projectAgent:stream-event', handler);
+      return () => ipcRenderer.removeListener('projectAgent:stream-event', handler);
     },
   },
 });

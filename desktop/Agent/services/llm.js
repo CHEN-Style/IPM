@@ -34,10 +34,24 @@ export function getOpenAIConfig() {
 
 export function createChatModel() {
   const { apiKey, baseURL, model } = getOpenAIConfig();
-  // MVP: deterministic output, no tuning surface exposed in UI
   return new ChatOpenAI({
     apiKey,
     model,
+    temperature: 0,
+    configuration: { baseURL },
+  });
+}
+
+/**
+ * Cheap / fast model for background tasks like summarization.
+ * Falls back to main model if OPENAI_SUMMARY_MODEL is not set.
+ */
+export function createSummaryModel() {
+  const { apiKey, baseURL, model } = getOpenAIConfig();
+  const summaryModel = process.env.OPENAI_SUMMARY_MODEL || model;
+  return new ChatOpenAI({
+    apiKey,
+    model: summaryModel,
     temperature: 0,
     configuration: { baseURL },
   });

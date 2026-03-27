@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Ban, Check, ChevronDown, ChevronRight, Search, Wand2 } from 'lucide-react';
 import ClassifyPipeline from './ClassifyPipeline.jsx';
+import RejectPopover from './RejectPopover.jsx';
 
 const AIGhostOverview = ({
   show,
@@ -23,6 +24,8 @@ const AIGhostOverview = ({
   pipelineQueued,
   pipelineClassifying,
 }) => {
+  const [rejectingItem, setRejectingItem] = useState(null);
+
   if (!show) return null;
 
   return (
@@ -164,15 +167,27 @@ const AIGhostOverview = ({
                                   <Check size={12} /> 接受
                                 </span>
                               </button>
-                              <button
-                                type="button"
-                                className="px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 rounded hover:bg-slate-50 transition-colors"
-                                onClick={() => onRejectItem?.(it.sourceRelPath)}
-                              >
-                                <span className="inline-flex items-center gap-1.5">
-                                  <Ban size={12} /> 放弃
-                                </span>
-                              </button>
+                              <div className="relative">
+                                <button
+                                  type="button"
+                                  className="px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 rounded hover:bg-slate-50 transition-colors"
+                                  onClick={() => setRejectingItem(rejectingItem === it.sourceRelPath ? null : it.sourceRelPath)}
+                                >
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <Ban size={12} /> 放弃
+                                  </span>
+                                </button>
+                                {rejectingItem === it.sourceRelPath && (
+                                  <RejectPopover
+                                    sourceRelPath={it.sourceRelPath}
+                                    onConfirm={(src, feedback) => {
+                                      setRejectingItem(null);
+                                      onRejectItem?.(src, { userFeedback: feedback });
+                                    }}
+                                    onCancel={() => setRejectingItem(null)}
+                                  />
+                                )}
+                              </div>
                               <button
                                 type="button"
                                 className="px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-violet-600 rounded hover:bg-violet-50 hover:border-violet-200 transition-colors"

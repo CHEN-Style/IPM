@@ -1,5 +1,46 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { appendClassifyEvent, lookupSourceInfo } from '../../../Agent/storage/classifyEvents.js';
+import { matchPreferences, updatePreference } from '../../../Agent/storage/preferences.js';
+import { getProjectDb } from '../../../Agent/db/index.js';
+import { appendLog } from '../../../Agent/db/activityLog.js';
+
+const DECAY_STEP = 0.1;
+const DECAY_FLOOR = 0.1;
+
+function decayPreferencesOnReject(projectDir, suggestion) {
+  if (!suggestion) return;
+  const fileName = suggestion.fileName || '';
+  const ext = suggestion.ext || '';
+  const suggestedFolder = suggestion.suggestedFolderRelPath || '';
+  if (!suggestedFolder) return;
+
+  let sourceDir = '';
+  try {
+    const src = lookupSourceInfo(projectDir, suggestion.sourceRelPath || '');
+    sourceDir = src?.sourceDir || '';
+  } catch {
+    // ignore
+  }
+
+  const matched = matchPreferences(projectDir, { fileName, ext, sourceDir });
+  const now = new Date().toISOString();
+
+  for (const pref of matched) {
+    if (pref.tendency?.folder !== suggestedFolder) continue;
+    const oldStrength = pref.tendency?.strength ?? 0.7;
+    const newStrength = Math.max(DECAY_FLOOR, oldStrength - DECAY_STEP);
+    const evidence = pref.evidence || { totalMatched: 0, accepted: 0, rejected: 0, lastSeenAt: null };
+    updatePreference(projectDir, pref.id, {
+      tendency: { ...pref.tendency, strength: newStrength },
+      evidence: {
+        ...evidence,
+        rejected: (evidence.rejected || 0) + 1,
+        lastSeenAt: now,
+      },
+    });
+  }
+}
 
 export function registerAiStorageIpc({
   ipcMain,
@@ -12,8 +53,6 @@ export function registerAiStorageIpc({
   resolveInside,
   sanitizeFileName,
   ensureUniqueDestPath,
-  appendJsonl,
-  getProjectLogPath,
 }) {
   if (!ipcMain) throw new Error('registerAiStorageIpc: ipcMain is required');
 
@@ -30,8 +69,41 @@ export function registerAiStorageIpc({
     const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
     const sourceRelPath = normalizeRelPathPosix(payload?.sourceRelPath ?? '');
     if (!sourceRelPath) throw new Error('sourceRelPath 不能为空');
-    const updated = setAiSuggestionStatus(projectDir, projectName, sourceRelPath, { status: 'rejected', rejectedAt: new Date().toISOString() });
+    const userFeedback = payload?.userFeedback ? String(payload.userFeedback).trim() : null;
+
+    const items = listAiSuggestions(projectDir, projectName, {});
+    const s = items.find((x) => normalizeRelPathPosix(x?.sourceRelPath) === sourceRelPath);
+
+    const now = new Date().toISOString();
+    const updated = setAiSuggestionStatus(projectDir, projectName, sourceRelPath, { status: 'rejected', rejectedAt: now, userFeedback });
     if (!updated) throw new Error('未找到对应暂存记录');
+
+    try {
+      const src = lookupSourceInfo(projectDir, sourceRelPath);
+      appendClassifyEvent(projectDir, {
+        event: 'classify.rejected',
+        fileName: s?.fileName || path.basename(sourceRelPath),
+        ext: s?.ext || '',
+        sourcePath: src?.sourcePath || '',
+        sourceDir: src?.sourceDir || '',
+        suggestedFolder: s?.suggestedFolderRelPath || '',
+        rationale: s?.rationale || '',
+        confidence: s?.confidence ?? null,
+        classifiedBy: s?.classifiedBy || '',
+        actualFolder: null,
+        movedToRelPath: null,
+        userFeedback,
+      });
+    } catch {
+      // non-critical
+    }
+
+    try {
+      decayPreferencesOnReject(projectDir, s);
+    } catch {
+      // non-critical
+    }
+
     return { ok: true, projectName, suggestion: updated };
   });
 
@@ -74,9 +146,9 @@ export function registerAiStorageIpc({
     });
 
     try {
-      appendJsonl(getProjectLogPath(projectDir), {
+      const db = getProjectDb(projectDir);
+      appendLog(db, 'aiStorage.accepted', {
         ts: now,
-        event: 'aiStorage.accepted',
         projectName,
         sourceRelPath,
         targetRelPath: targetRel,
@@ -84,6 +156,26 @@ export function registerAiStorageIpc({
       });
     } catch {
       // ignore
+    }
+
+    try {
+      const src = lookupSourceInfo(projectDir, sourceRelPath);
+      appendClassifyEvent(projectDir, {
+        event: 'classify.accepted',
+        fileName: s.fileName || path.basename(sourceRelPath),
+        ext: s.ext || '',
+        sourcePath: src?.sourcePath || '',
+        sourceDir: src?.sourceDir || '',
+        suggestedFolder: s.suggestedFolderRelPath || '',
+        rationale: s.rationale || '',
+        confidence: s.confidence ?? null,
+        classifiedBy: s.classifiedBy || '',
+        actualFolder: targetRel,
+        movedToRelPath,
+        userFeedback: null,
+      });
+    } catch {
+      // non-critical
     }
 
     return { ok: true, projectName, movedToRelPath, suggestion: updated };
@@ -120,6 +212,25 @@ export function registerAiStorageIpc({
           movedToRelPath,
           targetRelPath: targetRel,
         });
+        try {
+          const src = lookupSourceInfo(projectDir, sourceRelPath);
+          appendClassifyEvent(projectDir, {
+            event: 'classify.accepted',
+            fileName: s.fileName || path.basename(sourceRelPath),
+            ext: s.ext || '',
+            sourcePath: src?.sourcePath || '',
+            sourceDir: src?.sourceDir || '',
+            suggestedFolder: s.suggestedFolderRelPath || '',
+            rationale: s.rationale || '',
+            confidence: s.confidence ?? null,
+            classifiedBy: s.classifiedBy || '',
+            actualFolder: targetRel,
+            movedToRelPath,
+            userFeedback: null,
+          });
+        } catch {
+          // non-critical
+        }
         accepted += 1;
       } catch {
         failed += 1;
@@ -138,7 +249,33 @@ export function registerAiStorageIpc({
       const sourceRelPath = normalizeRelPathPosix(s.sourceRelPath || '');
       if (!sourceRelPath) continue;
       const updated = setAiSuggestionStatus(projectDir, projectName, sourceRelPath, { status: 'rejected', rejectedAt: now });
-      if (updated) rejected += 1;
+      if (updated) {
+        rejected += 1;
+        try {
+          const src = lookupSourceInfo(projectDir, sourceRelPath);
+          appendClassifyEvent(projectDir, {
+            event: 'classify.rejected',
+            fileName: s.fileName || path.basename(sourceRelPath),
+            ext: s.ext || '',
+            sourcePath: src?.sourcePath || '',
+            sourceDir: src?.sourceDir || '',
+            suggestedFolder: s.suggestedFolderRelPath || '',
+            rationale: s.rationale || '',
+            confidence: s.confidence ?? null,
+            classifiedBy: s.classifiedBy || '',
+            actualFolder: null,
+            movedToRelPath: null,
+            userFeedback: null,
+          });
+        } catch {
+          // non-critical
+        }
+        try {
+          decayPreferencesOnReject(projectDir, s);
+        } catch {
+          // non-critical
+        }
+      }
     }
     return { ok: true, projectName, rejected };
   });

@@ -21,6 +21,7 @@ export function registerProjectsIpc({
   getProjectDirOrThrow,
   sleepSync,
   trashOrRm,
+  closeProjectDb,
 }) {
   if (!ipcMain) throw new Error('registerProjectsIpc: ipcMain is required');
 
@@ -184,6 +185,8 @@ export function registerProjectsIpc({
   ipcMain.handle('projects/delete', async (_evt, payload) => {
     const { name, projectDir } = getProjectDirOrThrow(payload?.name);
     const root = getProjectsRoot();
+
+    try { closeProjectDb?.(projectDir); } catch { /* ignore */ }
 
     if (!fs.existsSync(projectDir)) {
       // Already gone, just clean up state

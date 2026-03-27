@@ -15,11 +15,11 @@ const log = (msg) => console.log(`[IPM][Classifier] ${msg}`);
  */
 export async function classifyFile(rawInput) {
   const input = ClassifyInputSchema.parse(rawInput);
-  const { fileName, ext, folders } = input;
+  const { fileName, ext, folders, projectDir, sourceDir } = input;
 
-  // --- 1. Fast path (rule engine, 0ms, no LLM) ---
+  // --- 1. Fast path (user rules first, then built-in rules, no LLM) ---
   log(`[1/3] 快速通道检查 | ${fileName}`);
-  const fastResult = tryFastPath({ fileName, ext, folders });
+  const fastResult = tryFastPath({ fileName, ext, folders, projectDir, sourceDir });
   if (fastResult) {
     const { valid, errors } = validateClassifyOutput(fastResult, folders);
     if (valid) {

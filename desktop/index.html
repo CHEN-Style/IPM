@@ -201,6 +201,141 @@
       .animate-float {
         animation: float-around 3s ease-in-out infinite;
       }
+
+      /* ===== Markdown prose styles for AI chat ===== */
+      .prose-chat {
+        font-size: 0.875rem;
+        line-height: 1.7;
+        color: #1e293b;
+      }
+      .prose-chat > *:first-child { margin-top: 0; }
+      .prose-chat > *:last-child  { margin-bottom: 0; }
+
+      .prose-chat h1, .prose-chat h2, .prose-chat h3,
+      .prose-chat h4, .prose-chat h5, .prose-chat h6 {
+        font-weight: 600;
+        color: #0f172a;
+        margin-top: 1.25em;
+        margin-bottom: 0.5em;
+        line-height: 1.35;
+      }
+      .prose-chat h1 { font-size: 1.25em; }
+      .prose-chat h2 { font-size: 1.125em; }
+      .prose-chat h3 { font-size: 1em; }
+
+      .prose-chat p {
+        margin-top: 0.5em;
+        margin-bottom: 0.5em;
+      }
+
+      .prose-chat ul, .prose-chat ol {
+        margin-top: 0.5em;
+        margin-bottom: 0.5em;
+        padding-left: 1.5em;
+      }
+      .prose-chat ul { list-style-type: disc; }
+      .prose-chat ol { list-style-type: decimal; }
+      .prose-chat li {
+        margin-top: 0.2em;
+        margin-bottom: 0.2em;
+      }
+      .prose-chat li > ul, .prose-chat li > ol {
+        margin-top: 0.15em;
+        margin-bottom: 0.15em;
+      }
+
+      .prose-chat strong { font-weight: 600; color: #0f172a; }
+      .prose-chat em { font-style: italic; }
+
+      .prose-chat code {
+        font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
+        font-size: 0.825em;
+        background: #f1f5f9;
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+        padding: 0.15em 0.35em;
+        color: #be185d;
+      }
+
+      .prose-chat pre {
+        margin-top: 0.75em;
+        margin-bottom: 0.75em;
+        padding: 0.875em 1em;
+        background: #1e293b;
+        border-radius: 8px;
+        overflow-x: auto;
+        border: 1px solid #334155;
+      }
+      .prose-chat pre code {
+        background: none;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+        font-size: 0.8em;
+        color: #e2e8f0;
+        line-height: 1.6;
+      }
+
+      .prose-chat blockquote {
+        margin-top: 0.75em;
+        margin-bottom: 0.75em;
+        padding: 0.5em 0 0.5em 1em;
+        border-left: 3px solid #cbd5e1;
+        color: #475569;
+      }
+      .prose-chat blockquote p { margin: 0.25em 0; }
+
+      .prose-chat table {
+        margin-top: 0.75em;
+        margin-bottom: 0.75em;
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.825em;
+      }
+      .prose-chat th {
+        text-align: left;
+        font-weight: 600;
+        padding: 0.5em 0.75em;
+        background: #f8fafc;
+        border-bottom: 2px solid #e2e8f0;
+        color: #334155;
+      }
+      .prose-chat td {
+        padding: 0.4em 0.75em;
+        border-bottom: 1px solid #f1f5f9;
+      }
+      .prose-chat tr:last-child td { border-bottom: none; }
+
+      .prose-chat hr {
+        margin: 1em 0;
+        border: none;
+        border-top: 1px solid #e2e8f0;
+      }
+
+      .prose-chat a {
+        color: #2563eb;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      .prose-chat a:hover { color: #1d4ed8; }
+
+      .prose-chat img { max-width: 100%; border-radius: 6px; }
+
+      /* Chat Panel overlay animations */
+      @keyframes chat-backdrop-in {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+      }
+      @keyframes chat-panel-slide-in {
+        from { transform: translateX(100%); }
+        to   { transform: translateX(0); }
+      }
+      .animate-chat-backdrop {
+        animation: chat-backdrop-in 0.2s ease-out forwards;
+      }
+      .animate-chat-panel {
+        animation: chat-panel-slide-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
     </style>
   </head>
   <body class="text-slate-900 overflow-hidden">

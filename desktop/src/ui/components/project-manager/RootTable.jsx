@@ -1,5 +1,5 @@
 import React from 'react';
-import { FolderOpen, Sparkles } from 'lucide-react';
+import { FolderOpen, Settings2, Sparkles, Bot } from 'lucide-react';
 
 const RootTable = ({
   errorText,
@@ -16,6 +16,8 @@ const RootTable = ({
   badgeByStatus,
   onSetProjectStatus,
   onOpenSnippetLinker,
+  onOpenPreferences,
+  onOpenAgent,
 }) => {
   const PROJECT_STATUSES = projectStatuses || ['active', 'pending', 'archived'];
 
@@ -32,6 +34,8 @@ const RootTable = ({
             <th className="pb-4 pl-4 font-bold">{entityLabel}名称</th>
             <th className="pb-4 font-bold">路径</th>
             <th className="pb-4 text-right font-bold">状态</th>
+            <th className="pb-4 text-right font-bold">偏好与记录</th>
+            <th className="pb-4 text-right font-bold">AI 助理</th>
             <th className="pb-4 text-right pr-4 font-bold">整理知识</th>
           </tr>
         </thead>
@@ -80,6 +84,8 @@ const RootTable = ({
                     </span>
                   </div>
                 </td>
+                <td className="py-3.5 text-right text-xs text-slate-300 font-medium border-y border-transparent">-</td>
+                <td className="py-3.5 text-right text-xs text-slate-300 font-medium border-y border-transparent">-</td>
                 <td className="py-3.5 text-right pr-4 rounded-r text-xs text-slate-300 font-medium border-y border-transparent">-</td>
               </tr>
             );
@@ -132,6 +138,36 @@ const RootTable = ({
                   </div>
                 </div>
               </td>
+              <td className="py-3.5 text-right text-xs text-slate-500 font-medium border-y border-transparent">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-medium hover:bg-slate-50 transition-colors"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onOpenPreferences?.(p);
+                  }}
+                  title="管理分类偏好与历史记录"
+                >
+                  <Settings2 size={14} />
+                  偏好与记录
+                </button>
+              </td>
+              <td className="py-3.5 text-right text-xs text-slate-500 font-medium border-y border-transparent">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 transition-colors shadow-sm"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onOpenAgent?.(p);
+                  }}
+                  title="打开 AI 助理对话"
+                >
+                  <Bot size={14} />
+                  AI 助理
+                </button>
+              </td>
               <td className="py-3.5 text-right pr-4 rounded-r text-xs text-slate-500 font-medium border-y border-transparent">
                 <button
                   type="button"
@@ -151,7 +187,7 @@ const RootTable = ({
           ))}
           {!projects.length && !(localFolders || []).length && (
             <tr>
-              <td colSpan={4} className="py-10 text-center text-sm text-slate-400">
+              <td colSpan={6} className="py-10 text-center text-sm text-slate-400">
                 暂无{entityLabel}，点击右上角「新建{entityLabel}」
               </td>
             </tr>

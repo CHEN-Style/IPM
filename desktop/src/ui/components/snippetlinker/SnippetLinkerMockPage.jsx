@@ -3,7 +3,6 @@ import { Search, Undo2, FolderTree, Network, LayoutGrid, Trash2, ArrowLeft } fro
 import { FileTree } from './FileTree.jsx';
 import { SnippetCard } from './SnippetCard.jsx';
 import { ToastContainer } from './ToastContainer.jsx';
-import { MOCK_FILE_TREE, MOCK_SNIPPETS } from './constants.js';
 import { AssociationNodeList } from './AssociationNodeList.jsx';
 import { ConnectorLines } from './ConnectorLines.jsx';
 import { SnippetDetailPanel } from './SnippetDetailPanel.jsx';
@@ -31,14 +30,15 @@ const getFlatNodeList = (nodes) => {
   return flat;
 };
 
-export default function SnippetLinkerMockPage({ projectName, onBack }) {
-  const [fileTree, setFileTree] = useState(MOCK_FILE_TREE);
+export default function SnippetLinkerMockPage({ projectName, domain, onBack }) {
+  const domainOpts = domain ? { domain } : {};
+  const [fileTree, setFileTree] = useState([]);
   const fileNodeMap = useMemo(() => flattenTree(fileTree), [fileTree]);
   const flatNodes = useMemo(() => getFlatNodeList(fileTree), [fileTree]);
 
-  const [snippets, setSnippets] = useState(MOCK_SNIPPETS);
+  const [snippets, setSnippets] = useState([]);
   const [selectedSnippetIds, setSelectedSnippetIds] = useState(new Set());
-  const [expandedIds, setExpandedIds] = useState(new Set(['root-1', 'proj-alpha']));
+  const [expandedIds, setExpandedIds] = useState(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [toasts, setToasts] = useState([]);
   const [dataLoading, setDataLoading] = useState(false);
@@ -135,7 +135,7 @@ export default function SnippetLinkerMockPage({ projectName, onBack }) {
     // persist
     const api = window.ipm?.snippets?.clipboardRecord?.updateMeta;
     if (typeof api === 'function') {
-      api(projectName, snippetId, { linkedTo: null }).catch(() => {});
+      api(projectName, snippetId, { linkedTo: null }, domainOpts).catch(() => {});
     }
   };
 
@@ -161,10 +161,10 @@ export default function SnippetLinkerMockPage({ projectName, onBack }) {
     const metaApi = window.ipm?.snippets?.clipboardRecord?.updateMeta;
     const contentApi = window.ipm?.snippets?.clipboardRecord?.updateContent;
     if (typeof metaApi === 'function') {
-      metaApi(projectName, updated.id, { title: updated.title, tags: updated.tags, importance: updated.importance }).catch(() => {});
+      metaApi(projectName, updated.id, { title: updated.title, tags: updated.tags, importance: updated.importance }, domainOpts).catch(() => {});
     }
     if (typeof contentApi === 'function' && typeof updated.content === 'string') {
-      contentApi(projectName, updated.id, updated.content).catch(() => {});
+      contentApi(projectName, updated.id, updated.content, domainOpts).catch(() => {});
     }
   };
 
@@ -181,7 +181,7 @@ export default function SnippetLinkerMockPage({ projectName, onBack }) {
     const api = window.ipm?.explorer?.readText;
     if (typeof api !== 'function') return;
     try {
-      const res = await api(projectName, rel, { maxBytes: 512 * 1024 });
+      const res = await api(projectName, rel, { maxBytes: 512 * 1024, ...domainOpts });
       const text = String(res?.text || '');
       setSnippets((prev) => prev.map((x) => (x.id === snippetId ? { ...x, _fullText: text } : x)));
     } catch {
@@ -200,7 +200,7 @@ export default function SnippetLinkerMockPage({ projectName, onBack }) {
       if (typeof api === 'function') {
         for (const id of ids) {
           // eslint-disable-next-line no-await-in-loop
-          await api(projectName, id);
+          await api(projectName, id, domainOpts);
         }
       }
       setSnippets((prev) => prev.filter((s) => !ids.includes(s.id)));
@@ -252,7 +252,7 @@ export default function SnippetLinkerMockPage({ projectName, onBack }) {
     const api = window.ipm?.snippets?.clipboardRecord?.updateMeta;
     if (typeof api === 'function') {
       idsToLink.forEach((id) => {
-        api(projectName, id, { linkedTo: { relPath: targetNodeId, kind } }).catch(() => {});
+        api(projectName, id, { linkedTo: { relPath: targetNodeId, kind } }, domainOpts).catch(() => {});
       });
     }
   };
@@ -287,7 +287,7 @@ export default function SnippetLinkerMockPage({ projectName, onBack }) {
         // --- File tree ---
         const buildTree = async (relPath = '') => {
           const rp = norm(relPath);
-          const res = await api.list(projectName, rp);
+          const res = await api.list(projectName, rp, domainOpts);
           const entries = Array.isArray(res?.entries) ? res.entries : [];
 
           const nodes = [];
@@ -323,7 +323,7 @@ export default function SnippetLinkerMockPage({ projectName, onBack }) {
         const recordApi = window.ipm?.snippets?.clipboardRecord?.list;
         let realSnips = [];
         if (typeof recordApi === 'function') {
-          const rec = await recordApi(projectName);
+          const rec = await recordApi(projectName, domainOpts);
           const items = Array.isArray(rec?.record?.items) ? rec.record.items : [];
           realSnips = items
             .filter((it) => String(it?.type) === 'snippet')
@@ -348,8 +348,8 @@ export default function SnippetLinkerMockPage({ projectName, onBack }) {
         }
 
         if (cancelled) return;
-        setFileTree(realTree.length ? realTree : MOCK_FILE_TREE);
-        setSnippets(realSnips.length ? realSnips : MOCK_SNIPPETS);
+        setFileTree(realTree);
+        setSnippets(realSnips);
         // Reset UI selections/expansions for real data
         setSelectedSnippetIds(new Set());
         setExpandedIds(new Set());
@@ -366,7 +366,7 @@ export default function SnippetLinkerMockPage({ projectName, onBack }) {
     return () => {
       cancelled = true;
     };
-  }, [projectName]);
+  }, [projectName, domain]);
 
   // Subscribe to clipboard-record changes for realtime updates
   useEffect(() => {
@@ -377,7 +377,7 @@ export default function SnippetLinkerMockPage({ projectName, onBack }) {
     const off = sub((evt) => {
       if (!evt || evt.projectName !== projectName) return;
       // refresh list (best-effort)
-      list(projectName)
+      list(projectName, domainOpts)
         .then((rec) => {
           const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '').replace(/\/{2,}/g, '/');
           const items = Array.isArray(rec?.record?.items) ? rec.record.items : [];
@@ -406,7 +406,7 @@ export default function SnippetLinkerMockPage({ projectName, onBack }) {
         .catch(() => {});
     });
     return () => off?.();
-  }, [projectName]);
+  }, [projectName, domain]);
 
   return (
     <div className="flex-1 flex h-full w-full bg-white overflow-hidden font-sans relative min-h-0" onDragStart={handleDragStart}>

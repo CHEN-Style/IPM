@@ -18,7 +18,14 @@ import { registerSnippetsIpc } from './main/ipc/snippets.js';
 import { registerScreenshotsIpc } from './main/ipc/screenshots.js';
 import { registerFloatingIpc } from './main/ipc/floating.js';
 import { registerUiIpc } from './main/ipc/ui.js';
+import { registerClassifyRulesIpc } from './main/ipc/classifyRules.js';
+import { registerClassifyEventsIpc } from './main/ipc/classifyEvents.js';
+import { registerProjectAgentIpc } from './main/ipc/projectAgent.js';
+import { registerPreferencesIpc } from './main/ipc/preferences.js';
 import { ClassifyTracker } from './main/classifyTracker.js';
+import { getProjectDb, closeProjectDb, closeAllDbs } from '../Agent/db/index.js';
+import { upsertSourceRecord, deleteSourceRecord, getSourceInfo as dbGetSourceInfo } from '../Agent/db/sourceRecords.js';
+import { appendLog as dbAppendLog } from '../Agent/db/activityLog.js';
 
 const shouldAgentLog = () => {
   const v = String(process.env.IPM_AGENT_LOG || '').trim();
@@ -325,9 +332,12 @@ const ensureProjectStructure = (projectName, domain = 'projects') => {
   fs.mkdirSync(getProjectMetaDir(projectDir), { recursive: true });
   fs.mkdirSync(path.join(projectDir, 'temp'), { recursive: true });
 
-  // Project logs (append-only)
+  // Project logs (append-only) — kept for backward compat
   const logPath = getProjectLogPath(projectDir);
   if (!fs.existsSync(logPath)) fs.writeFileSync(logPath, '', 'utf-8');
+
+  // Initialize SQLite database for the project
+  try { getProjectDb(projectDir); } catch { /* ignore */ }
 
   // Snippets metadata (domain-local)
   const snippetsMetaDir = getSnippetsMetaDir(projectDir);
@@ -493,78 +503,18 @@ const safeReadJson = (filePath, fallback = null) => {
 
 // Record source info for files copied into temp/, keyed by sourceRelPath (temp/xxx)
 const upsertTempSourceRecord = (projectDir, projectName, entry) => {
-  const recordPath = getTempSourceRecordPath(projectDir);
-  const nowIso = new Date().toISOString();
-  const doc = safeReadJson(recordPath, null) || {
-    schemaVersion: 1,
-    projectName: projectName || '',
-    createdAt: nowIso,
-    updatedAt: nowIso,
-    items: [],
-  };
-
-  doc.schemaVersion = doc.schemaVersion || 1;
-  doc.projectName = doc.projectName || projectName || '';
-  doc.items = Array.isArray(doc.items) ? doc.items : [];
-
-  const sourceRelPath = normalizeRelPathPosix(entry?.sourceRelPath || '');
-  if (!sourceRelPath) return null;
-
-  const normalized = {
-    sourceRelPath,
-    sourcePath: String(entry?.sourcePath || ''),
-    sourceDir: String(entry?.sourceDir || ''),
-    fileName: String(entry?.fileName || ''),
-    sourceSizeBytes: Number.isFinite(entry?.sourceSizeBytes) ? entry.sourceSizeBytes : null,
-    capturedAt: entry?.capturedAt || nowIso,
-  };
-
-  const idx = doc.items.findIndex((x) => normalizeRelPathPosix(x?.sourceRelPath || '') === sourceRelPath);
-  if (idx >= 0) {
-    doc.items[idx] = { ...(doc.items[idx] || {}), ...normalized };
-  } else {
-    doc.items.push(normalized);
-  }
-
-  // prevent unbounded growth
-  const MAX_ITEMS = 500;
-  if (doc.items.length > MAX_ITEMS) {
-    doc.items = doc.items.slice(doc.items.length - MAX_ITEMS);
-  }
-
-  doc.updatedAt = nowIso;
-  atomicWriteFileSync(recordPath, JSON.stringify(doc, null, 2), 'utf-8');
-  return normalized;
+  const db = getProjectDb(projectDir);
+  return upsertSourceRecord(db, entry);
 };
 
 const deleteTempSourceRecordByRelPath = (projectDir, sourceRelPathRaw) => {
-  const sourceRelPath = normalizeRelPathPosix(sourceRelPathRaw || '');
-  if (!sourceRelPath) return false;
-  const recordPath = getTempSourceRecordPath(projectDir);
-  const doc = safeReadJson(recordPath, null);
-  if (!doc || typeof doc !== 'object') return false;
-  const items = Array.isArray(doc.items) ? doc.items : [];
-  const next = items.filter((x) => normalizeRelPathPosix(x?.sourceRelPath || '') !== sourceRelPath);
-  if (next.length === items.length) return false;
-  doc.items = next;
-  doc.updatedAt = new Date().toISOString();
-  atomicWriteFileSync(recordPath, JSON.stringify(doc, null, 2), 'utf-8');
-  return true;
+  const db = getProjectDb(projectDir);
+  return deleteSourceRecord(db, sourceRelPathRaw);
 };
 
 const getTempSourceInfoByRelPath = (projectDir, sourceRelPathRaw) => {
-  const sourceRelPath = normalizeRelPathPosix(sourceRelPathRaw || '');
-  if (!sourceRelPath) return null;
-  const recordPath = getTempSourceRecordPath(projectDir);
-  const doc = safeReadJson(recordPath, null);
-  const items = doc && typeof doc === 'object' && Array.isArray(doc.items) ? doc.items : [];
-  const hit = items.find((x) => normalizeRelPathPosix(x?.sourceRelPath || '') === sourceRelPath);
-  if (!hit || typeof hit !== 'object') return null;
-  return {
-    sourceRelPath,
-    sourcePath: typeof hit.sourcePath === 'string' ? hit.sourcePath : '',
-    sourceDir: typeof hit.sourceDir === 'string' ? hit.sourceDir : '',
-  };
+  const db = getProjectDb(projectDir);
+  return dbGetSourceInfo(db, sourceRelPathRaw);
 };
 
 const safeRenameSync = (fromPath, toPath) => {
@@ -577,8 +527,15 @@ const safeRenameSync = (fromPath, toPath) => {
 };
 
 const appendJsonl = (filePath, obj) => {
-  const line = JSON.stringify(obj) + '\n';
-  fs.appendFileSync(filePath, line, 'utf-8');
+  try {
+    const metaDir = path.dirname(filePath);
+    const projectDir = path.dirname(metaDir);
+    const db = getProjectDb(projectDir);
+    dbAppendLog(db, obj.event || 'unknown', obj);
+  } catch {
+    const line = JSON.stringify(obj) + '\n';
+    fs.appendFileSync(filePath, line, 'utf-8');
+  }
 };
 
 const ensureTempDir = (projectDir) => {
@@ -1281,9 +1238,12 @@ app.whenReady().then(() => {
     resolveInside,
     sanitizeFileName,
     ensureUniqueDestPath,
-    appendJsonl,
-    getProjectLogPath,
   });
+
+  registerClassifyRulesIpc({ ipcMain, getWorkspaceDirOrThrow });
+  registerClassifyEventsIpc({ ipcMain, getWorkspaceDirOrThrow });
+  registerPreferencesIpc({ ipcMain, getWorkspaceDirOrThrow });
+  registerProjectAgentIpc({ ipcMain, getWorkspaceDirOrThrow, syncStructureJson });
 
   ipcMain.handle('classify:getSnapshot', async (_evt, payload) => {
     const projectName = String(payload?.projectName || '');
@@ -1351,6 +1311,7 @@ app.whenReady().then(() => {
     getProjectDirOrThrow,
     sleepSync,
     trashOrRm,
+    closeProjectDb,
   });
 
   registerCasesIpc({
@@ -1373,6 +1334,7 @@ app.whenReady().then(() => {
     getWorkspaceDirOrThrow,
     sleepSync,
     trashOrRm,
+    closeProjectDb,
   });
 
   registerSnippetsIpc({
@@ -1470,6 +1432,7 @@ app.whenReady().then(() => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
+  closeAllDbs();
   if (process.platform !== 'darwin') {
     app.quit();
   }

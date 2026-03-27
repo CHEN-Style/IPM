@@ -51,6 +51,7 @@ const HeaderBar = ({
   newProjectInputRef,
   goRootLabel,
   createLabel,
+  showAgentChat,
 }) => {
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef(null);

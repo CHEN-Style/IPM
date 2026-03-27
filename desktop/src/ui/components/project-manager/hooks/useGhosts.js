@@ -67,12 +67,12 @@ const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
   );
 
   const rejectGhost = useCallback(
-    async (sourceRelPath) => {
+    async (sourceRelPath, { userFeedback } = {}) => {
       if (cwd.type !== 'project') return;
       const api = window.ipm?.aiStorage?.reject;
       if (!api) return;
       try {
-        await api(cwd.name, sourceRelPath, domainOpts);
+        await api(cwd.name, sourceRelPath, { ...domainOpts, userFeedback: userFeedback || null });
         await refreshGhosts();
         setNotice?.({ variant: 'info', message: '已放弃（暂存建议已拒绝）' });
       } catch (e) {

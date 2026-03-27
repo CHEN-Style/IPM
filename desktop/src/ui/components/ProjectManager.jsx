@@ -21,6 +21,8 @@ import useResumeRefresh from './project-manager/hooks/useResumeRefresh.js';
 import useTraceView from './project-manager/hooks/useTraceView.js';
 import useClassifyPipeline from './project-manager/hooks/useClassifyPipeline.js';
 import ClassifyTraceView from './project-manager/ClassifyTraceView.jsx';
+import PreferencesPage from './project-manager/PreferencesPage.jsx';
+import ChatPanel from './agent-chat/ChatPanel.jsx';
 import { fileDecor, folderDecor, fmtBytes, fmtTime } from './project-manager/utils.js';
 
 const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
@@ -36,6 +38,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
   const [notice, setNotice] = useState(null); // {variant,message}
   const [fileFilters, setFileFilters] = useState([]);
   const [filterPersistent, setFilterPersistent] = useState(false);
+  const [chatProjectCtx, setChatProjectCtx] = useState(null);
   const {
     projects,
     currentProject,
@@ -98,6 +101,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
   });
 
   const { traceOpen, traceLoading, traceData, openTrace, closeTrace } = useTraceView({ cwd, domainOpts });
+  const [preferencesCtx, setPreferencesCtx] = useState(null);
   const pipelineState = useClassifyPipeline({ cwd, refreshGhosts, refreshEntries });
 
   const { localFolders, refreshLocalFolders, importLocalFolder, removeLocalFolder } = useLocalFolders({ normalizedDomain, setNotice });
@@ -398,13 +402,27 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
     return (
       <SnippetLinkerMockPage
         projectName={snippetLinkerCtx?.name}
+        domain={normalizedDomain}
         onBack={() => setSnippetLinkerCtx(null)}
       />
     );
   }
 
+  if (preferencesCtx) {
+    return (
+      <PreferencesPage
+        projectName={preferencesCtx.name}
+        domain={normalizedDomain}
+        onBack={() => setPreferencesCtx(null)}
+      />
+    );
+  }
+
+  const inProject = cwd.type === 'project';
+
   return (
-    <div className="flex-1 flex flex-col h-full bg-white relative" onClick={closeMenu}>
+    <div className="flex-1 flex h-full bg-white relative" onClick={closeMenu}>
+    <div className="flex-1 flex flex-col min-w-0 h-full">
       <ToastBubble notice={notice} onClear={() => setNotice(null)} autoCloseMs={4000} />
       {/* Hidden file input for “Upload & AI classify” (Electron gives file.path) */}
       <input
@@ -456,6 +474,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
         newProjectInputRef={newProjectInputRef}
         goRootLabel={entityLabelAll}
         createLabel={entityLabel}
+        showAgentChat={false}
       />
 
       {/* Content */}
@@ -498,6 +517,8 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
             badgeByStatus={badgeByStatus}
             onSetProjectStatus={setProjectStatus}
             onOpenSnippetLinker={(p) => setSnippetLinkerCtx({ name: p.name, path: p.path })}
+            onOpenPreferences={(p) => setPreferencesCtx({ name: p.name, path: p.path })}
+            onOpenAgent={(p) => setChatProjectCtx({ name: p.name, path: p.path })}
           />
         ) : (
           <EntryTable
@@ -647,6 +668,17 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
         data={traceData}
         onClose={closeTrace}
       />
+
+    </div>
+
+    {/* AI Chat Overlay — fixed positioning, renders above everything */}
+    {chatProjectCtx && (
+      <ChatPanel
+        projectName={chatProjectCtx.name}
+        domain={normalizedDomain}
+        onClose={() => setChatProjectCtx(null)}
+      />
+    )}
     </div>
   );
 };

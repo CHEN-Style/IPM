@@ -1,12 +1,17 @@
-import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2, MessageSquare, Search, Wrench, X, Zap } from 'lucide-react';
+import React, { useState, useCallback } from 'react';
+import { ChevronDown, ChevronRight, ClipboardCopy, Check, Loader2, MessageSquare, Search, Wrench, X, Zap } from 'lucide-react';
 
 const TOOL_LABELS = {
   browse_project_structure: '浏览项目文件夹结构',
+  browse_structure: '浏览项目文件夹结构',
   query_classification_history: '查询分类历史',
+  query_history: '查询分类历史',
   inspect_folder_contents: '查看文件夹内容',
+  inspect_folder: '查看文件夹内容',
   get_file_source_info: '获取文件来源信息',
+  get_source_info: '获取文件来源信息',
   get_user_rules: '获取用户自定义规则',
+  get_preferences: '获取软偏好',
 };
 
 function toolLabel(name) {
@@ -26,7 +31,8 @@ function confidenceBar(c) {
 }
 
 function classifiedByLabel(cb) {
-  if (cb === 'fast-path') return '快速通道（规则匹配）';
+  if (cb === 'fast-path') return '快速通道（内置规则）';
+  if (cb === 'fast-path-user-rule') return '快速通道（用户规则）';
   if (cb === 'agent') return 'AI Agent（智能分析）';
   return cb || '未知';
 }
@@ -35,8 +41,66 @@ function tryParseJson(str) {
   try { return JSON.parse(str); } catch { return null; }
 }
 
-function ToolResultContent({ content }) {
+function HistoryItemCard({ item, index }) {
+  const statusLabel = item.status === 'accepted' ? '✅ 已接受' : item.status === 'rejected' ? '❌ 已拒绝' : '⏳ 待处理';
+  const statusColor = item.status === 'accepted' ? 'border-emerald-200 bg-emerald-50/40' : item.status === 'rejected' ? 'border-rose-200 bg-rose-50/40' : 'border-slate-200 bg-slate-50/40';
+
+  return (
+    <div className={`p-2 rounded border ${statusColor} text-xs space-y-0.5`}>
+      <div className="flex items-center gap-2">
+        <span className="font-medium text-slate-700">{item.fileName || '(unknown)'}</span>
+        <span className="text-slate-400">{statusLabel}</span>
+      </div>
+      <div className="text-slate-500">
+        <span className="text-slate-400">建议 →</span> {item.suggestedFolder || '(无)'}
+        {item.actualFolder && item.actualFolder !== item.suggestedFolder && (
+          <span className="ml-1"><span className="text-slate-400">实际 →</span> <span className="text-emerald-600 font-medium">{item.actualFolder}</span></span>
+        )}
+      </div>
+      {item.rationale && (
+        <div className="text-slate-500"><span className="text-slate-400">AI 理由：</span>{item.rationale}</div>
+      )}
+      {item.userFeedback && (
+        <div className="mt-1 p-1.5 bg-amber-50 border border-amber-200 rounded text-amber-800">
+          <span className="font-semibold">💬 用户反馈：</span>{item.userFeedback}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolResultContent({ content, toolName }) {
   const parsed = tryParseJson(content);
+
+  if (toolName === 'query_history' && Array.isArray(parsed)) {
+    if (!parsed.length) return <div className="text-xs text-slate-500 italic">无匹配的分类历史</div>;
+    return (
+      <div className="space-y-1.5">
+        {parsed.map((item, i) => (
+          <HistoryItemCard key={i} item={item} index={i} />
+        ))}
+      </div>
+    );
+  }
+
+  if (toolName === 'get_preferences' && Array.isArray(parsed)) {
+    if (!parsed.length) return <div className="text-xs text-slate-500 italic">无匹配的软偏好</div>;
+    return (
+      <div className="space-y-1">
+        {parsed.map((p, i) => (
+          <div key={i} className="p-2 rounded border border-indigo-100 bg-indigo-50/40 text-xs">
+            <div className="text-slate-700"><span className="text-slate-400">偏好：</span>{p.pattern || '(无描述)'}</div>
+            <div className="text-slate-600">
+              <span className="text-slate-400">目标 →</span> {p.folder || '(无)'}
+              <span className="ml-2 text-slate-400">强度：</span>
+              <span className={p.strength >= 0.7 ? 'text-indigo-600 font-semibold' : 'text-slate-500'}>{p.strength}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   if (Array.isArray(parsed)) {
     return (
       <div className="space-y-1">
@@ -47,8 +111,6 @@ function ToolResultContent({ content }) {
                 {item.relPath || item.name || item.fileName || ''}
                 {item.description ? <span className="text-slate-400"> — {item.description}</span> : null}
                 {typeof item.fileCount === 'number' ? <span className="text-slate-400"> ({item.fileCount} 个文件)</span> : null}
-                {item.userAction ? <span className={`ml-1 ${item.userAction === 'accepted' ? 'text-emerald-500' : 'text-rose-400'}`}>({item.userAction === 'accepted' ? '已接受' : '已拒绝'})</span> : null}
-                {item.classifiedTo ? <span className="text-slate-400"> → {item.classifiedTo}</span> : null}
               </span>
             ) : (
               String(item)
@@ -73,9 +135,8 @@ function ToolResultContent({ content }) {
   return <div className="text-xs text-slate-600 whitespace-pre-wrap break-all">{content || '（无内容）'}</div>;
 }
 
-function CollapsibleResult({ content }) {
-  const [open, setOpen] = useState(false);
-  const isLong = (content || '').length > 200;
+function CollapsibleResult({ content, toolName, defaultOpen }) {
+  const [open, setOpen] = useState(defaultOpen || false);
 
   return (
     <div className="mt-1.5 ml-6 border-l-2 border-slate-200 pl-3">
@@ -87,9 +148,9 @@ function CollapsibleResult({ content }) {
         {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
         返回结果
       </button>
-      {(open || !isLong) && (
-        <div className="mt-1 p-2 bg-slate-50 rounded text-xs max-h-60 overflow-y-auto">
-          <ToolResultContent content={content} />
+      {open && (
+        <div className="mt-1 p-2 bg-slate-50 rounded text-xs max-h-72 overflow-y-auto">
+          <ToolResultContent content={content} toolName={toolName} />
         </div>
       )}
     </div>
@@ -112,6 +173,35 @@ function TraceStepNode({ step, index }) {
             <div className="text-xs text-slate-600">
               <span className="text-slate-400">规则：</span>{step.rule}
             </div>
+            <div className="text-xs text-slate-600 mt-0.5">
+              <span className="text-slate-400">目标：</span>{step.target}
+            </div>
+            {step.rationale && (
+              <div className="text-xs text-slate-500 mt-0.5">{step.rationale}</div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (step.type === 'fast-path-user-rule') {
+    return (
+      <div className="flex gap-3">
+        <div className="flex flex-col items-center">
+          <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+            <Zap size={14} className="text-blue-600" />
+          </div>
+          <div className="w-px flex-1 bg-slate-200" />
+        </div>
+        <div className="pb-5 flex-1 min-w-0">
+          <div className="text-xs font-semibold text-blue-700">用户规则匹配</div>
+          <div className="mt-1 p-2.5 bg-blue-50/60 rounded border border-blue-100">
+            {step.ruleLabel && (
+              <div className="text-xs text-slate-600">
+                <span className="text-slate-400">规则：</span>{step.ruleLabel}
+              </div>
+            )}
             <div className="text-xs text-slate-600 mt-0.5">
               <span className="text-slate-400">目标：</span>{step.target}
             </div>
@@ -149,17 +239,21 @@ function TraceStepNode({ step, index }) {
   }
 
   if (step.type === 'tool-result') {
+    const hasUserFeedback = step.name === 'query_history' && checkHasUserFeedback(step.content);
     return (
       <div className="flex gap-3">
         <div className="flex flex-col items-center">
-          <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
-            <Search size={14} className="text-slate-400" />
+          <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${hasUserFeedback ? 'bg-amber-100' : 'bg-slate-100'}`}>
+            <Search size={14} className={hasUserFeedback ? 'text-amber-500' : 'text-slate-400'} />
           </div>
           <div className="w-px flex-1 bg-slate-200" />
         </div>
         <div className="pb-5 flex-1 min-w-0">
-          <div className="text-xs font-medium text-slate-500">{toolLabel(step.name)} 返回</div>
-          <CollapsibleResult content={step.content} />
+          <div className="text-xs font-medium text-slate-500">
+            {toolLabel(step.name)} 返回
+            {hasUserFeedback && <span className="ml-1.5 text-amber-600 font-semibold">（含用户反馈）</span>}
+          </div>
+          <CollapsibleResult content={step.content} toolName={step.name} defaultOpen={hasUserFeedback} />
         </div>
       </div>
     );
@@ -187,6 +281,59 @@ function TraceStepNode({ step, index }) {
   return null;
 }
 
+function checkHasUserFeedback(content) {
+  try {
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed)) return parsed.some((item) => item.userFeedback);
+  } catch { /* ignore */ }
+  return false;
+}
+
+function buildCopyText(suggestion, trace) {
+  const lines = [];
+  lines.push('=== AI 分类过程 ===');
+  if (suggestion) {
+    lines.push(`文件: ${suggestion.fileName || ''}`);
+    lines.push(`目标文件夹: ${suggestion.suggestedFolderRelPath || ''}`);
+    lines.push(`置信度: ${Math.round((suggestion.confidence ?? 0) * 100)}%`);
+    lines.push(`分类方式: ${classifiedByLabel(suggestion.classifiedBy)}`);
+    if (suggestion.rationale) lines.push(`理由: ${suggestion.rationale}`);
+    lines.push('');
+  }
+
+  if (!trace?.length) return lines.join('\n');
+
+  lines.push('=== 推理过程 ===');
+  let stepNum = 0;
+  for (const step of trace) {
+    if (step.type === 'reasoning') {
+      lines.push(`\n[AI 推理]`);
+      lines.push(step.content);
+    } else if (step.type === 'tool-call') {
+      stepNum++;
+      lines.push(`\n[Step ${stepNum}] 调用工具: ${step.name}`);
+      if (step.args && Object.keys(step.args).length > 0) {
+        lines.push(`参数: ${JSON.stringify(step.args)}`);
+      }
+    } else if (step.type === 'tool-result') {
+      lines.push(`[${step.name} 返回数据]`);
+      try {
+        const parsed = JSON.parse(step.content);
+        lines.push(JSON.stringify(parsed, null, 2));
+      } catch {
+        lines.push(step.content || '(空)');
+      }
+    } else if (step.type === 'fast-path' || step.type === 'fast-path-user-rule') {
+      lines.push(`\n[快速通道] ${step.type}`);
+      if (step.rule || step.ruleLabel) lines.push(`规则: ${step.ruleLabel || step.rule}`);
+      lines.push(`目标: ${step.target}`);
+      if (step.rationale) lines.push(`理由: ${step.rationale}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
 function groupTraceSteps(trace) {
   if (!Array.isArray(trace)) return [];
   const grouped = [];
@@ -210,6 +357,8 @@ function groupTraceSteps(trace) {
 }
 
 const ClassifyTraceView = ({ open, loading, data, onClose }) => {
+  const [copied, setCopied] = useState(false);
+
   if (!open) return null;
 
   const suggestion = data?.suggestion;
@@ -217,7 +366,16 @@ const ClassifyTraceView = ({ open, loading, data, onClose }) => {
   const error = data?.error;
   const grouped = groupTraceSteps(trace);
   const toolCallSteps = grouped.filter((s) => s.type === 'tool-call');
-  const isFastPath = trace.length > 0 && trace[0].type === 'fast-path';
+  const isFastPath = trace.length > 0 && (trace[0].type === 'fast-path' || trace[0].type === 'fast-path-user-rule');
+
+  const handleCopy = async () => {
+    const text = buildCopyText(suggestion, trace);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* ignore */ }
+  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30" onClick={onClose}>
@@ -233,13 +391,26 @@ const ClassifyTraceView = ({ open, loading, data, onClose }) => {
               AI 分类过程{suggestion?.fileName ? `：${suggestion.fileName}` : ''}
             </div>
           </div>
-          <button
-            type="button"
-            className="p-1 rounded hover:bg-slate-100 transition-colors"
-            onClick={onClose}
-          >
-            <X size={16} className="text-slate-400" />
-          </button>
+          <div className="flex items-center gap-1">
+            {!loading && !error && suggestion && (
+              <button
+                type="button"
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs transition-colors ${copied ? 'bg-emerald-50 text-emerald-600' : 'hover:bg-slate-100 text-slate-500'}`}
+                onClick={handleCopy}
+                title="复制完整思考过程"
+              >
+                {copied ? <Check size={13} /> : <ClipboardCopy size={13} />}
+                {copied ? '已复制' : '复制'}
+              </button>
+            )}
+            <button
+              type="button"
+              className="p-1 rounded hover:bg-slate-100 transition-colors"
+              onClick={onClose}
+            >
+              <X size={16} className="text-slate-400" />
+            </button>
+          </div>
         </div>
 
         {/* Body */}

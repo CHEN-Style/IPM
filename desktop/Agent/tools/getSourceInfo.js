@@ -1,49 +1,34 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-
-function safeReadJson(filePath, fallback = null) {
-  try {
-    if (!fs.existsSync(filePath)) return fallback;
-    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-  } catch {
-    return fallback;
-  }
-}
-
-function normalizeRelPathPosix(relPath) {
-  return String(relPath || '')
-    .replace(/\\/g, '/')
-    .replace(/^\/+/, '')
-    .replace(/\/+$/, '')
-    .replace(/\/{2,}/g, '/');
-}
+import { getProjectDb } from '../db/index.js';
+import { getSourceInfo } from '../db/sourceRecords.js';
 
 export function createGetSourceInfoTool(projectDir) {
   return tool(
     async ({ sourceRelPath }) => {
-      const normalized = normalizeRelPathPosix(sourceRelPath);
+      const normalized = String(sourceRelPath || '')
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '')
+        .replace(/\/+$/, '')
+        .replace(/\/{2,}/g, '/');
       if (!normalized) return 'sourceRelPath is empty.';
 
-      const recordPath = path.join(projectDir, 'meta', 'temp-source-record.json');
-      const doc = safeReadJson(recordPath, null);
-      const items =
-        doc && typeof doc === 'object' && Array.isArray(doc.items) ? doc.items : [];
-      const hit = items.find(
-        (x) => normalizeRelPathPosix(x?.sourceRelPath || '') === normalized,
-      );
+      const db = getProjectDb(projectDir);
+      const info = getSourceInfo(db, normalized);
 
-      if (!hit || typeof hit !== 'object') {
+      if (!info) {
         return `No source info found for "${normalized}". The file may have been added without tracking its origin.`;
       }
 
-      const info = {
-        sourceRelPath: normalized,
-        sourcePath: typeof hit.sourcePath === 'string' ? hit.sourcePath : '',
-        sourceDir: typeof hit.sourceDir === 'string' ? hit.sourceDir : '',
-      };
-      return JSON.stringify(info, null, 2);
+      return JSON.stringify(
+        {
+          sourceRelPath: normalized,
+          sourcePath: info.sourcePath || '',
+          sourceDir: info.sourceDir || '',
+        },
+        null,
+        2,
+      );
     },
     {
       name: 'get_source_info',

@@ -7,6 +7,7 @@ import { createQueryHistoryTool } from '../tools/queryHistory.js';
 import { createInspectFolderTool } from '../tools/inspectFolder.js';
 import { createGetSourceInfoTool } from '../tools/getSourceInfo.js';
 import { createGetUserRulesTool } from '../tools/getUserRules.js';
+import { createGetPreferencesTool } from '../tools/getPreferences.js';
 
 const MAX_RECURSION = 15;
 
@@ -76,7 +77,8 @@ export async function runClassifyAgent(input, signal) {
     createQueryHistoryTool(projectDir, projectName),
     createInspectFolderTool(projectDir),
     createGetSourceInfoTool(projectDir),
-    createGetUserRulesTool(),
+    createGetUserRulesTool(projectDir),
+    createGetPreferencesTool(projectDir),
   ];
 
   const model = createChatModel();

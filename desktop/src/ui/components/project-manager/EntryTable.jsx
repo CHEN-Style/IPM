@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Ban, Check, Folder, Info, Search, Wand2 } from 'lucide-react';
 import ExplorerTree from './ExplorerTree.jsx';
+import RejectPopover from './RejectPopover.jsx';
 
 const EntryTable = ({
   errorText,
@@ -33,6 +34,7 @@ const EntryTable = ({
   onToggleTree,
   onLoadTree,
 }) => {
+  const [rejectingItem, setRejectingItem] = useState(null);
   const isProjectCwd = cwd?.type === 'project';
   const getExt = (name) => {
     const base = String(name || '');
@@ -191,18 +193,30 @@ const EntryTable = ({
                         >
                           <Check size={12} /> 接受
                         </button>
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 rounded hover:bg-slate-50 transition-colors"
-                          onClick={(evt) => {
-                            evt.preventDefault();
-                            evt.stopPropagation();
-                            onRejectGhost?.(e._ghost?.sourceRelPath);
-                          }}
-                          title="放弃该建议"
-                        >
-                          <Ban size={12} /> 放弃
-                        </button>
+                        <div className="relative">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 rounded hover:bg-slate-50 transition-colors"
+                            onClick={(evt) => {
+                              evt.preventDefault();
+                              evt.stopPropagation();
+                              setRejectingItem(rejectingItem === e._ghost?.sourceRelPath ? null : e._ghost?.sourceRelPath);
+                            }}
+                            title="放弃该建议"
+                          >
+                            <Ban size={12} /> 放弃
+                          </button>
+                          {rejectingItem === e._ghost?.sourceRelPath && (
+                            <RejectPopover
+                              sourceRelPath={e._ghost?.sourceRelPath}
+                              onConfirm={(src, feedback) => {
+                                setRejectingItem(null);
+                                onRejectGhost?.(src, { userFeedback: feedback });
+                              }}
+                              onCancel={() => setRejectingItem(null)}
+                            />
+                          )}
+                        </div>
                         <button
                           type="button"
                           className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-violet-600 rounded hover:bg-violet-50 hover:border-violet-200 transition-colors"

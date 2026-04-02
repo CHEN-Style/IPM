@@ -71,13 +71,16 @@ const HistoryDropdown = ({ projectName, domain, activeSessionId, onSelect, onDel
     if (!confirm(`确定删除全部 ${sessions.length} 条历史对话？此操作不可恢复。`)) return;
     setClearing(true);
     try {
+      const failed = [];
       for (const s of sessions) {
         try {
           await window.ipm?.agent?.deleteSession?.(projectName, domain, s.id);
-        } catch { /* continue */ }
+        } catch {
+          failed.push(s);
+        }
       }
-      setSessions([]);
-      onClearAll?.();
+      setSessions(failed);
+      if (!failed.length) onClearAll?.();
     } finally {
       setClearing(false);
     }

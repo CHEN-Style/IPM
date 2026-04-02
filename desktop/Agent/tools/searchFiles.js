@@ -3,7 +3,7 @@ import path from 'node:path';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 
-const SYSTEM_DIRS = new Set(['meta', 'temp', 'snippets']);
+const SYSTEM_DIRS = new Set(['meta', 'snippets']);
 const MAX_RESULTS = 50;
 
 function searchRecursive(dirPath, relBase, query, ext, results) {

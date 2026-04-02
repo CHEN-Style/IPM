@@ -55,6 +55,31 @@ contextBridge.exposeInMainWorld('ipm', {
   screenshots: {
     saveClipboardImage: (projectName, token, opts = {}) => ipcRenderer.invoke('screenshots/saveClipboardImage', { projectName, token, ...opts }),
   },
+  knowledge: {
+    list: (projectName, filters = {}, opts = {}) => ipcRenderer.invoke('knowledge/list', { projectName, ...filters, ...opts }),
+    get: (projectName, id, opts = {}) => ipcRenderer.invoke('knowledge/get', { projectName, id, ...opts }),
+    create: (projectName, item, opts = {}) => ipcRenderer.invoke('knowledge/create', { projectName, ...item, ...opts }),
+    update: (projectName, id, patch, opts = {}) => ipcRenderer.invoke('knowledge/update', { projectName, id, patch, ...opts }),
+    delete: (projectName, id, opts = {}) => ipcRenderer.invoke('knowledge/delete', { projectName, id, ...opts }),
+    addLink: (projectName, itemId, targetPath, targetKind, opts = {}) =>
+      ipcRenderer.invoke('knowledge/addLink', { projectName, itemId, targetPath, targetKind, ...opts }),
+    removeLink: (projectName, linkId, opts = {}) => ipcRenderer.invoke('knowledge/removeLink', { projectName, linkId, ...opts }),
+    removeLinkByItem: (projectName, itemId, targetPath, opts = {}) =>
+      ipcRenderer.invoke('knowledge/removeLink', { projectName, itemId, targetPath, ...opts }),
+    getLinks: (projectName, itemId, opts = {}) => ipcRenderer.invoke('knowledge/getLinks', { projectName, itemId, ...opts }),
+    getLinkedItems: (projectName, targetPath, opts = {}) =>
+      ipcRenderer.invoke('knowledge/getLinkedItems', { projectName, targetPath, ...opts }),
+    search: (projectName, query, opts = {}) => ipcRenderer.invoke('knowledge/search', { projectName, query, ...opts }),
+    stats: (projectName, opts = {}) => ipcRenderer.invoke('knowledge/stats', { projectName, ...opts }),
+    createWebclip: (projectName, url, opts = {}) => ipcRenderer.invoke('knowledge/createWebclip', { projectName, url, ...opts }),
+    addWebclipImage: (projectName, itemId, pngBuffer, opts = {}) => ipcRenderer.invoke('knowledge/addWebclipImage', { projectName, itemId, pngBuffer, ...opts }),
+    subscribe: (cb) => {
+      if (typeof cb !== 'function') return () => {};
+      const handler = (_evt, payload) => cb(payload);
+      ipcRenderer.on('knowledge:changed', handler);
+      return () => ipcRenderer.removeListener('knowledge:changed', handler);
+    },
+  },
   floating: {
     copyToTemp: (projectName, srcPath, fileName, opts = {}) =>
       ipcRenderer.invoke('floating/copyToTemp', { projectName, srcPath, fileName, ...opts }),
@@ -169,6 +194,59 @@ contextBridge.exposeInMainWorld('ipm', {
       const handler = (_e, data) => callback(data);
       ipcRenderer.on('projectAgent:stream-event', handler);
       return () => ipcRenderer.removeListener('projectAgent:stream-event', handler);
+    },
+  },
+  supervisor: {
+    sendMessage: (message) =>
+      ipcRenderer.invoke('supervisor/sendMessage', { message }),
+    executePlan: (plan, selectedIds) =>
+      ipcRenderer.invoke('supervisor/executePlan', { plan, selectedIds }),
+    cancelPlan: () =>
+      ipcRenderer.invoke('supervisor/cancelPlan'),
+    endSession: () =>
+      ipcRenderer.invoke('supervisor/endSession'),
+    getSessionInfo: () =>
+      ipcRenderer.invoke('supervisor/getSessionInfo'),
+    resumeSession: (sessionId) =>
+      ipcRenderer.invoke('supervisor/resumeSession', { sessionId }),
+    listSessions: (opts = {}) =>
+      ipcRenderer.invoke('supervisor/listSessions', opts),
+    loadSession: (sessionId) =>
+      ipcRenderer.invoke('supervisor/loadSession', { sessionId }),
+    deleteSession: (sessionId) =>
+      ipcRenderer.invoke('supervisor/deleteSession', { sessionId }),
+    setAutonomousMode: (enabled) =>
+      ipcRenderer.invoke('supervisor/setAutonomousMode', { enabled }),
+    getNotifications: (opts = {}) =>
+      ipcRenderer.invoke('supervisor/getNotifications', opts),
+    markNotificationRead: (id, all = false) =>
+      ipcRenderer.invoke('supervisor/markNotificationRead', { id, all }),
+    listPreferenceCandidates: (opts = {}) =>
+      ipcRenderer.invoke('supervisor/listPreferenceCandidates', opts),
+    acceptPreferenceCandidate: (id) =>
+      ipcRenderer.invoke('supervisor/acceptPreferenceCandidate', { id }),
+    dismissPreferenceCandidate: (id) =>
+      ipcRenderer.invoke('supervisor/dismissPreferenceCandidate', { id }),
+    checkPreferenceExtraction: () =>
+      ipcRenderer.invoke('supervisor/checkPreferenceExtraction'),
+    runPreferenceExtraction: () =>
+      ipcRenderer.invoke('supervisor/runPreferenceExtraction'),
+    rejectPreferenceExtraction: () =>
+      ipcRenderer.invoke('supervisor/rejectPreferenceExtraction'),
+    listSkills: () =>
+      ipcRenderer.invoke('supervisor/listSkills'),
+    getSkill: (skillName) =>
+      ipcRenderer.invoke('supervisor/getSkill', { skillName }),
+    setSkillMaturity: (skillName, maturity) =>
+      ipcRenderer.invoke('supervisor/setSkillMaturity', { skillName, maturity }),
+    deleteSkill: (skillName) =>
+      ipcRenderer.invoke('supervisor/deleteSkill', { skillName }),
+    listSkillExecutions: (opts = {}) =>
+      ipcRenderer.invoke('supervisor/listSkillExecutions', opts),
+    onStreamEvent: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('supervisor:stream-event', handler);
+      return () => ipcRenderer.removeListener('supervisor:stream-event', handler);
     },
   },
 });

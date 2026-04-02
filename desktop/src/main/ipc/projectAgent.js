@@ -179,15 +179,26 @@ export function registerProjectAgentIpc({ ipcMain, getWorkspaceDirOrThrow, syncS
 }
 
 async function streamSessionEvents(generator, sender, session) {
-  for await (const event of generator) {
+  try {
+    for await (const event of generator) {
+      try {
+        sender.send('projectAgent:stream-event', {
+          sessionId: session.threadId,
+          ...event,
+        });
+      } catch {
+        break;
+      }
+    }
+  } catch (e) {
     try {
       sender.send('projectAgent:stream-event', {
         sessionId: session.threadId,
-        ...event,
+        type: 'error',
+        error: e.message || 'Unknown stream error',
       });
-    } catch {
-      break;
-    }
+    } catch { /* sender destroyed */ }
+    throw e;
   }
 }
 

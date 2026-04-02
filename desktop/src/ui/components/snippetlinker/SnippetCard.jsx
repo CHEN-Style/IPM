@@ -1,5 +1,5 @@
 import React, { forwardRef } from 'react';
-import { GripVertical, Tag, FileText } from 'lucide-react';
+import { GripVertical, Tag, FileText, Image, StickyNote } from 'lucide-react';
 
 export const SnippetCard = forwardRef(
   (
@@ -80,9 +80,27 @@ export const SnippetCard = forwardRef(
           <h3 className="font-semibold text-gray-800 text-sm truncate">{snippet.title}</h3>
         </div>
 
+        {/* Type badge */}
+        {snippet._type && snippet._type !== 'snippet' && (
+          <div className="ml-[24px] -mt-0.5 mb-1">
+            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold uppercase rounded ${
+              snippet._type === 'screenshot' ? 'bg-violet-50 text-violet-600' : snippet._type === 'note' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'
+            }`}>
+              {snippet._type === 'screenshot' ? <Image size={10} /> : <StickyNote size={10} />}
+              {snippet._type === 'screenshot' ? '截图' : '笔记'}
+            </span>
+          </div>
+        )}
+
         {/* Middle */}
         <div className="mt-2.5 flex-1 min-h-0">
-          <p className="text-xs text-gray-500 line-clamp-3 leading-relaxed">{snippet.content}</p>
+          {snippet._type === 'screenshot' && snippet._absolutePath ? (
+            <div className="h-full rounded overflow-hidden bg-gray-100 flex items-center justify-center">
+              <img src={`ipm-file:///${snippet._absolutePath.replace(/\\/g, '/')}`} alt={snippet.title} className="max-h-full max-w-full object-contain" />
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500 line-clamp-3 leading-relaxed">{snippet.content}</p>
+          )}
         </div>
 
         {/* Bottom */}

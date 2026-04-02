@@ -8,6 +8,8 @@ export function undoAction(projectDir, logEntry, db) {
   switch (event) {
     case 'agent.move_file':
       return undoMoveFile(projectDir, data, undoData, db, id);
+    case 'agent.move_files_batch':
+      return undoMoveFilesBatch(projectDir, data, undoData, db, id);
     case 'agent.rename_file':
       return undoRenameFile(projectDir, data, undoData, db, id);
     case 'agent.create_folder':
@@ -17,6 +19,37 @@ export function undoAction(projectDir, logEntry, db) {
     default:
       return { ok: false, error: `不支持撤销的操作类型: ${event}` };
   }
+}
+
+function undoMoveFilesBatch(projectDir, data, undoData, db, logId) {
+  const ops = undoData?.ops;
+  if (!Array.isArray(ops) || !ops.length) return { ok: false, error: '缺少批量移动路径信息' };
+
+  let succeeded = 0;
+  let failed = 0;
+  const errors = [];
+  for (const op of ops.reverse()) {
+    const srcAbs = path.join(projectDir, op.to);
+    const destAbs = path.join(projectDir, op.from);
+    try {
+      if (!fs.existsSync(srcAbs)) { failed++; errors.push(`${op.to} 不存在`); continue; }
+      if (fs.existsSync(destAbs)) { failed++; errors.push(`${op.from} 已有文件`); continue; }
+      const destDir = path.dirname(destAbs);
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      fs.renameSync(srcAbs, destAbs);
+      succeeded++;
+    } catch (e) {
+      failed++;
+      errors.push(`${op.to}: ${e.message}`);
+    }
+  }
+
+  if (succeeded > 0) markUndone(db, logId);
+
+  if (failed === 0) {
+    return { ok: true, message: `已撤销批量移动：${succeeded} 个文件已还原` };
+  }
+  return { ok: succeeded > 0, message: `批量撤销：${succeeded} 个成功，${failed} 个失败`, errors };
 }
 
 function undoMoveFile(projectDir, data, undoData, db, logId) {

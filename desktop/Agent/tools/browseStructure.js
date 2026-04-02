@@ -32,7 +32,7 @@ export function createBrowseStructureTool(projectDir) {
           ? doc.folders
           : {};
 
-      const candidates = Object.values(folders)
+      const allFolders = Object.values(folders)
         .filter((f) => f && typeof f === 'object')
         .map((f) => ({
           relPath: String(f.relPath || ''),
@@ -40,7 +40,10 @@ export function createBrowseStructureTool(projectDir) {
           description: typeof f.description === 'string' ? f.description : '',
           system: Boolean(f.system),
         }))
-        .filter((f) => f.relPath && f.name && !f.system)
+        .filter((f) => f.relPath && f.name);
+
+      const candidates = allFolders
+        .filter((f) => !f.system)
         .sort((a, b) => a.relPath.length - b.relPath.length)
         .map((f) => ({
           relPath: f.relPath,
@@ -49,8 +52,27 @@ export function createBrowseStructureTool(projectDir) {
           fileCount: countFiles(path.join(projectDir, f.relPath)),
         }));
 
-      if (!candidates.length) return 'No folder candidates found in structure.json.';
-      return JSON.stringify(candidates, null, 2);
+      const tempDir = path.join(projectDir, 'temp');
+      const tempFileCount = countFiles(tempDir);
+
+      const result = { targetFolders: candidates };
+      if (tempFileCount > 0) {
+        let tempFiles = [];
+        try {
+          tempFiles = fs.readdirSync(tempDir, { withFileTypes: true })
+            .filter((e) => e.isFile())
+            .map((e) => e.name)
+            .slice(0, 30);
+        } catch { /* ignore */ }
+        result.pendingInTemp = {
+          fileCount: tempFileCount,
+          note: 'These files in temp/ are awaiting classification. You can use inspect_folder, search_files, or move_files to help organise them.',
+          sampleFiles: tempFiles,
+        };
+      }
+
+      if (!candidates.length && !tempFileCount) return 'No folder candidates found in structure.json.';
+      return JSON.stringify(result, null, 2);
     },
     {
       name: 'browse_structure',

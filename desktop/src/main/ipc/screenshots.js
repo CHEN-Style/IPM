@@ -22,8 +22,9 @@ export function registerScreenshotsIpc({
 }) {
   if (!ipcMain) throw new Error('registerScreenshotsIpc: ipcMain is required');
 
-  // ===== Screenshots: clipboard image -> png + snippets/screenshots + snippets/snippets-meta/screenshots-record.json index =====
+  // ===== [DEPRECATED] Use knowledge/create with type=screenshot instead =====
   ipcMain.handle('screenshots/saveClipboardImage', async (_evt, payload) => {
+    console.warn('[DEPRECATED] screenshots/saveClipboardImage — use knowledge/create with type=screenshot instead');
     const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
     const token = String(payload?.token ?? '');
     if (!token) throw new Error('截图 token 为空');

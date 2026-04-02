@@ -62,6 +62,8 @@ export function createMoveFilesTool(projectDir, ctx = {}) {
       let succeeded = 0;
       let failed = 0;
       let lastLogId = null;
+      const successOps = [];
+      const db = getProjectDb(projectDir);
       for (const op of selected) {
         try {
           const srcAbs = path.join(projectDir, op.from);
@@ -72,8 +74,9 @@ export function createMoveFilesTool(projectDir, ctx = {}) {
           if (fs.existsSync(destAbs)) throw new Error(`Destination exists: ${op.to}`);
           fs.renameSync(srcAbs, destAbs);
           succeeded++;
+          successOps.push({ from: op.from, to: op.to });
           try {
-            lastLogId = appendLog(getProjectDb(projectDir), 'agent.move_file', { from: op.from, to: op.to }, {
+            lastLogId = appendLog(db, 'agent.move_file', { from: op.from, to: op.to }, {
               sessionId: ctx.sessionId || '',
               undoData: { from: op.from, to: op.to },
             });
@@ -81,6 +84,15 @@ export function createMoveFilesTool(projectDir, ctx = {}) {
         } catch {
           failed++;
         }
+      }
+
+      if (successOps.length > 1) {
+        try {
+          lastLogId = appendLog(db, 'agent.move_files_batch',
+            { files: successOps.map((o) => o.from), targetFolder },
+            { sessionId: ctx.sessionId || '', undoData: { ops: successOps } },
+          );
+        } catch { /* best effort */ }
       }
 
       const msg = `移动完成：${succeeded} 个文件成功${failed ? `，${failed} 个失败` : ''}。`;

@@ -55,10 +55,16 @@ const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
       const api = window.ipm?.aiStorage?.accept;
       if (!api) return;
       try {
-        await api(cwd.name, sourceRelPath, domainOpts);
+        const res = await api(cwd.name, sourceRelPath, domainOpts);
         await refreshEntries?.();
         await refreshGhosts();
-        setNotice?.({ variant: 'success', message: '已移动（AI 建议已接受）' });
+        if (res?.stale) {
+          setNotice?.({ variant: 'info', message: '源文件已不在暂存区，本条建议已自动关闭' });
+        } else if (res?.alreadyApplied) {
+          setNotice?.({ variant: 'success', message: '文件已在目标文件夹，建议已标记为已接受' });
+        } else {
+          setNotice?.({ variant: 'success', message: '已移动（AI 建议已接受）' });
+        }
       } catch (e) {
         setNotice?.({ variant: 'error', message: e?.message || String(e) });
       }
@@ -91,7 +97,11 @@ const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
         const res = await api(cwd.name, { folderRelPath: cwd.relPath || '', ...domainOpts });
         await refreshEntries?.();
         await refreshGhosts();
-        setNotice?.({ variant: 'success', message: `已接受 ${res?.accepted || 0} 个，失败 ${res?.failed || 0} 个` });
+        const parts = [`已接受 ${res?.accepted || 0} 个`];
+        if (res?.alreadyApplied) parts.push(`其中 ${res.alreadyApplied} 个已在目标位置`);
+        if (res?.staleClosed) parts.push(`已清理失效建议 ${res.staleClosed} 条`);
+        if (res?.failed) parts.push(`失败 ${res.failed} 个`);
+        setNotice?.({ variant: 'success', message: parts.join('；') });
       } catch (e) {
         setNotice?.({ variant: 'error', message: e?.message || String(e) });
       }
@@ -124,7 +134,11 @@ const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
         const res = await api(cwd.name, { ...domainOpts });
         await refreshEntries?.();
         await refreshGhosts();
-        setNotice?.({ variant: 'success', message: `已接受 ${res?.accepted || 0} 个，失败 ${res?.failed || 0} 个` });
+        const parts = [`已接受 ${res?.accepted || 0} 个`];
+        if (res?.alreadyApplied) parts.push(`其中 ${res.alreadyApplied} 个已在目标位置`);
+        if (res?.staleClosed) parts.push(`已清理失效建议 ${res.staleClosed} 条`);
+        if (res?.failed) parts.push(`失败 ${res.failed} 个`);
+        setNotice?.({ variant: 'success', message: parts.join('；') });
       } catch (e) {
         setNotice?.({ variant: 'error', message: e?.message || String(e) });
       }
@@ -157,7 +171,11 @@ const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
         const res = await api(cwd.name, { folderRelPath, ...domainOpts });
         await refreshEntries?.();
         await refreshGhosts();
-        setNotice?.({ variant: 'success', message: `已接受 ${res?.accepted || 0} 个，失败 ${res?.failed || 0} 个` });
+        const parts = [`已接受 ${res?.accepted || 0} 个`];
+        if (res?.alreadyApplied) parts.push(`其中 ${res.alreadyApplied} 个已在目标位置`);
+        if (res?.staleClosed) parts.push(`已清理失效建议 ${res.staleClosed} 条`);
+        if (res?.failed) parts.push(`失败 ${res.failed} 个`);
+        setNotice?.({ variant: 'success', message: parts.join('；') });
       } catch (e) {
         setNotice?.({ variant: 'error', message: e?.message || String(e) });
       }

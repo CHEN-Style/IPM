@@ -14,6 +14,129 @@ export function migrateJsonToSqlite(db, projectDir) {
   return migrated;
 }
 
+export function migrateSnippetsJsonToSqlite(db, projectDir) {
+  const snippetsMetaDir = path.join(projectDir, 'snippets', 'snippets-meta');
+  const migrated = { snippets: 0, screenshots: 0, links: 0 };
+
+  migrateClipboardRecord(db, snippetsMetaDir, migrated);
+  migrateScreenshotRecord(db, snippetsMetaDir, migrated);
+
+  return migrated;
+}
+
+function norm(p) {
+  return String(p || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '').replace(/\/{2,}/g, '/');
+}
+
+function migrateClipboardRecord(db, snippetsMetaDir, stats) {
+  const filePath = path.join(snippetsMetaDir, 'clipboard-record.json');
+  if (!fs.existsSync(filePath)) return;
+
+  try {
+    const doc = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    const items = Array.isArray(doc?.items) ? doc.items : [];
+    if (!items.length) return;
+
+    const itemStmt = db.prepare(`
+      INSERT OR IGNORE INTO knowledge_items (id, type, title, content_text, content_path, summary, tags, importance, source_kind, pinned, archived, created_at, updated_at)
+      VALUES (@id, @type, @title, @content_text, @content_path, @summary, @tags, @importance, @source_kind, @pinned, @archived, @created_at, @updated_at)
+    `);
+    const linkStmt = db.prepare(`
+      INSERT OR IGNORE INTO knowledge_links (item_id, target_path, target_kind, created_at)
+      VALUES (@item_id, @target_path, @target_kind, @created_at)
+    `);
+
+    const insertAll = db.transaction(() => {
+      for (const it of items) {
+        const id = String(it.id || '');
+        if (!id) continue;
+        const now = it.createdAt || new Date().toISOString();
+        const tags = Array.isArray(it.tags) ? it.tags.map((t) => String(t)).filter(Boolean) : [];
+
+        itemStmt.run({
+          id,
+          type: 'snippet',
+          title: String(it.title || ''),
+          content_text: String(it.content?.preview || ''),
+          content_path: norm(it.content?.relPath || ''),
+          summary: String(it.summary || ''),
+          tags: JSON.stringify(tags),
+          importance: it.importance || null,
+          source_kind: String(it.source?.kind || 'clipboardText'),
+          pinned: it.pinned ? 1 : 0,
+          archived: it.archived ? 1 : 0,
+          created_at: now,
+          updated_at: it.updatedAt || now,
+        });
+        stats.snippets++;
+
+        if (it.linkedTo && typeof it.linkedTo === 'object' && it.linkedTo.relPath) {
+          const targetPath = norm(it.linkedTo.relPath);
+          if (targetPath) {
+            linkStmt.run({
+              item_id: id,
+              target_path: targetPath,
+              target_kind: String(it.linkedTo.kind || 'dir'),
+              created_at: now,
+            });
+            stats.links++;
+          }
+        }
+      }
+    });
+
+    insertAll();
+  } catch (e) {
+    console.error('[migrate] Failed to migrate clipboard-record.json:', e.message);
+  }
+}
+
+function migrateScreenshotRecord(db, snippetsMetaDir, stats) {
+  const filePath = path.join(snippetsMetaDir, 'screenshots-record.json');
+  if (!fs.existsSync(filePath)) return;
+
+  try {
+    const doc = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    const items = Array.isArray(doc?.items) ? doc.items : [];
+    if (!items.length) return;
+
+    const itemStmt = db.prepare(`
+      INSERT OR IGNORE INTO knowledge_items (id, type, title, content_text, content_path, summary, tags, importance, source_kind, pinned, archived, created_at, updated_at)
+      VALUES (@id, @type, @title, @content_text, @content_path, @summary, @tags, @importance, @source_kind, @pinned, @archived, @created_at, @updated_at)
+    `);
+
+    const insertAll = db.transaction(() => {
+      for (const it of items) {
+        const id = String(it.id || '');
+        if (!id) continue;
+        const now = it.createdAt || new Date().toISOString();
+        const tags = Array.isArray(it.tags) ? it.tags.map((t) => String(t)).filter(Boolean) : [];
+
+        itemStmt.run({
+          id,
+          type: 'screenshot',
+          title: String(it.title || '截图'),
+          content_text: '',
+          content_path: norm(it.content?.relPath || ''),
+          summary: String(it.summary || ''),
+          tags: JSON.stringify(tags),
+          importance: it.importance || null,
+          source_kind: String(it.source?.kind || 'clipboardImage'),
+          pinned: it.pinned ? 1 : 0,
+          archived: it.archived ? 1 : 0,
+          created_at: now,
+          updated_at: it.updatedAt || now,
+        });
+        stats.screenshots++;
+      }
+    });
+
+    insertAll();
+  } catch (e) {
+    console.error('[migrate] Failed to migrate screenshots-record.json:', e.message);
+  }
+}
+
 function migrateSuggestions(db, metaDir, stats) {
   const filePath = path.join(metaDir, 'ai-storage.json');
   if (!fs.existsSync(filePath)) return;

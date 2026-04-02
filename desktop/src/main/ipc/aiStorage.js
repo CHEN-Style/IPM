@@ -8,6 +8,82 @@ import { appendLog } from '../../../Agent/db/activityLog.js';
 const DECAY_STEP = 0.1;
 const DECAY_FLOOR = 0.1;
 
+/** When temp source is gone: if file already exists at suggested target, treat as accepted; else mark stale. */
+function acceptOrResolveStaleWhenSourceMissing({
+  projectDir,
+  projectName,
+  s,
+  sourceRelPath,
+  targetRel,
+  resolveInside,
+  sanitizeFileName,
+  setAiSuggestionStatus,
+  getProjectDb,
+  appendLog,
+  appendClassifyEvent,
+  lookupSourceInfo,
+}) {
+  const baseName = sanitizeFileName(s.fileName || path.basename(sourceRelPath)) || path.basename(sourceRelPath);
+  const destRelJoined = `${targetRel}/${baseName}`.replace(/\\/g, '/');
+  let destAbs;
+  try {
+    destAbs = resolveInside(projectDir, destRelJoined);
+  } catch {
+    destAbs = null;
+  }
+  const now = new Date().toISOString();
+
+  if (destAbs && fs.existsSync(destAbs) && fs.statSync(destAbs).isFile()) {
+    const movedToRelPath = String(path.relative(projectDir, destAbs)).split(path.sep).join('/');
+    const updated = setAiSuggestionStatus(projectDir, projectName, sourceRelPath, {
+      status: 'accepted',
+      acceptedAt: now,
+      movedToRelPath,
+      targetRelPath: targetRel,
+    });
+    try {
+      const db = getProjectDb(projectDir);
+      appendLog(db, 'aiStorage.accepted', {
+        ts: now,
+        projectName,
+        sourceRelPath,
+        targetRelPath: targetRel,
+        movedToRelPath,
+        note: 'source_already_moved',
+      });
+    } catch {
+      // ignore
+    }
+    try {
+      const src = lookupSourceInfo(projectDir, sourceRelPath);
+      appendClassifyEvent(projectDir, {
+        event: 'classify.accepted',
+        fileName: s.fileName || path.basename(sourceRelPath),
+        ext: s.ext || '',
+        sourcePath: src?.sourcePath || '',
+        sourceDir: src?.sourceDir || '',
+        suggestedFolder: s.suggestedFolderRelPath || '',
+        rationale: s.rationale || '',
+        confidence: s.confidence ?? null,
+        classifiedBy: s.classifiedBy || '',
+        actualFolder: targetRel,
+        movedToRelPath,
+        userFeedback: null,
+      });
+    } catch {
+      // non-critical
+    }
+    return { kind: 'already_applied', movedToRelPath, suggestion: updated };
+  }
+
+  const updated = setAiSuggestionStatus(projectDir, projectName, sourceRelPath, {
+    status: 'stale',
+    rejectedAt: now,
+    userFeedback: '源文件已不在 temp，可能已通过其他方式移动；本条建议已自动关闭。',
+  });
+  return { kind: 'stale', suggestion: updated };
+}
+
 function decayPreferencesOnReject(projectDir, suggestion) {
   if (!suggestion) return;
   const fileName = suggestion.fileName || '';
@@ -123,7 +199,37 @@ export function registerAiStorageIpc({
     const targetRel = ensureTargetFolderIsAllowedOrThrow(projectDir, s.suggestedFolderRelPath);
 
     const srcAbs = resolveInside(projectDir, srcRel);
-    if (!fs.existsSync(srcAbs)) throw new Error('源文件不存在（可能已被移动或删除）');
+    if (!fs.existsSync(srcAbs)) {
+      const resolved = acceptOrResolveStaleWhenSourceMissing({
+        projectDir,
+        projectName,
+        s,
+        sourceRelPath,
+        targetRel,
+        resolveInside,
+        sanitizeFileName,
+        setAiSuggestionStatus,
+        getProjectDb,
+        appendLog,
+        appendClassifyEvent,
+        lookupSourceInfo,
+      });
+      if (resolved.kind === 'already_applied') {
+        return {
+          ok: true,
+          projectName,
+          movedToRelPath: resolved.movedToRelPath,
+          suggestion: resolved.suggestion,
+          alreadyApplied: true,
+        };
+      }
+      return {
+        ok: true,
+        projectName,
+        stale: true,
+        suggestion: resolved.suggestion,
+      };
+    }
     const st = fs.statSync(srcAbs);
     if (!st.isFile()) throw new Error('源路径不是文件');
 
@@ -187,6 +293,8 @@ export function registerAiStorageIpc({
     const all = listAiSuggestions(projectDir, projectName, { status: 'pending', folderRelPath });
     let accepted = 0;
     let failed = 0;
+    let staleClosed = 0;
+    let alreadyApplied = 0;
     for (const s of all) {
       try {
         // reuse accept logic by direct invocation of internal operations
@@ -196,7 +304,29 @@ export function registerAiStorageIpc({
         const srcRel = ensureSourceIsTempOrThrow(sourceRelPath);
         const targetRel = ensureTargetFolderIsAllowedOrThrow(projectDir, s.suggestedFolderRelPath);
         const srcAbs = resolveInside(projectDir, srcRel);
-        if (!fs.existsSync(srcAbs)) throw new Error('源文件不存在');
+        if (!fs.existsSync(srcAbs)) {
+          const resolved = acceptOrResolveStaleWhenSourceMissing({
+            projectDir,
+            projectName,
+            s,
+            sourceRelPath,
+            targetRel,
+            resolveInside,
+            sanitizeFileName,
+            setAiSuggestionStatus,
+            getProjectDb,
+            appendLog,
+            appendClassifyEvent,
+            lookupSourceInfo,
+          });
+          if (resolved.kind === 'already_applied') {
+            alreadyApplied += 1;
+            accepted += 1;
+          } else {
+            staleClosed += 1;
+          }
+          continue;
+        }
         const st = fs.statSync(srcAbs);
         if (!st.isFile()) throw new Error('源不是文件');
         const targetDirAbs = resolveInside(projectDir, targetRel);
@@ -236,7 +366,7 @@ export function registerAiStorageIpc({
         failed += 1;
       }
     }
-    return { ok: true, projectName, accepted, failed };
+    return { ok: true, projectName, accepted, failed, staleClosed, alreadyApplied };
   });
 
   ipcMain.handle('aiStorage/rejectAll', async (_evt, payload) => {

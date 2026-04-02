@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   ArrowRight,
   Check,
@@ -93,6 +93,12 @@ const ActionPlanCard = ({ plan, onExecute, onCancel, executed }) => {
   const [checkedSet, setCheckedSet] = useState(() => new Set(ops.map((_, i) => i)));
   const [executing, setExecuting] = useState(false);
   const [results, setResults] = useState(null);
+
+  useEffect(() => {
+    const nextOps = plan?.operations || [];
+    setCheckedSet(new Set(nextOps.map((_, i) => i)));
+    setResults(null);
+  }, [plan]);
 
   const toggleCheck = useCallback((index) => {
     setCheckedSet((prev) => {

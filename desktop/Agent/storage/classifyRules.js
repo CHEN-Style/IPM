@@ -119,3 +119,48 @@ export function incrementHitCount(projectDir, ruleId) {
   r.updatedAt = new Date().toISOString();
   writeDoc(projectDir, doc);
 }
+
+const SEED_RULES_WORK = [
+  { label: '发票/收据 → 收到资料', targetFolder: '收到资料', confidence: 0.88, conditions: { nameIncludes: ['发票', 'invoice', 'receipt'] } },
+  { label: '会议纪要/会议记录 → 过程文档', targetFolder: '过程文档', confidence: 0.92, conditions: { nameIncludes: ['会议纪要', 'meeting minutes', '会议记录'] } },
+  { label: '备忘录 → 过程文档', targetFolder: '过程文档', confidence: 0.88, conditions: { nameIncludes: ['备忘录', 'memo', 'memorandum'] } },
+  { label: '工作底稿/草稿 → 过程文档', targetFolder: '过程文档', confidence: 0.85, conditions: { nameIncludes: ['工作底稿', 'draft', '草稿'] } },
+  { label: '笔录/谈话记录 → 过程文档', targetFolder: '过程文档', confidence: 0.88, conditions: { nameIncludes: ['笔录', '谈话记录', 'interview record'] } },
+  { label: '研究/调研/分析报告 → 调研研究', targetFolder: '调研研究', confidence: 0.88, conditions: { nameIncludes: ['研究', '调研', '分析', 'report', 'analysis'] } },
+  { label: '案例/判例 → 调研研究', targetFolder: '调研研究', confidence: 0.85, conditions: { nameIncludes: ['案例', 'case study', '判例'] } },
+  { label: '法规/法律文件 → 调研研究', targetFolder: '调研研究', confidence: 0.85, conditions: { nameIncludes: ['法规', '法律', 'regulation', 'statute'] } },
+  { label: '交付/终版/成果 → 交付成果', targetFolder: '交付成果', confidence: 0.90, conditions: { nameIncludes: ['交付', 'final', 'deliverable', '成果', '终版'] } },
+  { label: '意见书/法律意见 → 交付成果', targetFolder: '交付成果', confidence: 0.90, conditions: { nameIncludes: ['意见书', '法律意见', 'legal opinion'] } },
+  { label: '思维导图 → 调研研究', targetFolder: '调研研究', confidence: 0.85, conditions: { exts: ['xmind', 'mindmap'] } },
+];
+
+/**
+ * Seed default hard rules into a newly created project/case.
+ * Only writes if classify-rules.json does not yet exist (idempotent).
+ * @param {string} projectDir - absolute path to the project directory
+ * @param {'projects'|'cases'} [domain] - workspace domain (study skipped)
+ */
+export function seedDefaultRules(projectDir, domain) {
+  if (domain === 'study') return;
+  const p = getClassifyRulesPath(projectDir);
+  if (fs.existsSync(p)) return;
+
+  const now = new Date().toISOString();
+  const seeds = SEED_RULES_WORK;
+  const rules = seeds.map((s, i) => ({
+    id: genId(),
+    enabled: true,
+    source: 'system_seed',
+    targetFolder: s.targetFolder,
+    conditions: normalizeConditions(s.conditions),
+    confidence: s.confidence,
+    priority: (seeds.length - i) * 10,
+    label: s.label,
+    hitCount: 0,
+    createdAt: now,
+    updatedAt: now,
+  }));
+
+  const doc = { schemaVersion: SCHEMA_VERSION, rules };
+  writeDoc(projectDir, doc);
+}

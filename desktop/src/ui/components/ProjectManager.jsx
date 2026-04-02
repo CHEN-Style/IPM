@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import ToastBubble from './ToastBubble.jsx';
-import SnippetLinkerMockPage from './snippetlinker/SnippetLinkerMockPage.jsx';
+
+import KnowledgePage from './knowledge/KnowledgePage.jsx';
 import FolderDetailPanel from './project-manager/FolderDetailPanel.jsx';
 import AIGhostOverview from './project-manager/AIGhostOverview.jsx';
 import HeaderBar from './project-manager/HeaderBar.jsx';
@@ -23,6 +23,7 @@ import useClassifyPipeline from './project-manager/hooks/useClassifyPipeline.js'
 import ClassifyTraceView from './project-manager/ClassifyTraceView.jsx';
 import PreferencesPage from './project-manager/PreferencesPage.jsx';
 import ChatPanel from './agent-chat/ChatPanel.jsx';
+import { useToast } from '../hooks/useToast.js';
 import { fileDecor, folderDecor, fmtBytes, fmtTime } from './project-manager/utils.js';
 
 const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
@@ -36,6 +37,13 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
   const entityApi = isCases ? window.ipm?.cases : isStudy ? null : window.ipm?.projects;
 
   const [notice, setNotice] = useState(null); // {variant,message}
+  const { showToast } = useToast();
+  useEffect(() => {
+    if (notice) {
+      showToast(notice.message || String(notice), notice.variant || 'info');
+      setNotice(null);
+    }
+  }, [notice, showToast]);
   const [fileFilters, setFileFilters] = useState([]);
   const [filterPersistent, setFilterPersistent] = useState(false);
   const [chatProjectCtx, setChatProjectCtx] = useState(null);
@@ -50,7 +58,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
     badgeByStatus,
     setProjectStatus,
   } = useProjects({ normalizedDomain, isStudy, entityApi, setNotice });
-  const [snippetLinkerCtx, setSnippetLinkerCtx] = useState(null); // { name, path } | null
+  const [knowledgeCtx, setKnowledgeCtx] = useState(null); // { name, path } | null
   const {
     cwd,
     setCwd,
@@ -397,17 +405,16 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
     refreshTreeDir,
     setNotice,
   });
-  // Knowledge snippet linker (mock) page
-  if (snippetLinkerCtx) {
+  // Knowledge management page
+  if (knowledgeCtx) {
     return (
-      <SnippetLinkerMockPage
-        projectName={snippetLinkerCtx?.name}
+      <KnowledgePage
+        projectName={knowledgeCtx.name}
         domain={normalizedDomain}
-        onBack={() => setSnippetLinkerCtx(null)}
+        onBack={() => setKnowledgeCtx(null)}
       />
     );
   }
-
   if (preferencesCtx) {
     return (
       <PreferencesPage
@@ -423,7 +430,6 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
   return (
     <div className="flex-1 flex h-full bg-white relative" onClick={closeMenu}>
     <div className="flex-1 flex flex-col min-w-0 h-full">
-      <ToastBubble notice={notice} onClear={() => setNotice(null)} autoCloseMs={4000} />
       {/* Hidden file input for “Upload & AI classify” (Electron gives file.path) */}
       <input
         ref={aiUploadInputRef}
@@ -516,7 +522,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
             statusLabel={statusLabel}
             badgeByStatus={badgeByStatus}
             onSetProjectStatus={setProjectStatus}
-            onOpenSnippetLinker={(p) => setSnippetLinkerCtx({ name: p.name, path: p.path })}
+            onOpenKnowledge={(p) => setKnowledgeCtx({ name: p.name, path: p.path })}
             onOpenPreferences={(p) => setPreferencesCtx({ name: p.name, path: p.path })}
             onOpenAgent={(p) => setChatProjectCtx({ name: p.name, path: p.path })}
           />

@@ -429,8 +429,9 @@ const TrayWidget = ({
     if (!pendingSnippet?.text) return;
     if (!hasTarget) return;
     if (snippetStatus === 'saving') return;
-    if (!window.ipm?.snippets?.saveClipboardText) {
-      window.alert('snippets/saveClipboardText 未就绪：请重启应用（不要只刷新页面）');
+    const kApi = window.ipm?.knowledge?.create;
+    if (!kApi) {
+      window.alert('knowledge/create 未就绪：请重启应用');
       return;
     }
 
@@ -445,7 +446,6 @@ const TrayWidget = ({
       }, 1200);
     };
 
-    // Compact UX: click once => hide card immediately, show "saving/saved" feedback in banner.
     if (isCompact) {
       if (snippetTimerRef.current) {
         window.clearTimeout(snippetTimerRef.current);
@@ -458,7 +458,7 @@ const TrayWidget = ({
       setSnippetStatus('saving');
     }
     try {
-      await window.ipm.snippets.saveClipboardText(activeProjectId, draft.text, { domain: activeDomain });
+      await kApi(activeProjectId, { type: 'snippet', text: draft.text, source_kind: 'clipboardText', domain: activeDomain });
       if (isCompact) {
         setSnippetStatus('idle');
         flash('已保存知识碎片');
@@ -488,8 +488,9 @@ const TrayWidget = ({
     if (!pendingShot?.token) return;
     if (!hasTarget) return;
     if (shotStatus === 'saving') return;
-    if (!window.ipm?.screenshots?.saveClipboardImage) {
-      window.alert('screenshots/saveClipboardImage 未就绪：请重启应用（不要只刷新页面）');
+    const kApi = window.ipm?.knowledge?.create;
+    if (!kApi) {
+      window.alert('knowledge/create 未就绪：请重启应用');
       return;
     }
 
@@ -516,7 +517,7 @@ const TrayWidget = ({
       setShotStatus('saving');
     }
     try {
-      await window.ipm.screenshots.saveClipboardImage(activeProjectId, draft.token, { domain: activeDomain });
+      await kApi(activeProjectId, { type: 'screenshot', token: draft.token, source_kind: 'clipboardImage', domain: activeDomain });
       if (isCompact) {
         setShotStatus('idle');
         flash('已保存截图');

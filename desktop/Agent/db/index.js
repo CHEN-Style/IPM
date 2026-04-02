@@ -1,5 +1,5 @@
 import { openProjectDb } from './init.js';
-import { migrateJsonToSqlite } from './migrate.js';
+import { migrateJsonToSqlite, migrateSnippetsJsonToSqlite } from './migrate.js';
 
 const dbCache = new Map();
 const migratedSet = new Set();
@@ -21,6 +21,19 @@ export function getProjectDb(projectDir) {
     } catch (e) {
       console.error(`[db] Migration failed for ${projectDir}:`, e.message);
     }
+
+    try {
+      const hasKnowledge = db.prepare("SELECT COUNT(*) as cnt FROM knowledge_items").get()?.cnt || 0;
+      if (hasKnowledge === 0) {
+        const kStats = migrateSnippetsJsonToSqlite(db, projectDir);
+        if (kStats.snippets || kStats.screenshots || kStats.links) {
+          console.log(`[db] Migrated knowledge data for ${projectDir}:`, kStats);
+        }
+      }
+    } catch (e) {
+      console.error(`[db] Knowledge migration failed for ${projectDir}:`, e.message);
+    }
+
     migratedSet.add(projectDir);
   }
 
@@ -31,6 +44,7 @@ export function getProjectDb(projectDir) {
 export function closeProjectDb(projectDir) {
   const db = dbCache.get(projectDir);
   if (db) {
+    try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* ignore */ }
     try { db.close(); } catch { /* ignore */ }
     dbCache.delete(projectDir);
     migratedSet.delete(projectDir);

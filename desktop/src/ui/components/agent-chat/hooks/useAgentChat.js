@@ -32,6 +32,7 @@ export default function useAgentChat(projectName, domain) {
   const streamBufferRef = useRef('');
   const toolEventsRef = useRef([]);
   const resumingRef = useRef(null);
+  const loadIdRef = useRef(0);
 
   useEffect(() => {
     if (!projectName) return;
@@ -130,6 +131,23 @@ export default function useAgentChat(projectName, domain) {
         setStreaming(false);
       }
 
+      if (event.type === 'error') {
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.streaming) {
+            return [
+              ...prev.slice(0, -1),
+              { role: 'system', content: `Agent 错误: ${event.error || '未知错误'}`, ts: Date.now() },
+            ];
+          }
+          return [...prev, { role: 'system', content: `Agent 错误: ${event.error || '未知错误'}`, ts: Date.now() }];
+        });
+        streamBufferRef.current = '';
+        toolEventsRef.current = [];
+        resumingRef.current = null;
+        setStreaming(false);
+      }
+
       if (event.sessionId && !sessionId) {
         setSessionId(event.sessionId);
       }
@@ -170,7 +188,16 @@ export default function useAgentChat(projectName, domain) {
         setStreaming(false);
       }
     } catch (e) {
-      setMessages((prev) => [...prev, { role: 'system', content: `发送失败: ${e.message}`, ts: Date.now() }]);
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.streaming) {
+          return [
+            ...prev.slice(0, -1),
+            { role: 'system', content: `发送失败: ${e.message}`, ts: Date.now() },
+          ];
+        }
+        return [...prev, { role: 'system', content: `发送失败: ${e.message}`, ts: Date.now() }];
+      });
       setStreaming(false);
     }
   }, [projectName, domain, streaming, isReadonly]);
@@ -188,11 +215,13 @@ export default function useAgentChat(projectName, domain) {
     try {
       const result = await window.ipm?.agent?.executePlan?.(projectName, domain, plan, selectedIndices);
       if (!result?.ok) {
+        resumingRef.current = null;
         setMessages((prev) => [...prev, { role: 'system', content: `执行失败: ${result?.error || '未知错误'}`, ts: Date.now() }]);
         setStreaming(false);
       }
       return result;
     } catch (e) {
+      resumingRef.current = null;
       setMessages((prev) => [...prev, { role: 'system', content: `执行出错: ${e.message}`, ts: Date.now() }]);
       setStreaming(false);
       return null;
@@ -212,6 +241,7 @@ export default function useAgentChat(projectName, domain) {
     try {
       await window.ipm?.agent?.cancelPlan?.(projectName, domain);
     } catch {
+      resumingRef.current = null;
       setStreaming(false);
     }
   }, [projectName, domain]);
@@ -231,9 +261,14 @@ export default function useAgentChat(projectName, domain) {
 
   const loadHistorySession = useCallback(async (targetSessionId) => {
     if (!projectName || !targetSessionId) return;
+    const myLoadId = ++loadIdRef.current;
     try {
       const res = await window.ipm?.agent?.loadSession?.(projectName, domain, targetSessionId);
-      if (!res?.ok) return;
+      if (loadIdRef.current !== myLoadId) return;
+      if (!res?.ok) {
+        setMessages([{ role: 'system', content: '加载历史对话失败', ts: Date.now() }]);
+        return;
+      }
       const loaded = (res.messages || []).map((m) => ({
         role: m.role,
         content: m.content || '',
@@ -248,9 +283,15 @@ export default function useAgentChat(projectName, domain) {
       setIsReadonly(false);
 
       window.ipm?.agent?.resumeSession?.(projectName, domain, targetSessionId)
-        .then((r) => { if (r?.ok) setSessionId(r.sessionId || targetSessionId); })
+        .then((r) => {
+          if (loadIdRef.current !== myLoadId) return;
+          if (r?.ok) setSessionId(r.sessionId || targetSessionId);
+        })
         .catch(() => {});
-    } catch { /* ignore */ }
+    } catch {
+      if (loadIdRef.current !== myLoadId) return;
+      setMessages([{ role: 'system', content: '加载历史对话失败', ts: Date.now() }]);
+    }
   }, [projectName, domain]);
 
   const startNewSession = useCallback(async () => {

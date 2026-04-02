@@ -129,18 +129,18 @@ export default function SnippetLinkerMockPage({ projectName, domain, onBack }) {
 
   const handleUnlink = (snippetId) => {
     setHistory((prev) => [...prev, snippets]); // Save state for undo
+    const sn = snippets.find((s) => s.id === snippetId);
+    const linkedRp = sn?.linkedTo?.relPath;
     setSnippets((prev) => prev.map((s) => (s.id === snippetId ? { ...s, linkedTo: null } : s)));
     addToast('已解除关联', 'info', { label: '撤销', onClick: handleUndo });
 
-    // persist
-    const api = window.ipm?.snippets?.clipboardRecord?.updateMeta;
-    if (typeof api === 'function') {
-      api(projectName, snippetId, { linkedTo: null }, domainOpts).catch(() => {});
+    const kApi = window.ipm?.knowledge?.removeLinkByItem;
+    if (typeof kApi === 'function' && linkedRp) {
+      kApi(projectName, snippetId, linkedRp, domainOpts).catch(() => {});
     }
   };
 
   const handleUpdateSnippet = (updated) => {
-    // update local state (keep preview in `content`, full text in `_fullText`)
     setSnippets((prev) =>
       prev.map((s) => {
         if (s.id !== updated.id) return s;
@@ -157,14 +157,11 @@ export default function SnippetLinkerMockPage({ projectName, domain, onBack }) {
       }),
     );
 
-    // persist meta/content (best-effort)
-    const metaApi = window.ipm?.snippets?.clipboardRecord?.updateMeta;
-    const contentApi = window.ipm?.snippets?.clipboardRecord?.updateContent;
-    if (typeof metaApi === 'function') {
-      metaApi(projectName, updated.id, { title: updated.title, tags: updated.tags, importance: updated.importance }, domainOpts).catch(() => {});
-    }
-    if (typeof contentApi === 'function' && typeof updated.content === 'string') {
-      contentApi(projectName, updated.id, updated.content, domainOpts).catch(() => {});
+    const kApi = window.ipm?.knowledge?.update;
+    if (typeof kApi === 'function') {
+      const patch = { title: updated.title, tags: updated.tags, importance: updated.importance };
+      if (typeof updated.content === 'string') patch.content_text = updated.content;
+      kApi(projectName, updated.id, patch, domainOpts).catch(() => {});
     }
   };
 
@@ -191,16 +188,16 @@ export default function SnippetLinkerMockPage({ projectName, domain, onBack }) {
 
   const handleDeleteSelected = async () => {
     if (!selectedSnippetIds.size) return;
-    if (!window.confirm(`确定删除 ${selectedSnippetIds.size} 条知识碎片吗？该操作会删除对应的 txt 文件（不可恢复）。`)) return;
+    if (!window.confirm(`确定删除 ${selectedSnippetIds.size} 条知识碎片吗？该操作会删除对应文件（不可恢复）。`)) return;
     const ids = Array.from(selectedSnippetIds);
     setSelectedSnippetIds(new Set());
     setSnipBusy(true);
     try {
-      const api = window.ipm?.snippets?.clipboardRecord?.delete;
-      if (typeof api === 'function') {
+      const kApi = window.ipm?.knowledge?.delete;
+      if (typeof kApi === 'function') {
         for (const id of ids) {
           // eslint-disable-next-line no-await-in-loop
-          await api(projectName, id, domainOpts);
+          await kApi(projectName, id, domainOpts);
         }
       }
       setSnippets((prev) => prev.filter((s) => !ids.includes(s.id)));
@@ -248,11 +245,10 @@ export default function SnippetLinkerMockPage({ projectName, domain, onBack }) {
     addToast(`已关联 ${count} 条碎片到「${targetNode.name}」`, 'success', { label: '撤销', onClick: handleUndo });
     setSelectedSnippetIds(new Set());
 
-    // persist (best-effort)
-    const api = window.ipm?.snippets?.clipboardRecord?.updateMeta;
-    if (typeof api === 'function') {
+    const kApi = window.ipm?.knowledge?.addLink;
+    if (typeof kApi === 'function') {
       idsToLink.forEach((id) => {
-        api(projectName, id, { linkedTo: { relPath: targetNodeId, kind } }, domainOpts).catch(() => {});
+        kApi(projectName, id, targetNodeId, kind, domainOpts).catch(() => {});
       });
     }
   };
@@ -319,29 +315,32 @@ export default function SnippetLinkerMockPage({ projectName, domain, onBack }) {
 
         const realTree = await buildTree('');
 
-        // --- Snippets: clipboard-record.json (preferred) ---
-        const recordApi = window.ipm?.snippets?.clipboardRecord?.list;
+        // --- Snippets from knowledge API ---
+        const kListApi = window.ipm?.knowledge?.list;
         let realSnips = [];
-        if (typeof recordApi === 'function') {
-          const rec = await recordApi(projectName, domainOpts);
-          const items = Array.isArray(rec?.record?.items) ? rec.record.items : [];
-          realSnips = items
-            .filter((it) => String(it?.type) === 'snippet')
+        if (typeof kListApi === 'function') {
+          const kRes = await kListApi(projectName, { archived: false }, domainOpts);
+          const kItems = Array.isArray(kRes?.items) ? kRes.items : [];
+          realSnips = kItems
             .map((it) => {
               const tags = Array.isArray(it?.tags) ? it.tags.map((x) => String(x)).filter(Boolean) : [];
               const displayTags = tags.length ? tags : ['temp'];
-              const linkedTo = it?.linkedTo && typeof it.linkedTo === 'object' ? { relPath: norm(it.linkedTo.relPath), kind: String(it.linkedTo.kind || 'dir') } : null;
+              const links = Array.isArray(it?.links) ? it.links : [];
+              const firstLink = links[0] || null;
+              const linkedTo = firstLink ? { relPath: norm(firstLink.target_path), kind: String(firstLink.target_kind || 'dir') } : null;
               return {
                 id: String(it.id || ''),
                 title: String(it.title || '默认标题'),
-                content: String(it?.content?.preview || ''), // list uses preview
-                _contentRelPath: norm(it?.content?.relPath || ''),
-                _fullText: undefined, // lazily loaded for detail panel
+                content: String(it?.content_text || ''),
+                _contentRelPath: norm(it?.content_path || ''),
+                _fullText: undefined,
                 tags: displayTags,
-                source: String(it?.source?.kind || 'clipboardText'),
-                createdAt: String((it.createdAt || '').slice(0, 10) || ''),
+                source: String(it?.source_kind || 'manual'),
+                createdAt: String((it.created_at || '').slice(0, 10) || ''),
                 importance: it?.importance ? String(it.importance) : undefined,
                 linkedTo: linkedTo && linkedTo.relPath ? linkedTo : null,
+                _type: String(it?.type || 'snippet'),
+                _absolutePath: it?._absolutePath || null,
               };
             })
             .filter((s) => s.id);
@@ -368,36 +367,38 @@ export default function SnippetLinkerMockPage({ projectName, domain, onBack }) {
     };
   }, [projectName, domain]);
 
-  // Subscribe to clipboard-record changes for realtime updates
+  // Subscribe to knowledge changes for realtime updates
   useEffect(() => {
     if (!projectName) return () => {};
-    const sub = window.ipm?.snippets?.clipboardRecord?.subscribe;
-    const list = window.ipm?.snippets?.clipboardRecord?.list;
-    if (typeof sub !== 'function' || typeof list !== 'function') return () => {};
+    const sub = window.ipm?.knowledge?.subscribe;
+    const kListApi = window.ipm?.knowledge?.list;
+    if (typeof sub !== 'function' || typeof kListApi !== 'function') return () => {};
     const off = sub((evt) => {
       if (!evt || evt.projectName !== projectName) return;
-      // refresh list (best-effort)
-      list(projectName, domainOpts)
-        .then((rec) => {
+      kListApi(projectName, { archived: false }, domainOpts)
+        .then((kRes) => {
           const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '').replace(/\/{2,}/g, '/');
-          const items = Array.isArray(rec?.record?.items) ? rec.record.items : [];
-          const next = items
-            .filter((it) => String(it?.type) === 'snippet')
+          const kItems = Array.isArray(kRes?.items) ? kRes.items : [];
+          const next = kItems
             .map((it) => {
               const tags = Array.isArray(it?.tags) ? it.tags.map((x) => String(x)).filter(Boolean) : [];
               const displayTags = tags.length ? tags : ['temp'];
-              const linkedTo = it?.linkedTo && typeof it.linkedTo === 'object' ? { relPath: norm(it.linkedTo.relPath), kind: String(it.linkedTo.kind || 'dir') } : null;
+              const links = Array.isArray(it?.links) ? it.links : [];
+              const firstLink = links[0] || null;
+              const linkedTo = firstLink ? { relPath: norm(firstLink.target_path), kind: String(firstLink.target_kind || 'dir') } : null;
               return {
                 id: String(it.id || ''),
                 title: String(it.title || '默认标题'),
-                content: String(it?.content?.preview || ''),
-                _contentRelPath: norm(it?.content?.relPath || ''),
+                content: String(it?.content_text || ''),
+                _contentRelPath: norm(it?.content_path || ''),
                 _fullText: undefined,
                 tags: displayTags,
-                source: String(it?.source?.kind || 'clipboardText'),
-                createdAt: String((it.createdAt || '').slice(0, 10) || ''),
+                source: String(it?.source_kind || 'manual'),
+                createdAt: String((it.created_at || '').slice(0, 10) || ''),
                 importance: it?.importance ? String(it.importance) : undefined,
                 linkedTo: linkedTo && linkedTo.relPath ? linkedTo : null,
+                _type: String(it?.type || 'snippet'),
+                _absolutePath: it?._absolutePath || null,
               };
             })
             .filter((s) => s.id);

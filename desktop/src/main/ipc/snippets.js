@@ -25,8 +25,9 @@ export function registerSnippetsIpc({
 }) {
   if (!ipcMain) throw new Error('registerSnippetsIpc: ipcMain is required');
 
-  // ===== Snippets: clipboard text -> txt + snippets/snippets-meta/clipboard-record.json index =====
+  // ===== [DEPRECATED] Use knowledge/create instead =====
   ipcMain.handle('snippets/saveClipboardText', async (_evt, payload) => {
+    console.warn('[DEPRECATED] snippets/saveClipboardText — use knowledge/create with type=snippet instead');
     const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
     const text = String(payload?.text ?? '');
     const trimmed = text.trim();
@@ -107,8 +108,9 @@ export function registerSnippetsIpc({
     return { ok: true, projectName, id, relPath };
   });
 
-  // ===== Snippets: clipboard-record.json CRUD (for snippet linker persistence) =====
+  // ===== [DEPRECATED] Use knowledge/* APIs instead =====
   ipcMain.handle('snippets/clipboardRecord/list', async (_evt, payload) => {
+    console.warn('[DEPRECATED] snippets/clipboardRecord/list — use knowledge/list instead');
     const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
     ensureProjectStructure(projectName, payload?.domain);
     migrateLegacySnippetRecordFilesIfNeeded(projectDir, projectName);
@@ -121,6 +123,7 @@ export function registerSnippetsIpc({
   });
 
   ipcMain.handle('snippets/clipboardRecord/updateMeta', async (_evt, payload) => {
+    console.warn('[DEPRECATED] snippets/clipboardRecord/updateMeta — use knowledge/update instead');
     const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
     const id = String(payload?.id || '');
     const patch = payload?.patch && typeof payload.patch === 'object' ? payload.patch : {};
@@ -185,6 +188,7 @@ export function registerSnippetsIpc({
   });
 
   ipcMain.handle('snippets/clipboardRecord/updateContent', async (_evt, payload) => {
+    console.warn('[DEPRECATED] snippets/clipboardRecord/updateContent — use knowledge/update instead');
     const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
     const id = String(payload?.id || '');
     const text = String(payload?.text ?? '');
@@ -229,6 +233,7 @@ export function registerSnippetsIpc({
   });
 
   ipcMain.handle('snippets/clipboardRecord/delete', async (_evt, payload) => {
+    console.warn('[DEPRECATED] snippets/clipboardRecord/delete — use knowledge/delete instead');
     const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
     const id = String(payload?.id || '');
     if (!id) throw new Error('id 不能为空');

@@ -4,7 +4,7 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { getProjectDb } from '../db/index.js';
 
-const SYSTEM_DIRS = new Set(['meta', 'temp', 'snippets']);
+const SYSTEM_DIRS = new Set(['meta', 'snippets']);
 
 function walkStats(dirPath, relBase) {
   const stats = [];

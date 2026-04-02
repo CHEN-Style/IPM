@@ -4,8 +4,10 @@ import { createChatModel } from '../services/llm.js';
 
 const AGENT_DIR = 'agent';
 const SUMMARY_FILE = 'project-summary.md';
-const SYSTEM_DIRS = new Set(['meta', 'temp', 'snippets']);
+const SYSTEM_DIRS = new Set(['meta', 'snippets']);
 const MAX_FILES_PER_FOLDER = 10;
+const MAX_SCAN_DEPTH = 4;
+const MAX_SCAN_FOLDERS = 50;
 
 function getAgentDir(projectDir) {
   return path.join(projectDir, 'meta', AGENT_DIR);
@@ -60,7 +62,9 @@ function scanProjectStructure(projectDir) {
 
   const result = [];
 
-  function walkDir(dirPath, relBase) {
+  function walkDir(dirPath, relBase, depth = 0) {
+    if (depth > MAX_SCAN_DEPTH || result.length >= MAX_SCAN_FOLDERS) return;
+
     let entries;
     try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); } catch { return; }
 
@@ -85,12 +89,13 @@ function scanProjectStructure(projectDir) {
     result.push({ path: rel, description: desc, totalFiles, sampleFiles });
 
     for (const sub of subDirs) {
+      if (result.length >= MAX_SCAN_FOLDERS) break;
       const subRel = relBase ? `${relBase}/${sub}` : sub;
-      walkDir(path.join(dirPath, sub), subRel);
+      walkDir(path.join(dirPath, sub), subRel, depth + 1);
     }
   }
 
-  walkDir(projectDir, '');
+  walkDir(projectDir, '', 0);
   return result;
 }
 

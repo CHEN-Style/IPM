@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, clipboard } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, clipboard, protocol, net } from 'electron';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -20,10 +20,17 @@ import { registerFloatingIpc } from './main/ipc/floating.js';
 import { registerUiIpc } from './main/ipc/ui.js';
 import { registerClassifyRulesIpc } from './main/ipc/classifyRules.js';
 import { registerClassifyEventsIpc } from './main/ipc/classifyEvents.js';
+import { seedDefaultRules } from '../Agent/storage/classifyRules.js';
 import { registerProjectAgentIpc } from './main/ipc/projectAgent.js';
+import { getSession as getAgentSession, removeSession as removeAgentSession } from '../Agent/project-agent/session.js';
+import { registerSupervisorIpc } from './main/ipc/supervisor.js';
 import { registerPreferencesIpc } from './main/ipc/preferences.js';
+import { registerKnowledgeIpc } from './main/ipc/knowledge.js';
 import { ClassifyTracker } from './main/classifyTracker.js';
 import { getProjectDb, closeProjectDb, closeAllDbs } from '../Agent/db/index.js';
+import { getSupervisorDb, closeSupervisorDb } from '../Agent/db/supervisorDb.js';
+import { ensureBuiltinSkills } from '../Agent/supervisor/skills/builtinSkills.js';
+import { runProactiveCheck } from '../Agent/supervisor/proactiveChecker.js';
 import { upsertSourceRecord, deleteSourceRecord, getSourceInfo as dbGetSourceInfo } from '../Agent/db/sourceRecords.js';
 import { appendLog as dbAppendLog } from '../Agent/db/activityLog.js';
 
@@ -65,6 +72,7 @@ const getProjectsRoot = () => path.join(getUserFileRoot(), 'projects');
 const getCasesRoot = () => path.join(getUserFileRoot(), 'cases');
 const getStudyRoot = () => path.join(getUserFileRoot(), 'study');
 const getAppRoot = () => path.join(getUserFileRoot(), '_app');
+const getSandboxRoot = () => path.join(getAppRoot(), 'sandbox');
 const getStatePath = () => path.join(getAppRoot(), 'state.json');
 
 // ===== Domain: folder templates (MVP->vNext) =====
@@ -204,7 +212,6 @@ const shouldExcludeFromStructureRelPath = (relPath) => {
   if (!rp) return false; // keep root
   if (rp === 'snippets' || rp.startsWith('snippets/')) return true;
   if (rp === 'meta' || rp.startsWith('meta/')) return true;
-  if (rp === 'temp' || rp.startsWith('temp/')) return true;
   return false;
 };
 
@@ -394,6 +401,8 @@ const ensureProjectStructure = (projectName, domain = 'projects') => {
       // best-effort
     }
   }
+
+  try { seedDefaultRules(projectDir, d); } catch { /* best-effort */ }
 
   return {
     name: effectiveName,
@@ -818,6 +827,21 @@ const emitClipboardRecordChanged = (payload) => {
   } catch {
     // ignore
   }
+  // Parallel broadcast to knowledge subscribers for compatibility
+  emitKnowledgeChanged({ projectName: payload?.projectName, type: 'updated', id: payload?.id || '' });
+};
+
+const emitKnowledgeChanged = (payload) => {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('knowledge:changed', payload);
+    }
+  } catch { /* ignore */ }
+  try {
+    if (floatingWindow && !floatingWindow.isDestroyed()) {
+      floatingWindow.webContents.send('knowledge:changed', payload);
+    }
+  } catch { /* ignore */ }
 };
 
 const ensureScreenshotRecordDoc = (projectDir, projectName) => {
@@ -1188,15 +1212,28 @@ const createFloatingWindow = () => {
   return floatingWindow;
 };
 
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'ipm-file', privileges: { bypassCSP: true, stream: true, supportFetchAPI: true } },
+]);
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  protocol.handle('ipm-file', (request) => {
+    const url = new URL(request.url);
+    let filePath = decodeURIComponent(url.pathname);
+    if (/^\/[A-Za-z]:/.test(filePath)) filePath = filePath.slice(1);
+    return net.fetch(`file:///${filePath.replace(/\\/g, '/')}`);
+  });
   fs.mkdirSync(getUserFileRoot(), { recursive: true });
   fs.mkdirSync(getProjectsRoot(), { recursive: true });
   fs.mkdirSync(getCasesRoot(), { recursive: true });
   fs.mkdirSync(getStudyRoot(), { recursive: true });
   fs.mkdirSync(getAppRoot(), { recursive: true });
+  fs.mkdirSync(path.join(getSandboxRoot(), 'skills'), { recursive: true });
+  fs.mkdirSync(path.join(getSandboxRoot(), 'workspace'), { recursive: true });
+  fs.mkdirSync(path.join(getSandboxRoot(), 'output'), { recursive: true });
 
   // Ensure study root has default knowledge library structure (best-effort)
   try {
@@ -1244,6 +1281,19 @@ app.whenReady().then(() => {
   registerClassifyEventsIpc({ ipcMain, getWorkspaceDirOrThrow });
   registerPreferencesIpc({ ipcMain, getWorkspaceDirOrThrow });
   registerProjectAgentIpc({ ipcMain, getWorkspaceDirOrThrow, syncStructureJson });
+  registerSupervisorIpc({
+    ipcMain,
+    getAppRoot,
+    getSandboxRoot,
+    getWorkspaceDirs: () => ({
+      projectsRoot: getProjectsRoot(),
+      casesRoot: getCasesRoot(),
+      studyRoot: getStudyRoot(),
+    }),
+    getWorkspaceDirOrThrow,
+    syncStructureJson,
+    readState,
+  });
 
   ipcMain.handle('classify:getSnapshot', async (_evt, payload) => {
     const projectName = String(payload?.projectName || '');
@@ -1312,6 +1362,8 @@ app.whenReady().then(() => {
     sleepSync,
     trashOrRm,
     closeProjectDb,
+    getAgentSession,
+    removeAgentSession,
   });
 
   registerCasesIpc({
@@ -1335,6 +1387,8 @@ app.whenReady().then(() => {
     sleepSync,
     trashOrRm,
     closeProjectDb,
+    getAgentSession,
+    removeAgentSession,
   });
 
   registerSnippetsIpc({
@@ -1380,6 +1434,24 @@ app.whenReady().then(() => {
     appendJsonl,
   });
 
+  registerKnowledgeIpc({
+    ipcMain,
+    clipboardImageCache,
+    getWorkspaceDirOrThrow,
+    getProjectDb,
+    ensureProjectStructure,
+    ensureClipboardSnippetsDir,
+    ensureScreenshotsDir,
+    formatStamp,
+    makeShortId,
+    ensureUniqueDestPath,
+    sanitizeFileName,
+    normalizeRelPathPosix,
+    resolveInside,
+    trashOrRm,
+    emitKnowledgeChanged,
+  });
+
   registerFloatingIpc({
     ipcMain,
     getWorkspaceDirOrThrow,
@@ -1417,7 +1489,31 @@ app.whenReady().then(() => {
 
   // explorer/* moved to `src/main/ipc/explorer.js`
 
+  // Initialize Supervisor DB early
+  try { getSupervisorDb(getAppRoot()); } catch { /* ignore */ }
+
+  // Install builtin skills if missing
+  try { ensureBuiltinSkills(getSandboxRoot()); } catch { /* ignore */ }
+
   createMainWindow();
+
+  const proactiveCheckArgs = () => ({
+    appRoot: getAppRoot(),
+    projectsRoot: getProjectsRoot(),
+    casesRoot: getCasesRoot(),
+    studyRoot: getStudyRoot(),
+    readState,
+  });
+
+  // Proactive check: run every 30 minutes
+  const proactiveCheckInterval = setInterval(() => {
+    try { runProactiveCheck(proactiveCheckArgs()); } catch { /* ignore */ }
+  }, 30 * 60 * 1000);
+
+  // Initial proactive check after a short delay (let things settle)
+  setTimeout(() => {
+    try { runProactiveCheck(proactiveCheckArgs()); } catch { /* ignore */ }
+  }, 10_000);
 
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
@@ -1433,6 +1529,7 @@ app.whenReady().then(() => {
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
   closeAllDbs();
+  closeSupervisorDb();
   if (process.platform !== 'darwin') {
     app.quit();
   }

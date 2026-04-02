@@ -38,8 +38,13 @@ export function createCreateFolderTool(projectDir, ctx = {}) {
 
       try {
         fs.mkdirSync(absPath, { recursive: true });
+        let descWarning = '';
         if (description) {
-          updateStructureDescription(projectDir, folderPath, description);
+          try {
+            updateStructureDescription(projectDir, folderPath, description);
+          } catch (descErr) {
+            descWarning = `（注意：描述写入失败 - ${descErr.message}）`;
+          }
         }
         let logId = null;
         try {
@@ -48,7 +53,7 @@ export function createCreateFolderTool(projectDir, ctx = {}) {
             undoData: { path: folderPath },
           });
         } catch { /* best effort */ }
-        const msg = `已创建文件夹「${folderPath}」${description ? `（描述：${description}）` : ''}。`;
+        const msg = `已创建文件夹「${folderPath}」${description ? `（描述：${description}）` : ''}${descWarning}。`;
         return logId ? JSON.stringify({ message: msg, _undoId: logId }) : msg;
       } catch (e) {
         return `创建文件夹失败：${e.message}`;
@@ -67,20 +72,18 @@ export function createCreateFolderTool(projectDir, ctx = {}) {
 
 function updateStructureDescription(projectDir, folderRel, description) {
   const structurePath = path.join(projectDir, 'meta', 'structure.json');
-  try {
-    const doc = JSON.parse(fs.readFileSync(structurePath, 'utf-8'));
-    const key = folderRel.replace(/\\/g, '/');
-    if (!doc.folders) doc.folders = {};
-    if (!doc.folders[key]) {
-      doc.folders[key] = {
-        relPath: key,
-        name: key.split('/').pop(),
-        description: '',
-        createdAt: new Date().toISOString(),
-      };
-    }
-    doc.folders[key].description = description;
-    doc.folders[key].updatedAt = new Date().toISOString();
-    fs.writeFileSync(structurePath, JSON.stringify(doc, null, 2), 'utf-8');
-  } catch { /* ignore */ }
+  const doc = JSON.parse(fs.readFileSync(structurePath, 'utf-8'));
+  const key = folderRel.replace(/\\/g, '/');
+  if (!doc.folders) doc.folders = {};
+  if (!doc.folders[key]) {
+    doc.folders[key] = {
+      relPath: key,
+      name: key.split('/').pop(),
+      description: '',
+      createdAt: new Date().toISOString(),
+    };
+  }
+  doc.folders[key].description = description;
+  doc.folders[key].updatedAt = new Date().toISOString();
+  fs.writeFileSync(structurePath, JSON.stringify(doc, null, 2), 'utf-8');
 }

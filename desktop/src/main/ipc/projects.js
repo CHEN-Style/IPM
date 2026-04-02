@@ -22,6 +22,8 @@ export function registerProjectsIpc({
   sleepSync,
   trashOrRm,
   closeProjectDb,
+  getAgentSession,
+  removeAgentSession,
 }) {
   if (!ipcMain) throw new Error('registerProjectsIpc: ipcMain is required');
 
@@ -186,7 +188,17 @@ export function registerProjectsIpc({
     const { name, projectDir } = getProjectDirOrThrow(payload?.name);
     const root = getProjectsRoot();
 
+    try {
+      const session = getAgentSession?.(projectDir);
+      if (session) {
+        try { await session.endSession(); } catch { /* ignore */ }
+        try { removeAgentSession?.(projectDir); } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+
     try { closeProjectDb?.(projectDir); } catch { /* ignore */ }
+
+    await new Promise((r) => setTimeout(r, 150));
 
     if (!fs.existsSync(projectDir)) {
       // Already gone, just clean up state

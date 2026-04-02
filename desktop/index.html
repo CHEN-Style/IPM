@@ -81,6 +81,44 @@
         animation: fade-in-up 0.22s ease-out forwards;
       }
 
+      /* SupervisorBubble animations */
+      @keyframes bubble-expand {
+        0% {
+          transform: scale(0.85) translateY(8px);
+          opacity: 0;
+        }
+        100% {
+          transform: scale(1) translateY(0);
+          opacity: 1;
+        }
+      }
+      .animate-bubble-expand {
+        animation: bubble-expand 0.2s ease-out forwards;
+      }
+      @keyframes bounce-subtle {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-2px); }
+      }
+      .animate-bounce-subtle {
+        animation: bounce-subtle 1.5s ease-in-out infinite;
+      }
+
+      /* Morph toast bubble animations */
+      @keyframes morph-text-in {
+        from { opacity: 0; transform: translateX(-6px); }
+        to   { opacity: 1; transform: translateX(0); }
+      }
+      @keyframes morph-text-out {
+        from { opacity: 1; }
+        to   { opacity: 0; }
+      }
+      .animate-morph-text-in {
+        animation: morph-text-in 0.25s ease-out both;
+      }
+      .animate-morph-text-out {
+        animation: morph-text-out 0.15s ease-in both;
+      }
+
       /* Snappy Animations for "Juicy" feel */
       @keyframes pop-in {
         0% {

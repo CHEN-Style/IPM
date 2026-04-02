@@ -6,6 +6,9 @@ import SettingsPage from './components/SettingsPage.jsx';
 import KnowledgePanorama from './components/knowledge/KnowledgePanorama.jsx';
 import MyDataPage from './components/MyDataPage.jsx';
 import OverviewPage from './components/OverviewPage.jsx';
+import KnowClawPage from './components/knowclaw/KnowClawPage.jsx';
+import SupervisorBubble from './components/SupervisorBubble.jsx';
+import { ToastProvider } from './hooks/useToast.js';
 
 const App = () => {
   const [activeNav, setActiveNav] = useState('mydata');
@@ -52,7 +55,7 @@ const App = () => {
   const [displayNav, setDisplayNav] = useState(activeNav);
   const fadeTimerRef = useRef(null);
 
-  const fadeEligible = useMemo(() => new Set(['overview', 'mydata', 'knowledge']), []);
+  const fadeEligible = useMemo(() => new Set(['overview', 'mydata', 'knowledge', 'knowclaw']), []);
 
   useEffect(() => {
     if (fadeTimerRef.current) {
@@ -152,7 +155,8 @@ const App = () => {
   }
 
   return (
-    <div className="flex flex-col h-screen w-full overflow-hidden select-none antialiased">
+    <ToastProvider>
+    <div className="flex flex-col h-screen w-full overflow-hidden select-auto antialiased">
       <div className="flex flex-1 min-h-0 w-full overflow-hidden">
         {/* Column 1: Navigation Sidebar */}
         <Sidebar
@@ -187,6 +191,8 @@ const App = () => {
               <OverviewPage stats={workspaceStats} onOpenDomain={openMyDataDomain} />
             ) : displayNav === 'knowledge' ? (
             <KnowledgePanorama />
+            ) : displayNav === 'knowclaw' ? (
+            <KnowClawPage />
             ) : displayNav === 'mydata' ? (
               <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} />
           ) : (
@@ -203,6 +209,11 @@ const App = () => {
         ) : null}
       </div>
 
+      {/* Supervisor Bubble (global floating) */}
+      {displayNav !== 'knowclaw' && (
+        <SupervisorBubble onNavigateToKnowClaw={() => setActiveNav('knowclaw')} />
+      )}
+
       {/* Global Status Bar (in layout; no overlap) */}
       <div className="h-6 bg-slate-900 border-t border-slate-800 flex items-center justify-between px-3 text-[10px] text-slate-500 pointer-events-none">
         <div className="flex items-center gap-4">
@@ -217,6 +228,7 @@ const App = () => {
         </div>
       </div>
     </div>
+    </ToastProvider>
   );
 };
 

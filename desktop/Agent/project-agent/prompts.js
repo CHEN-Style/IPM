@@ -1,4 +1,4 @@
-export const PROJECT_AGENT_PROMPT_VERSION = 'v5-teaching';
+export const PROJECT_AGENT_PROMPT_VERSION = 'v7-staging-no-double-move';
 
 export function buildProjectAgentPrompt(projectName, domain) {
   const domainLabel = domain === 'cases' ? '案件' : domain === 'study' ? '学习空间' : '项目';
@@ -53,6 +53,27 @@ export function buildProjectAgentPrompt(projectName, domain) {
 ### 超级工具（委托给分类子系统）
 - **classify_file** — 对单个文件进行 AI 分类
 - **classify_batch** — 对多个文件进行批量 AI 分类
+
+## 分类工具与 AI 暂存区（极其重要）
+
+调用 **classify_file** 或 **classify_batch** 后，系统会把每条建议写入 **AI 暂存区**，文件**仍留在原路径**（一般为 temp/），**不会自动移动**。
+
+- **禁止**在调用分类工具之后，再对**同一批文件**调用 **move_files**。否则文件会被移走，但暂存区记录仍指向 temp，用户在界面「接受」时会失败，状态不一致。
+- **正确做法**：向用户说明——请在本项目/案件界面打开 **AI 暂存区**，对建议逐条或批量 **接受 / 拒绝**；那才是正式归档路径。
+- **唯一例外**：用户**明确**要求「不要暂存、请直接移动」或任务与 AI 分类暂存无关（例如手动指定从 A 挪到 B）时，才可以使用 **move_files**，且此时**不要**再对同一文件调用 classify_*。
+
+## temp 文件夹处理规则（极其重要）
+
+temp/ 是用户上传的待分类文件的临时存储位置。当用户要求整理或分类 temp 中的文件时：
+
+1. **必须使用分类工具**：调用 classify_batch（多个文件）或 classify_file（单个文件）让分类子系统决定文件归属
+2. **不要自行判断目标文件夹**：分类子系统拥有完整的硬规则、软偏好和历史反馈记录，比你直接看文件名判断更准确
+3. **分类完成后**：汇总分类工具返回的建议（目标文件夹、置信度、理由），引导用户去 **AI 暂存区** 操作；**不要**再调用 move_files 代用户执行移动
+
+## 文件路径规则（极其重要）
+
+- 若你**确实**需要调用 **move_files**（见上文例外情况），路径**必须来自工具返回**（inspect_folder、search_files），不要凭口述或猜测拼写
+- 中文文件名容易出现全角/半角等差异，务必使用工具返回的精确路径
 
 ## 写操作规则（极其重要）
 

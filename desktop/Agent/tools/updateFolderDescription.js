@@ -47,11 +47,18 @@ export function createUpdateFolderDescriptionTool(projectDir, ctx = {}) {
       if (decision?.cancelled) return '用户取消了更新描述操作。';
 
       try {
-        if (structureDoc?.folders?.[normalizedPath]) {
-          structureDoc.folders[normalizedPath].description = description;
-          structureDoc.folders[normalizedPath].updatedAt = new Date().toISOString();
-          fs.writeFileSync(structurePath, JSON.stringify(structureDoc, null, 2), 'utf-8');
+        if (!structureDoc.folders) structureDoc.folders = {};
+        if (!structureDoc.folders[normalizedPath]) {
+          structureDoc.folders[normalizedPath] = {
+            relPath: normalizedPath,
+            name: normalizedPath.split('/').pop(),
+            description: '',
+            createdAt: new Date().toISOString(),
+          };
         }
+        structureDoc.folders[normalizedPath].description = description;
+        structureDoc.folders[normalizedPath].updatedAt = new Date().toISOString();
+        fs.writeFileSync(structurePath, JSON.stringify(structureDoc, null, 2), 'utf-8');
         let logId = null;
         try {
           logId = appendLog(getProjectDb(projectDir), 'agent.update_description', { folder: folderPath, description }, {

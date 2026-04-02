@@ -1,5 +1,5 @@
 import React from 'react';
-import { FolderOpen, Settings2, Sparkles, Bot } from 'lucide-react';
+import { FolderOpen, Settings2, Bot, BookOpen } from 'lucide-react';
 
 const RootTable = ({
   errorText,
@@ -15,7 +15,7 @@ const RootTable = ({
   statusLabel,
   badgeByStatus,
   onSetProjectStatus,
-  onOpenSnippetLinker,
+  onOpenKnowledge,
   onOpenPreferences,
   onOpenAgent,
 }) => {
@@ -36,7 +36,7 @@ const RootTable = ({
             <th className="pb-4 text-right font-bold">状态</th>
             <th className="pb-4 text-right font-bold">偏好与记录</th>
             <th className="pb-4 text-right font-bold">AI 助理</th>
-            <th className="pb-4 text-right pr-4 font-bold">整理知识</th>
+            <th className="pb-4 text-right pr-4 font-bold">知识管理</th>
           </tr>
         </thead>
         <tbody>
@@ -171,16 +171,16 @@ const RootTable = ({
               <td className="py-3.5 text-right pr-4 rounded-r text-xs text-slate-500 font-medium border-y border-transparent">
                 <button
                   type="button"
-                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 transition-colors shadow-sm"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-colors shadow-sm"
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    onOpenSnippetLinker?.(p);
+                    onOpenKnowledge?.(p);
                   }}
-                  title="进入知识碎片关联与管理页面（Mock）"
+                  title="知识碎片管理与关联"
                 >
-                  <Sparkles size={14} />
-                  整理知识
+                  <BookOpen size={14} />
+                  知识管理
                 </button>
               </td>
             </tr>

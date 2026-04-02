@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
 
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 3;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS suggestions (
@@ -108,6 +108,40 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
 `;
 
+const MIGRATION_V3 = `
+CREATE TABLE IF NOT EXISTS knowledge_items (
+  id            TEXT PRIMARY KEY,
+  type          TEXT NOT NULL DEFAULT 'snippet',
+  title         TEXT NOT NULL DEFAULT '',
+  content_text  TEXT DEFAULT '',
+  content_json  TEXT DEFAULT NULL,
+  content_path  TEXT DEFAULT '',
+  summary       TEXT DEFAULT '',
+  tags          TEXT DEFAULT '[]',
+  importance    TEXT DEFAULT NULL,
+  source_kind   TEXT DEFAULT 'manual',
+  source_url    TEXT DEFAULT NULL,
+  pinned        INTEGER DEFAULT 0,
+  archived      INTEGER DEFAULT 0,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ki_type ON knowledge_items(type);
+CREATE INDEX IF NOT EXISTS idx_ki_created ON knowledge_items(created_at);
+CREATE INDEX IF NOT EXISTS idx_ki_pinned ON knowledge_items(pinned);
+CREATE INDEX IF NOT EXISTS idx_ki_archived ON knowledge_items(archived);
+
+CREATE TABLE IF NOT EXISTS knowledge_links (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id     TEXT NOT NULL REFERENCES knowledge_items(id) ON DELETE CASCADE,
+  target_path TEXT NOT NULL,
+  target_kind TEXT NOT NULL DEFAULT 'file',
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kl_item ON knowledge_links(item_id);
+CREATE INDEX IF NOT EXISTS idx_kl_target ON knowledge_links(target_path);
+`;
+
 function safeAlter(db, sql) {
   try { db.exec(sql); } catch { /* column may already exist */ }
 }
@@ -127,6 +161,10 @@ export function initDb(db) {
     safeAlter(db, "ALTER TABLE activity_log ADD COLUMN session_id TEXT DEFAULT ''");
     safeAlter(db, 'ALTER TABLE activity_log ADD COLUMN is_undone INTEGER DEFAULT 0');
     safeAlter(db, "ALTER TABLE activity_log ADD COLUMN undo_data TEXT DEFAULT '{}'");
+  }
+
+  if (version < 3) {
+    db.exec(MIGRATION_V3);
   }
 
   if (version < CURRENT_VERSION) {

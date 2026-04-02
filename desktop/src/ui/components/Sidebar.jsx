@@ -13,6 +13,7 @@ import {
   Layers,
   Pin,
   PinOff,
+  Brain,
 } from 'lucide-react';
 
 const Sidebar = ({
@@ -65,7 +66,7 @@ const Sidebar = ({
 
   return (
     <div
-      className={`bg-[#0f172a] h-full flex flex-col text-slate-400 border-r border-slate-800/50 overflow-hidden transition-[width] duration-300 ease-in-out ${
+      className={`bg-[#0f172a] h-full flex flex-col text-slate-400 border-r border-slate-800/50 overflow-hidden transition-[width] duration-300 ease-in-out select-none ${
         isCollapsed ? 'w-16' : 'w-72'
       }`}
       onMouseDownCapture={(e) => {
@@ -212,6 +213,14 @@ const Sidebar = ({
               collapsed={isCollapsed}
               navDirectWhenCollapsed
               onClick={() => navSelectDirect('knowledge')}
+            />
+            <NavItem
+              icon={<Brain size={16} />}
+              label="KnowClaw"
+              active={activeNav === 'knowclaw'}
+              collapsed={isCollapsed}
+              navDirectWhenCollapsed
+              onClick={() => navSelectDirect('knowclaw')}
             />
           </div>
         </section>

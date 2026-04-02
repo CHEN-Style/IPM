@@ -10,25 +10,25 @@ const log = (msg) => console.log(`[IPM][Classifier] ${msg}`);
 /**
  * Unified classification entry point.
  *
- * Waterfall: fast-path rules → Tool-Calling Agent → validator.
+ * Waterfall: 硬规则 (fast-path) → Tool-Calling Agent (软偏好 + 推理) → validator.
  * Returns a ClassifyOutput-shaped result with confidence, classifiedBy, etc.
  */
 export async function classifyFile(rawInput) {
   const input = ClassifyInputSchema.parse(rawInput);
   const { fileName, ext, folders, projectDir, sourceDir } = input;
 
-  // --- 1. Fast path (user rules first, then built-in rules, no LLM) ---
-  log(`[1/3] 快速通道检查 | ${fileName}`);
+  // --- 1. 硬规则快速通道 (classify-rules.json, no LLM) ---
+  log(`[1/3] 硬规则检查 | ${fileName}`);
   const fastResult = tryFastPath({ fileName, ext, folders, projectDir, sourceDir });
   if (fastResult) {
     const { valid, errors } = validateClassifyOutput(fastResult, folders);
     if (valid) {
-      log(`[1/3] ⚡ 快速通道命中 → ${fastResult.targetRelPath}`);
+      log(`[1/3] ⚡ 硬规则命中 → ${fastResult.targetRelPath}`);
       return { ...fastResult, toolCallCount: 0, trace: fastResult.trace || [] };
     }
-    log(`[1/3] ⚠ 快速通道命中但校验失败: ${errors.join('; ')}，转入 Agent`);
+    log(`[1/3] ⚠ 硬规则命中但校验失败: ${errors.join('; ')}，转入 Agent`);
   } else {
-    log(`[1/3] 快速通道未命中，转入 Tool-Calling Agent`);
+    log(`[1/3] 无硬规则命中，转入 Tool-Calling Agent`);
   }
 
   // --- 2. Tool-Calling Agent (with timeout) ---

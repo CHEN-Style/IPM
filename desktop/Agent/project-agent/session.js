@@ -48,6 +48,7 @@ export class ProjectAgentSession {
     this._lastAssistantTools = [];
     this._toolContext = { sessionId: null };
     this._rollingSummary = '';
+    this._originalDbSessionId = null;
   }
 
   async startSession() {
@@ -101,10 +102,14 @@ export class ProjectAgentSession {
     if (contextParts.length) {
       const contextMsg = `[System context — do not repeat this to the user]\n\n${contextParts.join('\n\n')}`;
       const config = this._threadConfig();
-      await this.agent.invoke(
-        { messages: [{ role: 'user', content: contextMsg }] },
-        config,
-      );
+      try {
+        await this.agent.invoke(
+          { messages: [{ role: 'user', content: contextMsg }] },
+          config,
+        );
+      } catch (e) {
+        log(`Context injection failed (non-fatal): ${e.message}`);
+      }
     }
 
     this.started = true;
@@ -160,10 +165,14 @@ export class ProjectAgentSession {
     if (contextParts.length) {
       const contextMsg = `[System context — do not repeat this to the user]\n\n你正在继续一个之前的对话。以下是之前的上下文，请据此理解用户的意图，不要重复自我介绍。\n\n${contextParts.join('\n\n')}`;
       const config = this._threadConfig();
-      await this.agent.invoke(
-        { messages: [{ role: 'user', content: contextMsg }] },
-        config,
-      );
+      try {
+        await this.agent.invoke(
+          { messages: [{ role: 'user', content: contextMsg }] },
+          config,
+        );
+      } catch (e) {
+        log(`Context injection failed (non-fatal): ${e.message}`);
+      }
     }
 
     dbUpdateSession(db, sessionId, { status: 'active' });
@@ -272,7 +281,7 @@ export class ProjectAgentSession {
   }
 
   get _dbSessionId() {
-    return this._resumedFromSession || this.threadId;
+    return this._originalDbSessionId || this._resumedFromSession || this.threadId;
   }
 
   _persistUserMessage(content) {
@@ -331,11 +340,25 @@ export class ProjectAgentSession {
         this._rollingSummary = await this._updateRollingSummary(evictedMessages);
       }
 
-      const recentFormatted = recentMessages.map((m) => {
-        const role = m._getType?.() === 'human' ? 'user' : 'assistant';
-        const content = typeof m.content === 'string' ? m.content : '';
-        return { role, content };
-      });
+      const recentFormatted = [];
+      for (const m of recentMessages) {
+        const type = m._getType?.() || m.constructor?.name || '';
+        if (type === 'tool' || type === 'ToolMessage') continue;
+
+        const role = type === 'human' ? 'user' : 'assistant';
+        let content = typeof m.content === 'string' ? m.content : '';
+
+        if (m.tool_calls?.length) {
+          const toolSummary = m.tool_calls.map((tc) => `${tc.name}(${JSON.stringify(tc.args || {}).slice(0, 100)})`).join(', ');
+          content = content ? `${content}\n[之前调用了工具: ${toolSummary}]` : `[调用了工具: ${toolSummary}]`;
+        }
+        if (!content.trim()) continue;
+        recentFormatted.push({ role, content });
+      }
+
+      if (!this._originalDbSessionId) {
+        this._originalDbSessionId = this._dbSessionId;
+      }
 
       const { agent: newAgent, recursionLimit } = createProjectAgent(
         this.projectDir, this.projectName, this.domain,
@@ -351,16 +374,15 @@ export class ProjectAgentSession {
       const projectSummary = readProjectSummary(this.projectDir);
       if (projectSummary) contextParts.push(`<project_summary>\n${projectSummary}\n</project_summary>`);
       if (this._rollingSummary) contextParts.push(`<conversation_summary>\n${this._rollingSummary}\n</conversation_summary>`);
+      if (recentFormatted.length) {
+        const recentText = recentFormatted.map((m) => `${m.role === 'user' ? '用户' : '助理'}: ${m.content.slice(0, 300)}`).join('\n');
+        contextParts.push(`<recent_messages>\n${recentText}\n</recent_messages>`);
+      }
 
-      const injectionMsg = `[System context — do not repeat this to the user]\n\n${contextParts.join('\n\n')}`;
-
-      const seedMessages = [
-        { role: 'user', content: injectionMsg },
-        ...recentFormatted,
-      ];
+      const injectionMsg = `[System context — do not repeat this to the user. Do NOT call any tools in response to this message. Simply acknowledge by saying "已恢复上下文" in one short sentence.]\n\n${contextParts.join('\n\n')}`;
 
       const newConfig = this._threadConfig();
-      await this.agent.invoke({ messages: seedMessages }, newConfig);
+      await this.agent.invoke({ messages: [{ role: 'user', content: injectionMsg }] }, newConfig);
 
       log(`Compressed. New thread: ${newThreadId}, rolling summary: ${this._rollingSummary.length} chars`);
     } catch (e) {
@@ -434,6 +456,7 @@ export class ProjectAgentSession {
     this._lastAssistantTools = [];
     this._rollingSummary = '';
     this._resumedFromSession = null;
+    this._originalDbSessionId = null;
     sessionCache.delete(this.projectDir);
 
     return { ok: true };

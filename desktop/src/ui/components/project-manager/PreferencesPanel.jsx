@@ -59,11 +59,11 @@ function PrefRow({ pref, onToggle, onEdit, onDelete }) {
           <span className={`text-sm font-medium truncate ${pref.enabled ? 'text-slate-800' : 'text-slate-400'}`}>
             {pref.pattern || '未命名偏好'}
           </span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-medium flex-shrink-0">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#eceef7] text-[#3e4b9c] font-medium flex-shrink-0">
             {pref.tendency?.folder || '-'}
           </span>
           {pref.source !== 'user_defined' && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-600 font-medium flex-shrink-0">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#eceef7] text-[#515668] font-medium flex-shrink-0">
               {sourceLabel(pref.source)}
             </span>
           )}
@@ -137,7 +137,7 @@ function PrefForm({ folders, initial, onSave, onCancel }) {
   };
 
   const inputCls =
-    'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 bg-white';
+    'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3e4b9c]/20 focus:border-[#3e4b9c]/40 bg-white';
   const labelCls = 'block text-xs font-medium text-slate-600 mb-1';
 
   return (
@@ -219,7 +219,7 @@ function PrefForm({ folders, initial, onSave, onCancel }) {
         </button>
         <button
           type="submit"
-          className="px-4 py-1.5 text-xs rounded-lg bg-slate-800 text-white hover:bg-slate-700 font-medium"
+          className="px-4 py-1.5 text-xs rounded-lg bg-[#3e4b9c] text-white hover:bg-[#4e5bab] font-medium"
         >
           {initial ? '保存修改' : '添加偏好'}
         </button>
@@ -230,8 +230,8 @@ function PrefForm({ folders, initial, onSave, onCancel }) {
 
 function NLPreviewCard({ result, onConfirm, onEditThenAdd, onCancel }) {
   return (
-    <div className="mx-4 my-3 p-4 rounded-xl border border-blue-200 bg-blue-50/50 space-y-3">
-      <div className="flex items-center gap-2 text-sm font-medium text-blue-700">
+    <div className="mx-4 my-3 p-4 rounded-xl border border-[#d8dbed] bg-[#eceef7]/50 space-y-3">
+      <div className="flex items-center gap-2 text-sm font-medium text-[#3e4b9c]">
         <Sparkles size={14} />
         AI 解析结果预览
       </div>
@@ -243,7 +243,7 @@ function NLPreviewCard({ result, onConfirm, onEditThenAdd, onCancel }) {
         <div className="flex items-center gap-4">
           <div>
             <span className="text-slate-500">目标文件夹：</span>
-            <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-xs font-medium">{result.tendency?.folder}</span>
+            <span className="px-1.5 py-0.5 rounded bg-[#d8dbed] text-[#3e4b9c] text-xs font-medium">{result.tendency?.folder}</span>
           </div>
           <div>
             <span className="text-slate-500">强度：</span>
@@ -259,7 +259,7 @@ function NLPreviewCard({ result, onConfirm, onEditThenAdd, onCancel }) {
         <button
           type="button"
           onClick={onConfirm}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-[#3e4b9c] text-white hover:bg-[#4e5bab] font-medium"
         >
           <Check size={13} />
           确认添加
@@ -267,7 +267,7 @@ function NLPreviewCard({ result, onConfirm, onEditThenAdd, onCancel }) {
         <button
           type="button"
           onClick={onEditThenAdd}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-100 font-medium"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-[#d8dbed] text-[#3e4b9c] hover:bg-[#eceef7] font-medium"
         >
           <Pencil size={13} />
           编辑后添加
@@ -442,7 +442,7 @@ const PreferencesPanel = ({ projectName, domain, embedded = false }) => {
       <div className="px-4 pt-4 pb-2 border-b border-slate-100">
         <div className="flex items-start gap-2">
           <textarea
-            className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 bg-white resize-none"
+            className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3e4b9c]/20 focus:border-[#3e4b9c]/40 bg-white resize-none"
             placeholder="用自然语言描述偏好，例如：来自微信的 PDF 通常放到「外部资料」文件夹..."
             value={nlText}
             onChange={(e) => setNlText(e.target.value)}
@@ -459,7 +459,7 @@ const PreferencesPanel = ({ projectName, domain, embedded = false }) => {
             type="button"
             onClick={handleNlParse}
             disabled={!nlText.trim() || nlParsing}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap flex-shrink-0"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-[#3e4b9c] text-white hover:bg-[#4e5bab] font-medium disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap flex-shrink-0"
           >
             {nlParsing ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
             AI 解析
@@ -521,7 +521,7 @@ const PreferencesPanel = ({ projectName, domain, embedded = false }) => {
               setEditingPref(null);
               setShowForm(true);
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-slate-800 text-white hover:bg-slate-700 font-medium"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-[#3e4b9c] text-white hover:bg-[#4e5bab] font-medium"
           >
             <Plus size={13} />
             手动添加

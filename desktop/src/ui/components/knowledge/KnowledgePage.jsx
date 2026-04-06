@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, BookOpen, Loader2, Search, Undo2, FolderTree, Network, Trash2, Globe, AlertCircle, CheckCircle2 } from 'lucide-react';
 import KnowledgeToolbar from './KnowledgeToolbar.jsx';
 import KnowledgeItemCard from './KnowledgeItemCard.jsx';
@@ -8,7 +8,6 @@ import useKnowledgeLinker from './useKnowledgeLinker.js';
 import { FileTree } from '../snippetlinker/FileTree.jsx';
 import { AssociationNodeList } from '../snippetlinker/AssociationNodeList.jsx';
 import { ConnectorLines } from '../snippetlinker/ConnectorLines.jsx';
-import { ToastContainer } from '../snippetlinker/ToastContainer.jsx';
 
 export default function KnowledgePage({ projectName, domain, onBack }) {
   const domainOpts = domain ? { domain } : {};
@@ -221,6 +220,40 @@ export default function KnowledgePage({ projectName, domain, onBack }) {
     try { return `ipm-file:///${item._absolutePath.replace(/\\/g, '/')}`; } catch { return null; }
   }, []);
 
+  const [tempBoardToast, setTempBoardToast] = useState(null);
+  const tempBoardToastTimer = useRef(null);
+
+  const handleAddToTempBoard = useCallback(async (knowledgeItem) => {
+    if (!knowledgeItem?.id) return;
+    try {
+      const boardApi = window.ipm?.board;
+      if (!boardApi) return;
+      const { boards } = await boardApi.list();
+      let tempBoard = boards?.find((b) => b.name === '临时看板');
+      if (!tempBoard) {
+        const res = await boardApi.create('临时看板');
+        tempBoard = res?.board;
+      }
+      if (!tempBoard?.id) return;
+      await boardApi.addItem({
+        boardId: tempBoard.id,
+        knowledgeId: knowledgeItem.id,
+        sourceProject: projectName,
+        sourceDomain: domain,
+        x: 100 + Math.random() * 400,
+        y: 100 + Math.random() * 300,
+      });
+      setTempBoardToast('已加入「临时看板」');
+      if (tempBoardToastTimer.current) clearTimeout(tempBoardToastTimer.current);
+      tempBoardToastTimer.current = setTimeout(() => setTempBoardToast(null), 2500);
+    } catch (err) {
+      console.error('Add to temp board failed:', err);
+      setTempBoardToast('加入失败');
+      if (tempBoardToastTimer.current) clearTimeout(tempBoardToastTimer.current);
+      tempBoardToastTimer.current = setTimeout(() => setTempBoardToast(null), 2500);
+    }
+  }, [projectName, domain]);
+
   // ============ Render ============
   const isLinkerMode = viewMode === 'linker';
 
@@ -231,6 +264,7 @@ export default function KnowledgePage({ projectName, domain, onBack }) {
         domain={domain}
         itemId={noteEditId}
         onBack={() => { setNoteEditId(null); loadItems(); loadStats(); }}
+        onAddToTempBoard={handleAddToTempBoard}
       />
     );
   }
@@ -322,9 +356,6 @@ export default function KnowledgePage({ projectName, domain, onBack }) {
       {/* ======= Content: manage vs linker ======= */}
       {isLinkerMode ? (
         <div className="flex-1 flex h-full min-h-0 relative" onDragStart={linker.handleDragStart}>
-          {/* Toasts */}
-          <ToastContainer toasts={linker.toasts} onDismiss={linker.dismissToast} />
-
           {/* Connector lines */}
           <ConnectorLines
             viewMode={linker.linkerSubView}
@@ -492,6 +523,7 @@ export default function KnowledgePage({ projectName, domain, onBack }) {
         onEditNote={(id) => { setActiveItemId(null); setDetailItem(null); setNoteEditId(id); }}
         projectName={projectName}
         domain={domain}
+        onAddToTempBoard={handleAddToTempBoard}
         onConvertToNote={async (id) => {
           if (!api?.update) return;
           try {
@@ -610,6 +642,17 @@ export default function KnowledgePage({ projectName, domain, onBack }) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {tempBoardToast && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          background: '#1F2937', color: 'white', padding: '8px 20px', borderRadius: 8,
+          fontSize: 13, zIndex: 9999, boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          animation: 'fadeIn 0.2s ease',
+        }}>
+          {tempBoardToast}
         </div>
       )}
     </div>

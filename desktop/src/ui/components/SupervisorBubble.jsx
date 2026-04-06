@@ -97,22 +97,28 @@ const SupervisorBubble = ({ onNavigateToKnowClaw }) => {
     if (morphTimerRef.current) { clearTimeout(morphTimerRef.current); morphTimerRef.current = null; }
   };
 
+  const dismissMorph = useCallback(() => {
+    clearMorphTimer();
+    setMorphState('collapsing');
+    morphTimerRef.current = setTimeout(() => {
+      setMorphState('idle');
+      setCurrentToast(null);
+      dequeue();
+    }, 300);
+  }, [dequeue]);
+
   const startMorph = useCallback((toast) => {
     clearMorphTimer();
     setCurrentToast(toast);
     setMorphState('expanding');
+    const showDuration = toast.action ? 6000 : 3500;
     morphTimerRef.current = setTimeout(() => {
       setMorphState('showing');
       morphTimerRef.current = setTimeout(() => {
-        setMorphState('collapsing');
-        morphTimerRef.current = setTimeout(() => {
-          setMorphState('idle');
-          setCurrentToast(null);
-          dequeue();
-        }, 300);
-      }, 3500);
+        dismissMorph();
+      }, showDuration);
     }, 300);
-  }, [dequeue]);
+  }, [dismissMorph]);
 
   useEffect(() => {
     if (expanded || morphState !== 'idle' || queue.length === 0) return;
@@ -136,31 +142,29 @@ const SupervisorBubble = ({ onNavigateToKnowClaw }) => {
 
   if (!expanded) {
     return (
-      <div className="fixed bottom-10 right-6 z-50">
+      <div className="fixed bottom-10 right-6 z-50 flex flex-col items-end">
         <div className="relative">
-          <button
-            type="button"
-            onClick={() => {
+          <div
+            onClick={(e) => {
+              if (e.defaultPrevented) return;
               if (isMorphing) {
-                clearMorphTimer();
-                setMorphState('idle');
-                setCurrentToast(null);
-                dequeue();
+                dismissMorph();
+                return;
               }
               setExpanded(true);
             }}
             onContextMenu={handleContextMenu}
             className={[
-              'relative flex items-center',
+              'relative flex items-center cursor-pointer',
               'bg-gradient-to-br from-violet-600 to-indigo-600 text-white',
               'shadow-lg shadow-violet-300/40 hover:shadow-xl hover:shadow-violet-300/60',
               'transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]',
               'overflow-hidden group',
               isMorphing
-                ? 'h-11 rounded-full pl-3.5 pr-5'
+                ? 'h-11 rounded-full pl-3.5 pr-4'
                 : 'w-12 h-12 rounded-full justify-center hover:scale-105',
             ].join(' ')}
-            style={isMorphing ? { width: 'auto', maxWidth: '380px' } : {}}
+            style={isMorphing ? { width: 'auto', maxWidth: 'calc(100vw - 48px)' } : {}}
             title="KnowClaw — 右键跳转完整界面"
           >
             {/* Brain icon: visible when idle, hidden when morphing */}
@@ -172,16 +176,30 @@ const SupervisorBubble = ({ onNavigateToKnowClaw }) => {
 
             {/* Morph toast content */}
             {isMorphing && (
-              <div className={`flex items-center gap-2.5 whitespace-nowrap ${
+              <div className={`flex items-center gap-2.5 min-w-0 ${
                 morphState === 'collapsing' ? 'animate-morph-text-out' : 'animate-morph-text-in'
               }`}>
                 <div className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
-                <span className="text-sm font-medium leading-none">{currentToast.message}</span>
+                <span className="text-sm font-medium leading-none truncate">{currentToast.message}</span>
+                {currentToast.action && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      currentToast.action.onClick?.();
+                      dismissMorph();
+                    }}
+                    className="shrink-0 ml-1 px-2.5 py-1 text-xs font-semibold rounded-full bg-white/20 hover:bg-white/35 transition-colors"
+                  >
+                    {currentToast.action.label}
+                  </button>
+                )}
               </div>
             )}
-          </button>
+          </div>
 
-          {/* Badge — outside button to avoid overflow-hidden clipping */}
+          {/* Badge — outside to avoid overflow-hidden clipping */}
           {!isMorphing && badgeCount > 0 && (
             <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 rounded-full flex items-center justify-center text-[10px] font-bold text-white px-1 animate-bounce-subtle pointer-events-none">
               {badgeCount > 99 ? '99+' : badgeCount}

@@ -28,7 +28,6 @@ const HeaderBar = ({
   isRoot,
   showGoParent,
   onGoParent,
-  showRootPlaceholder,
   filterTypes,
   filterOptions,
   filterPersistent,
@@ -89,7 +88,7 @@ const HeaderBar = ({
   }, [filterOpen]);
 
   return (
-    <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
+    <header className="bg-white border-b border-[#e2e4eb] sticky top-0 z-10">
       <div className="px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 relative">
         <div className="flex items-center gap-3 overflow-hidden w-full md:w-auto pr-16 md:pr-0">
           <div className="flex items-center gap-3 pr-3 border-r border-slate-200 mr-3 shrink-0 max-w-[70%] sm:max-w-none">
@@ -122,7 +121,7 @@ const HeaderBar = ({
                     className={`${
                       crumb.active
                         ? 'font-semibold text-slate-900'
-                        : 'text-slate-600 hover:text-blue-600'
+                        : 'text-slate-600 hover:text-[#3e4b9c]'
                     } transition-colors`}
                     title={crumb.label}
                   >
@@ -170,15 +169,6 @@ const HeaderBar = ({
               <ArrowLeft size={14} /> 上一级
             </button>
           ) : null}
-          {showRootPlaceholder ? (
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-slate-100 text-slate-500 border border-slate-200 text-sm cursor-default"
-              title="AI分析（占位）"
-            >
-              <Sparkles size={14} /> AI分析
-            </button>
-          ) : null}
           {showGoRoot ? (
             <button
               type="button"
@@ -220,7 +210,7 @@ const HeaderBar = ({
               type="button"
               className={`inline-flex items-center gap-2 h-9 px-3 rounded-lg border transition-colors text-sm ${
                 hasActiveFilter
-                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200 animate-pulse'
+                  ? 'bg-[#eceef7] text-[#3e4b9c] border-[#d8dbed]'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
               }`}
               title="筛选文件类型"
@@ -262,7 +252,7 @@ const HeaderBar = ({
                       }`}
                     >
                       <span>{opt.label}</span>
-                      {isSelected(opt.value) ? <Check size={14} className="text-emerald-600" /> : null}
+                      {isSelected(opt.value) ? <Check size={14} className="text-[#3e4b9c]" /> : null}
                     </button>
                   ))}
                 </div>
@@ -296,9 +286,9 @@ const HeaderBar = ({
             <>
               <button
                 type="button"
-                onClick={onImportLocalFolder}
-                className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 transition-colors text-sm"
-                title="导入一个本地文件夹（仅用于浏览/基础文件操作）"
+                disabled
+                className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-slate-100 text-slate-400 border border-slate-200 text-sm cursor-not-allowed"
+                title="正在开发中"
               >
                 导入本地
               </button>
@@ -317,7 +307,7 @@ const HeaderBar = ({
                   <button
                     type="button"
                     onClick={onCreateProject}
-                    className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors text-sm shadow-sm"
+                    className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-[#3e4b9c] text-white hover:bg-[#4e5bab] transition-colors text-sm shadow-sm"
                   >
                     <Plus size={14} /> 新建{createLabel}
                   </button>
@@ -368,7 +358,7 @@ const HeaderBar = ({
                 className={`inline-flex items-center gap-2 h-9 px-3 rounded-lg text-sm font-medium transition-colors shadow-sm ${
                   aiUploadRunning || !allowAiUpload
                     ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-700 hover:to-indigo-700'
+                    : 'bg-[#3e4b9c] text-white hover:bg-[#4e5bab]'
                 }`}
                 title="选择一个或多个文件，逐个放入 temp，并逐个触发 AI 分类推荐"
               >

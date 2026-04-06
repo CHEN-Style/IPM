@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState, lazy, Suspense } from 'react';
-import { ArrowLeft, Save, Clock, Tag, X, Pin, PinOff, Trash2, StickyNote } from 'lucide-react';
+import { ArrowLeft, Save, Clock, Tag, X, Pin, PinOff, Trash2, StickyNote, LayoutDashboard } from 'lucide-react';
 
 const NoteEditor = lazy(() => import('./NoteEditor.jsx'));
 
-export default function NoteEditorPage({ projectName, domain, itemId, onBack }) {
+export default function NoteEditorPage({ projectName, domain, itemId, onBack, onAddToTempBoard }) {
   const domainOpts = domain ? { domain } : {};
   const api = window.ipm?.knowledge;
 
@@ -142,6 +142,11 @@ export default function NoteEditorPage({ projectName, domain, itemId, onBack }) 
 
         <div className="flex items-center gap-2">
           {saving && <span className="text-xs text-slate-400">保存中...</span>}
+          {onAddToTempBoard && (
+            <button type="button" onClick={() => onAddToTempBoard?.(item)} className="p-1.5 rounded-md border border-slate-200 bg-white text-slate-400 hover:text-teal-600 hover:border-teal-200 hover:bg-teal-50 transition-colors" title="加入临时看板">
+              <LayoutDashboard size={15} />
+            </button>
+          )}
           <button type="button" onClick={handleTogglePin} className={`p-1.5 rounded-md border transition-colors ${item.pinned ? 'bg-amber-50 border-amber-200 text-amber-600' : 'bg-white border-slate-200 text-slate-400 hover:text-amber-500'}`} title={item.pinned ? '取消置顶' : '置顶'}>
             {item.pinned ? <PinOff size={15} /> : <Pin size={15} />}
           </button>

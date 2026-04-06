@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Ban, Check, Folder, Info, Search, Wand2 } from 'lucide-react';
 import ExplorerTree from './ExplorerTree.jsx';
 import RejectPopover from './RejectPopover.jsx';
+import { isHiddenSystemDir, folderTooltip } from './utils.js';
 
 const EntryTable = ({
   errorText,
@@ -52,7 +53,7 @@ const EntryTable = ({
     return '其他';
   };
   const list = [
-    ...(entries || []),
+    ...(entries || []).filter((e) => !isHiddenSystemDir(e)),
     ...(pendingGhostsInCwd || []).map((g) => ({
       kind: 'ghost',
       name: g.fileName || 'file',
@@ -126,8 +127,9 @@ const EntryTable = ({
                       onOpenFile?.(src);
                     }
                   }}
+                  title={e.kind === 'dir' ? folderTooltip(e.relPath) : undefined}
                   className={`transition-all duration-200 hover:bg-slate-50/50 cursor-pointer ${
-                    e.kind === 'dir' && dragOverFolderRelPath === e.relPath ? 'ring-2 ring-blue-300 bg-blue-50/40' : ''
+                    e.kind === 'dir' && dragOverFolderRelPath === e.relPath ? 'ring-2 ring-[#d8dbed] bg-[#eceef7]/40' : ''
                   } ${e.kind === 'ghost' ? 'opacity-80 bg-amber-50/40 hover:bg-amber-50/60' : ''}`}
                   draggable={e.kind !== 'ghost'}
                   onDragStart={e.kind === 'ghost' ? undefined : (evt) => onDragStartEntry?.(evt, e)}
@@ -219,7 +221,7 @@ const EntryTable = ({
                         </div>
                         <button
                           type="button"
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-violet-600 rounded hover:bg-violet-50 hover:border-violet-200 transition-colors"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-[#3e4b9c] rounded hover:bg-[#eceef7] hover:border-[#d8dbed] transition-colors"
                           onClick={(evt) => {
                             evt.preventDefault();
                             evt.stopPropagation();

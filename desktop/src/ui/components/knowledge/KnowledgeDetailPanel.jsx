@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { X, Tag, Clock, Pin, PinOff, Archive, ArchiveRestore, Trash2, Link2, FileText, Image, StickyNote, ArrowRightLeft, Globe, ExternalLink, ImagePlus, Loader2 } from 'lucide-react';
+import { X, Tag, Clock, Pin, PinOff, Archive, ArchiveRestore, Trash2, Link2, FileText, Image, StickyNote, ArrowRightLeft, Globe, ExternalLink, ImagePlus, Loader2, FolderInput, LayoutDashboard } from 'lucide-react';
 
-export default function KnowledgeDetailPanel({ item, isOpen, onClose, onUpdate, onDelete, onTogglePin, onToggleArchive, screenshotSrc, onEditNote, onConvertToNote, projectName, domain }) {
+export default function KnowledgeDetailPanel({ item, isOpen, onClose, onUpdate, onDelete, onTogglePin, onToggleArchive, screenshotSrc, onEditNote, onConvertToNote, projectName, domain, isDraft, onAssignDraft, onAddToTempBoard }) {
   const [formData, setFormData] = useState(null);
   const [newTag, setNewTag] = useState('');
   const [isDirty, setIsDirty] = useState(false);
@@ -106,6 +106,11 @@ export default function KnowledgeDetailPanel({ item, isOpen, onClose, onUpdate, 
                 <TypeIcon size={10} />
                 {formData.type === 'screenshot' ? '截图' : formData.type === 'note' ? '笔记' : formData.type === 'webclip' ? '网页' : '文本'}
               </span>
+              {isDraft && (
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded">
+                  草稿
+                </span>
+              )}
             </div>
             <input
               type="text"
@@ -121,6 +126,11 @@ export default function KnowledgeDetailPanel({ item, isOpen, onClose, onUpdate, 
             </div>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {onAddToTempBoard && (
+              <button type="button" onClick={() => onAddToTempBoard?.(formData)} className="p-1.5 rounded-md hover:bg-teal-50 text-slate-400 hover:text-teal-600 transition-colors" title="加入临时看板">
+                <LayoutDashboard size={16} />
+              </button>
+            )}
             <button type="button" onClick={() => onTogglePin?.(formData)} className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-amber-500 transition-colors" title={formData.pinned ? '取消置顶' : '置顶'}>
               {formData.pinned ? <PinOff size={16} /> : <Pin size={16} />}
             </button>
@@ -318,10 +328,25 @@ export default function KnowledgeDetailPanel({ item, isOpen, onClose, onUpdate, 
             </section>
           )}
 
+          {/* Draft assign button */}
+          {isDraft && onAssignDraft && (
+            <section>
+              <button
+                type="button"
+                onClick={onAssignDraft}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-indigo-700 bg-indigo-50 border-2 border-dashed border-indigo-200 rounded-xl hover:bg-indigo-100 hover:border-indigo-300 transition-all"
+              >
+                <FolderInput size={16} />
+                归属到项目
+              </button>
+              <p className="text-[10px] text-slate-400 text-center mt-1.5">选择目标项目后，此草稿将转为正式知识碎片</p>
+            </section>
+          )}
+
           {/* Source */}
           <section className="pt-4 border-t border-slate-100">
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">来源</label>
-            <div className="text-xs text-slate-500">{formData.source_kind || 'manual'}</div>
+            <div className="text-xs text-slate-500">{isDraft ? '草稿' : (formData.source_kind || 'manual')}</div>
           </section>
         </div>
       </div>

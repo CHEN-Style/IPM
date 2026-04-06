@@ -64,7 +64,7 @@ function EventRow({ event, detailed, onEditFeedback }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-slate-800 truncate">{event.fileName}</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-medium flex-shrink-0">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#eceef7] text-[#3e4b9c] font-medium flex-shrink-0">
               {isAccepted ? event.actualFolder : event.suggestedFolder}
             </span>
             {!isAccepted && (
@@ -224,7 +224,7 @@ const ClassifyEventsTab = ({ projectName, domain }) => {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索文件名、文件夹..."
-            className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 bg-white"
+            className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3e4b9c]/20 focus:border-[#3e4b9c]/40 bg-white"
           />
           {search && (
             <button type="button" onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-slate-100">
@@ -252,7 +252,7 @@ const ClassifyEventsTab = ({ projectName, domain }) => {
           type="button"
           onClick={() => setDetailed(!detailed)}
           className={`px-3 py-1.5 text-[11px] font-medium rounded-lg border transition-colors ${
-            detailed ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+            detailed ? 'bg-[#3e4b9c] text-white border-[#3e4b9c]' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
           }`}
         >
           {detailed ? '详细' : '简略'}
@@ -303,7 +303,7 @@ const ClassifyEventsTab = ({ projectName, domain }) => {
               value={feedbackDraft}
               onChange={(e) => setFeedbackDraft(e.target.value)}
               placeholder="说明拒绝原因，例如：这个文件应该归到交付成果，因为..."
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400"
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[#3e4b9c]/20 focus:border-[#3e4b9c]/40"
               rows={3}
               autoFocus
             />
@@ -318,7 +318,7 @@ const ClassifyEventsTab = ({ projectName, domain }) => {
               <button
                 type="button"
                 onClick={handleSaveFeedback}
-                className="px-4 py-1.5 text-xs bg-slate-800 text-white rounded-lg hover:bg-slate-700 font-medium"
+                className="px-4 py-1.5 text-xs bg-[#3e4b9c] text-white rounded-lg hover:bg-[#4e5bab] font-medium"
               >
                 保存
               </button>

@@ -50,7 +50,7 @@ function RuleRow({ rule, onToggle, onEdit, onDelete }) {
           <span className={`text-sm font-medium truncate ${rule.enabled ? 'text-slate-800' : 'text-slate-400'}`}>
             {rule.label || '未命名规则'}
           </span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-medium flex-shrink-0">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#eceef7] text-[#3e4b9c] font-medium flex-shrink-0">
             {rule.targetFolder}
           </span>
           {rule.source === 'promoted' ? (
@@ -118,7 +118,7 @@ function RuleForm({ folders, initial, onSave, onCancel }) {
   };
 
   const inputCls =
-    'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 bg-white';
+    'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3e4b9c]/20 focus:border-[#3e4b9c]/40 bg-white';
   const labelCls = 'block text-xs font-medium text-slate-600 mb-1';
 
   return (
@@ -183,7 +183,7 @@ function RuleForm({ folders, initial, onSave, onCancel }) {
         </button>
         <button
           type="submit"
-          className="px-4 py-1.5 text-xs rounded-lg bg-slate-800 text-white hover:bg-slate-700 font-medium"
+          className="px-4 py-1.5 text-xs rounded-lg bg-[#3e4b9c] text-white hover:bg-[#4e5bab] font-medium"
         >
           {initial ? '保存修改' : '添加规则'}
         </button>
@@ -318,7 +318,7 @@ const ClassifyRulesPanel = ({ projectName, domain, open, onClose, embedded = fal
               setEditingRule(null);
               setShowForm(true);
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-slate-800 text-white hover:bg-slate-700 font-medium"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-[#3e4b9c] text-white hover:bg-[#4e5bab] font-medium"
           >
             <Plus size={13} />
             添加规则
@@ -340,8 +340,8 @@ const ClassifyRulesPanel = ({ projectName, domain, open, onClose, embedded = fal
       >
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-blue-50 border border-blue-200/60">
-              <ShieldCheck size={16} className="text-blue-600" />
+            <div className="p-2 rounded-lg bg-[#eceef7] border border-[#d8dbed]">
+              <ShieldCheck size={16} className="text-[#3e4b9c]" />
             </div>
             <div>
               <div className="text-sm font-semibold text-slate-800">分类规则管理</div>

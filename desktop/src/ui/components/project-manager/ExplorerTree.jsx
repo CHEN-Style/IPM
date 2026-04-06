@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { isHiddenSystemDir, folderTooltip } from './utils.js';
 
 const ExplorerTree = ({
   name,
@@ -58,6 +59,7 @@ const ExplorerTree = ({
         onDragOver={(evt) => onDragOverFolder?.(evt, { kind: 'dir', relPath: rp })}
         onDragLeave={(evt) => onDragLeaveFolder?.(evt, { kind: 'dir', relPath: rp })}
         onDrop={(evt) => onDropOnFolder?.(evt, { kind: 'dir', relPath: rp, name: name || '文件夹' })}
+        title={folderTooltip(rp)}
         className="flex items-center gap-2 py-1.5 px-2 hover:bg-slate-50 rounded cursor-pointer group transition-colors"
         style={{ paddingLeft: `${depth * 20 + 8}px` }}
       >
@@ -74,7 +76,7 @@ const ExplorerTree = ({
         <div className="relative">
           <div className="absolute left-0 top-0 bottom-0 w-[1px] bg-slate-100" style={{ marginLeft: `${depth * 20 + 15}px` }} />
           {Array.isArray(children) &&
-            children.map((e) => {
+            children.filter((e) => !isHiddenSystemDir(e)).map((e) => {
               if (e.kind === 'dir') {
                 return (
                   <ExplorerTree

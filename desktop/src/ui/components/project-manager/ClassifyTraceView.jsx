@@ -126,12 +126,12 @@ function ToolResultContent({ content, toolName }) {
     return (
       <div className="space-y-1.5">
         {parsed.map((p, i) => (
-          <div key={i} className="p-2 rounded-lg border border-indigo-100 bg-indigo-50/40 text-xs">
+          <div key={i} className="p-2 rounded-lg border border-[#d8dbed] bg-[#eceef7]/40 text-xs">
             <div className="text-gray-700"><span className="text-gray-400">偏好：</span>{p.pattern || '(无描述)'}</div>
             <div className="text-gray-600">
               <span className="text-gray-400">目标 →</span> {p.folder || '(无)'}
               <span className="ml-2 text-gray-400">强度：</span>
-              <span className={p.strength >= 0.7 ? 'text-indigo-600 font-semibold' : 'text-gray-500'}>{p.strength}</span>
+              <span className={p.strength >= 0.7 ? 'text-[#3e4b9c] font-semibold' : 'text-gray-500'}>{p.strength}</span>
             </div>
           </div>
         ))}
@@ -253,12 +253,12 @@ function StepNode({ step, animDelay }) {
   if (step.type === 'fast-path-user-rule') {
     return (
       <div className="flex items-start gap-4" style={style}>
-        <div className="w-8 h-8 rounded-full bg-blue-50 border border-blue-200/60 flex items-center justify-center shrink-0 z-10 mt-0.5">
-          <Zap size={14} className="text-blue-500" />
+        <div className="w-8 h-8 rounded-full bg-[#eceef7] border border-[#d8dbed] flex items-center justify-center shrink-0 z-10 mt-0.5">
+          <Zap size={14} className="text-[#3e4b9c]" />
         </div>
         <div className="flex-1 min-w-0 pt-1">
-          <div className="text-sm font-medium text-blue-700 mb-2">用户规则匹配</div>
-          <div className="p-3.5 bg-blue-50/50 border border-blue-100 rounded-xl space-y-1">
+          <div className="text-sm font-medium text-[#3e4b9c] mb-2">用户规则匹配</div>
+          <div className="p-3.5 bg-[#eceef7]/50 border border-[#d8dbed] rounded-xl space-y-1">
             {step.ruleLabel && (
               <div className="text-xs text-gray-600">
                 <span className="text-gray-400">规则：</span>{step.ruleLabel}
@@ -602,7 +602,7 @@ const ClassifyTraceView = ({ open, loading, data, onClose }) => {
                           animation: `traceStepIn 0.4s ease-out ${80 + merged.length * 60}ms both`,
                         }}
                       >
-                        <div className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center shrink-0 z-10 shadow-md">
+                        <div className="w-8 h-8 rounded-full bg-[#3e4b9c] flex items-center justify-center shrink-0 z-10 shadow-md">
                           <Check size={14} className="text-white" strokeWidth={2.5} />
                         </div>
                         <span className="text-sm text-gray-800 font-medium">分类完成</span>

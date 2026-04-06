@@ -23,6 +23,7 @@ import useClassifyPipeline from './project-manager/hooks/useClassifyPipeline.js'
 import ClassifyTraceView from './project-manager/ClassifyTraceView.jsx';
 import PreferencesPage from './project-manager/PreferencesPage.jsx';
 import ChatPanel from './agent-chat/ChatPanel.jsx';
+import CreateKnowledgeModal from './project-manager/CreateKnowledgeModal.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { fileDecor, folderDecor, fmtBytes, fmtTime } from './project-manager/utils.js';
 
@@ -202,6 +203,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
       });
     }
   };
+  const [createKnowledgeTarget, setCreateKnowledgeTarget] = useState(null);
   const {
     menu,
     closeMenu,
@@ -223,6 +225,11 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
     openRename,
     deleteEntry,
     removeLocalFolder,
+    onCreateKnowledge: (entry) => {
+      const projName = cwd?.name || currentProject;
+      if (!projName) return;
+      setCreateKnowledgeTarget({ entry, projectName: projName, domain: normalizedDomain });
+    },
   });
   const title = useMemo(() => {
     if (isRoot) return entityLabelAll;
@@ -428,7 +435,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
   const inProject = cwd.type === 'project';
 
   return (
-    <div className="flex-1 flex h-full bg-white relative" onClick={closeMenu}>
+    <div className="flex-1 flex h-full bg-[#f8f9fb] relative" onClick={closeMenu}>
     <div className="flex-1 flex flex-col min-w-0 h-full">
       {/* Hidden file input for “Upload & AI classify” (Electron gives file.path) */}
       <input
@@ -450,14 +457,13 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
         onNavigateBreadcrumb={handleNavigateBreadcrumb}
         showBackHome={typeof onBackHome === 'function'}
         onBackHome={onBackHome}
-        showGoRoot={cwd.type === 'project' && !cwd.relPath}
+        showGoRoot={cwd.type === 'project' && !cwd.relPath && !isStudy}
         onGoRoot={goRoot}
         viewMode={viewMode}
         onSetViewMode={setViewModeSafe}
         isRoot={isRoot}
         showGoParent={!isRoot && Boolean(cwd.relPath)}
         onGoParent={goParent}
-        showRootPlaceholder={isRoot}
         filterTypes={fileFilters}
         filterOptions={fileFilterOptions}
         filterPersistent={filterPersistent}
@@ -604,7 +610,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
               <button type="button" className="px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded" onClick={() => setNewFolderOpen(false)}>
                 取消
               </button>
-              <button type="button" className="px-3 py-2 text-sm bg-slate-900 text-white rounded hover:bg-slate-800" onClick={createFolder}>
+              <button type="button" className="px-3 py-2 text-sm bg-[#3e4b9c] text-white rounded hover:bg-[#4e5bab]" onClick={createFolder}>
                 创建
               </button>
             </div>
@@ -632,7 +638,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
               <button type="button" className="px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded" onClick={() => setRenameOpen(false)}>
                 取消
               </button>
-              <button type="button" className="px-3 py-2 text-sm bg-slate-900 text-white rounded hover:bg-slate-800" onClick={doRename}>
+              <button type="button" className="px-3 py-2 text-sm bg-[#3e4b9c] text-white rounded hover:bg-[#4e5bab]" onClick={doRename}>
                 确认
               </button>
             </div>
@@ -683,6 +689,14 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
         projectName={chatProjectCtx.name}
         domain={normalizedDomain}
         onClose={() => setChatProjectCtx(null)}
+      />
+    )}
+
+    {createKnowledgeTarget && (
+      <CreateKnowledgeModal
+        target={createKnowledgeTarget}
+        onClose={() => setCreateKnowledgeTarget(null)}
+        onNavigateKnowledge={() => setKnowledgeCtx({ name: createKnowledgeTarget.projectName })}
       />
     )}
     </div>

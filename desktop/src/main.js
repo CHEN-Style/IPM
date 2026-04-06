@@ -1180,7 +1180,7 @@ const createFloatingWindow = () => {
   floatingWindow = new BrowserWindow({
     width: 420,
     height: 560,
-    frame: false, // 关键：无系统标题栏（无最小化/最大化/关闭那一栏）
+    frame: false,
     transparent: true,
     backgroundColor: '#00000000',
     resizable: false,
@@ -1188,7 +1188,7 @@ const createFloatingWindow = () => {
     minimizable: false,
     fullscreenable: false,
     alwaysOnTop: true,
-    skipTaskbar: true,
+    skipTaskbar: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1196,14 +1196,20 @@ const createFloatingWindow = () => {
     },
   });
 
+  floatingWindow.setAlwaysOnTop(true, 'screen-saver');
+
   loadRenderer(floatingWindow, 'floating');
 
-  // DevTools 默认不开，避免打扰（需要时可以手动打开）
+  floatingWindow.on('blur', () => {
+    if (floatingWindow && !floatingWindow.isDestroyed()) {
+      floatingWindow.setAlwaysOnTop(true, 'screen-saver');
+    }
+  });
+
   floatingWindow.on('closed', () => {
     floatingWindow = null;
     floatingWindowRef.current = null;
     stopClipboardWatcher();
-    // 如果用户直接关掉浮窗，则回到中台
     if (mainWindow) mainWindow.show();
   });
 
@@ -1450,6 +1456,10 @@ app.whenReady().then(() => {
     resolveInside,
     trashOrRm,
     emitKnowledgeChanged,
+    getProjectsRoot,
+    getCasesRoot,
+    getStudyRoot,
+    isTombstoneProjectName,
   });
 
   registerFloatingIpc({

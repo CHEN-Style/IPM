@@ -39,7 +39,6 @@ export default function useKnowledgeLinker({ projectName, domain, items, onItems
   const [linkerSubView, setLinkerSubView] = useState('structure'); // structure | association
   const [focusedNodeId, setFocusedNodeId] = useState(null);
 
-  const [toasts, setToasts] = useState([]);
   const [history, setHistory] = useState([]);
 
   const fileNodeRefs = useRef(new Map());
@@ -77,20 +76,13 @@ export default function useKnowledgeLinker({ projectName, domain, items, onItems
   const { showToast: globalToast } = useToast();
 
   const addToast = useCallback((message, type = 'info', action) => {
-    if (!action) {
-      globalToast(message, type);
-      return;
-    }
-    const id = Date.now().toString();
-    setToasts((prev) => [...prev, { id, message, type, actionLabel: action?.label, onAction: action?.onClick }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+    globalToast(
+      message,
+      type,
+      action ? { label: action.label, onClick: action.onClick } : undefined,
+    );
   }, [globalToast]);
 
-  const dismissToast = useCallback((id) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, []);
 
   // Tree actions
   const handleToggleExpand = useCallback((id) => {
@@ -252,8 +244,6 @@ export default function useKnowledgeLinker({ projectName, domain, items, onItems
     setLinkerSubView,
     focusedNodeId,
     setFocusedNodeId,
-    toasts,
-    dismissToast,
     history,
     linkedCounts,
     displayedItems,

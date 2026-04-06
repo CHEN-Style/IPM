@@ -85,7 +85,7 @@ const FolderDetailPanel = ({
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      className="px-2.5 py-1 text-[11px] font-semibold bg-slate-900 text-white rounded hover:bg-slate-800 disabled:opacity-50"
+                      className="px-2.5 py-1 text-[11px] font-semibold bg-[#3e4b9c] text-white rounded hover:bg-[#4e5bab] disabled:opacity-50"
                       disabled={descSaving}
                       onClick={onSave}
                     >

@@ -188,15 +188,19 @@ const App = () => {
             {displayNav === 'settings' ? (
             <SettingsPage />
             ) : displayNav === 'overview' ? (
-              <OverviewPage stats={workspaceStats} onOpenDomain={openMyDataDomain} />
+              <OverviewPage />
             ) : displayNav === 'knowledge' ? (
-            <KnowledgePanorama />
+            <KnowledgePanorama
+              onNavigateToProject={(projectName, domain) => {
+                openMyDataDomain(domain || 'projects');
+              }}
+            />
             ) : displayNav === 'knowclaw' ? (
             <KnowClawPage />
             ) : displayNav === 'mydata' ? (
-              <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} />
+              <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} onNavigate={setActiveNav} />
           ) : (
-              <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} />
+              <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} onNavigate={setActiveNav} />
           )}
           </div>
         </main>

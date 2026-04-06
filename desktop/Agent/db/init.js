@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
 
-const CURRENT_VERSION = 3;
+const CURRENT_VERSION = 7;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS suggestions (
@@ -142,6 +142,59 @@ CREATE INDEX IF NOT EXISTS idx_kl_item ON knowledge_links(item_id);
 CREATE INDEX IF NOT EXISTS idx_kl_target ON knowledge_links(target_path);
 `;
 
+const MIGRATION_V4 = `
+CREATE TABLE IF NOT EXISTS boards (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL DEFAULT '',
+  is_main     INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS board_items (
+  id              TEXT PRIMARY KEY,
+  board_id        TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+  knowledge_id    TEXT NOT NULL,
+  source_project  TEXT NOT NULL DEFAULT '',
+  source_domain   TEXT NOT NULL DEFAULT 'projects',
+  x               REAL NOT NULL DEFAULT 100,
+  y               REAL NOT NULL DEFAULT 100,
+  rotation        REAL NOT NULL DEFAULT 0,
+  width           REAL NOT NULL DEFAULT 240,
+  height          REAL DEFAULT NULL,
+  z_index         INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bi_board ON board_items(board_id);
+CREATE INDEX IF NOT EXISTS idx_bi_knowledge ON board_items(knowledge_id);
+`;
+
+const MIGRATION_V5 = `
+CREATE TABLE IF NOT EXISTS board_connections (
+  id            TEXT PRIMARY KEY,
+  board_id      TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+  from_item_id  TEXT NOT NULL REFERENCES board_items(id) ON DELETE CASCADE,
+  to_item_id    TEXT NOT NULL REFERENCES board_items(id) ON DELETE CASCADE,
+  color         TEXT NOT NULL DEFAULT '#e8a0a0',
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bc_board ON board_connections(board_id);
+
+CREATE TABLE IF NOT EXISTS board_groups (
+  id          TEXT PRIMARY KEY,
+  board_id    TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL DEFAULT '',
+  x           REAL NOT NULL DEFAULT 0,
+  y           REAL NOT NULL DEFAULT 0,
+  width       REAL NOT NULL DEFAULT 400,
+  height      REAL NOT NULL DEFAULT 300,
+  color       TEXT NOT NULL DEFAULT 'rgba(74,158,142,0.08)',
+  z_index     INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bg_board ON board_groups(board_id);
+`;
+
 function safeAlter(db, sql) {
   try { db.exec(sql); } catch { /* column may already exist */ }
 }
@@ -165,6 +218,45 @@ export function initDb(db) {
 
   if (version < 3) {
     db.exec(MIGRATION_V3);
+  }
+
+  if (version < 4) {
+    db.exec(MIGRATION_V4);
+  }
+
+  if (version < 5) {
+    db.exec(MIGRATION_V5);
+    safeAlter(db, 'ALTER TABLE board_items ADD COLUMN locked INTEGER DEFAULT 0');
+    safeAlter(db, 'ALTER TABLE board_items ADD COLUMN group_id TEXT DEFAULT NULL');
+    safeAlter(db, "ALTER TABLE boards ADD COLUMN bg_style TEXT DEFAULT 'grid'");
+    safeAlter(db, "ALTER TABLE boards ADD COLUMN bg_color TEXT DEFAULT ''");
+  }
+
+  if (version < 6) {
+    db.pragma('foreign_keys = OFF');
+    const hasOldConns = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='board_connections'").get();
+    if (hasOldConns) {
+      db.exec(`
+        CREATE TABLE board_connections_v2 (
+          id            TEXT PRIMARY KEY,
+          board_id      TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+          from_item_id  TEXT NOT NULL,
+          to_item_id    TEXT NOT NULL,
+          color         TEXT NOT NULL DEFAULT '#e8a0a0',
+          created_at    TEXT NOT NULL
+        );
+        INSERT INTO board_connections_v2 SELECT * FROM board_connections;
+        DROP TABLE board_connections;
+        ALTER TABLE board_connections_v2 RENAME TO board_connections;
+        CREATE INDEX IF NOT EXISTS idx_bc_board ON board_connections(board_id);
+      `);
+    }
+    db.pragma('foreign_keys = ON');
+    safeAlter(db, 'ALTER TABLE board_groups ADD COLUMN locked INTEGER DEFAULT 0');
+  }
+
+  if (version < 7) {
+    safeAlter(db, "ALTER TABLE board_groups ADD COLUMN frame_style TEXT DEFAULT 'default'");
   }
 
   if (version < CURRENT_VERSION) {

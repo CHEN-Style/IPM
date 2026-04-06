@@ -14,6 +14,7 @@ const useContextMenu = ({
   openRename,
   deleteEntry,
   removeLocalFolder,
+  onCreateKnowledge,
 }) => {
   const [menu, setMenu] = useState(null); // {x,y, items:[{label,onClick, danger?}]}
 
@@ -42,9 +43,10 @@ const useContextMenu = ({
         { label: '新建文件夹', onClick: () => openNewFolder?.() },
         { label: '上传文件', onClick: () => uploadFiles?.() },
         { label: '上传并AI分类', onClick: () => pickFilesAndAiClassify?.() },
+        { label: '新建知识碎片', onClick: () => onCreateKnowledge?.(null) },
       ]);
     },
-    [entityLabel, isRoot, newProjectInputRef, openMenu, openNewFolder, pickFilesAndAiClassify, setErrorText, uploadFiles],
+    [entityLabel, isRoot, newProjectInputRef, openMenu, openNewFolder, pickFilesAndAiClassify, setErrorText, uploadFiles, onCreateKnowledge],
   );
 
   const handleRowContextMenuRoot = useCallback(
@@ -78,17 +80,19 @@ const useContextMenu = ({
         openMenu(e.clientX, e.clientY, [
           { label: `上传文件到文件夹「${entry.name}」`, onClick: () => uploadFilesTo?.(entry.relPath, entry.name) },
           { label: `在「${entry.name}」中新建文件夹`, onClick: () => openNewFolderAt?.(entry.relPath, entry.name) },
+          { label: '新建知识碎片', onClick: () => onCreateKnowledge?.(entry) },
           { label: `重命名：${entry.name}`, onClick: () => openRename?.(entry) },
           { label: `删除文件夹：${entry.name}`, danger: true, onClick: () => deleteEntry?.(entry) },
         ]);
         return;
       }
       openMenu(e.clientX, e.clientY, [
+        { label: '新建知识碎片', onClick: () => onCreateKnowledge?.(entry) },
         { label: `重命名：${entry.name}`, onClick: () => openRename?.(entry) },
         { label: `删除文件：${entry.name}`, danger: true, onClick: () => deleteEntry?.(entry) },
       ]);
     },
-    [deleteEntry, isRoot, openMenu, openNewFolderAt, openRename, uploadFilesTo],
+    [deleteEntry, isRoot, openMenu, openNewFolderAt, openRename, uploadFilesTo, onCreateKnowledge],
   );
 
   return {

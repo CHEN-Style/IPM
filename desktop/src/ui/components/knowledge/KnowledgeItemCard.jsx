@@ -1,5 +1,5 @@
 import React, { forwardRef } from 'react';
-import { FileText, Image, StickyNote, Pin, Tag, Link2, GripVertical, Globe } from 'lucide-react';
+import { FileText, Image, StickyNote, Pin, Tag, Link2, GripVertical, Globe, Edit3 } from 'lucide-react';
 
 const TYPE_ICON = {
   snippet: FileText,
@@ -34,10 +34,15 @@ const KnowledgeItemCard = forwardRef(({
   onUnlink,
   isDimmed = false,
   showAnchor = false,
+  // Panorama props
+  projectLabel,
+  projectDomain,
+  onNavigateToProject,
 }, ref) => {
   const Icon = TYPE_ICON[item.type] || FileText;
   const tags = Array.isArray(item.tags) ? item.tags : [];
   const linkCount = item.links?.length || 0;
+  const isDraft = item.source_kind === 'draft' || projectDomain === 'draft';
 
   const handleDragStart = (e) => {
     if (!draggable) return;
@@ -64,21 +69,30 @@ const KnowledgeItemCard = forwardRef(({
       onDragStart={handleDragStart}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
-      className={`group relative flex flex-col rounded-xl border transition-all duration-200 h-[210px] p-4 hover:shadow-md ${
+      className={`group relative flex flex-col rounded-xl border transition-all duration-200 h-[210px] p-4 hover:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.1)] hover:-translate-y-0.5 ${
         draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
       } ${
-        isActive
-          ? 'border-indigo-400 ring-2 ring-indigo-100 bg-indigo-50/30'
-          : isSelected
-            ? 'border-indigo-400 ring-2 ring-indigo-200/60 bg-white'
-            : linkedFileName
-              ? 'bg-sky-50/90 border-sky-200/60 shadow-sm hover:border-sky-200'
-              : 'bg-white border-slate-200 shadow-sm hover:border-slate-300'
+        isDraft && !isActive
+          ? 'border-dashed border-amber-300 bg-amber-50/20'
+          : isActive
+            ? 'border-indigo-400 ring-2 ring-indigo-100 bg-indigo-50/30'
+            : isSelected
+              ? 'border-indigo-400 ring-2 ring-indigo-200/60 bg-white'
+              : linkedFileName
+                ? 'bg-sky-50/90 border-sky-200/60 shadow-sm hover:border-sky-200'
+                : 'bg-white border-slate-200 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] hover:border-slate-300'
       } ${isDimmed ? 'opacity-20 grayscale blur-[1px] pointer-events-none' : ''}`}
     >
       {/* Association View Anchor Point */}
       {showAnchor && (
         <div className="absolute -left-1.5 top-6 w-3 h-3 bg-red-500 rounded-full border-2 border-white shadow-sm z-10" />
+      )}
+
+      {/* Draft badge */}
+      {isDraft && (
+        <div className="absolute top-2 right-2 flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+          <Edit3 size={9} /> 草稿
+        </div>
       )}
 
       {/* Top row: type badge + importance + pin */}
@@ -129,6 +143,27 @@ const KnowledgeItemCard = forwardRef(({
               {tags[0]}
               {tags.length > 1 && <span className="text-slate-400 ml-0.5">+{tags.length - 1}</span>}
             </span>
+          )}
+          {/* Project source label (panorama mode) */}
+          {projectLabel && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onNavigateToProject && projectDomain && projectDomain !== 'draft') {
+                  onNavigateToProject(projectLabel, projectDomain);
+                }
+              }}
+              className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded truncate max-w-[100px] transition ${
+                isDraft
+                  ? 'bg-amber-50 text-amber-600 border border-dashed border-amber-200'
+                  : projectDomain === 'cases'
+                    ? 'bg-violet-50 text-violet-600 hover:bg-violet-100'
+                    : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
+              }`}
+            >
+              {projectLabel}
+            </button>
           )}
         </div>
         {/* In linker mode: show linked file name */}

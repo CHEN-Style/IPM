@@ -22,9 +22,9 @@ const ClassifyPipeline = ({ queued, classifying, pendingGhostCount }) => {
       <div className="flex items-center gap-1" title={isProcessing ? `${classifyingCount} 个文件正在分类` : '无文件正在分类'}>
         <Loader2
           size={12}
-          className={`${classifyingCount > 0 ? 'text-blue-500 animate-spin' : isProcessing ? 'text-blue-300' : 'text-slate-300'}`}
+          className={`${classifyingCount > 0 ? 'text-[#3e4b9c] animate-spin' : isProcessing ? 'text-[#9a9eb0]' : 'text-slate-300'}`}
         />
-        <span className={`text-[11px] font-semibold tabular-nums ${classifyingCount > 0 ? 'text-blue-600' : isProcessing ? 'text-blue-300' : 'text-slate-300'}`}>
+        <span className={`text-[11px] font-semibold tabular-nums ${classifyingCount > 0 ? 'text-[#3e4b9c]' : isProcessing ? 'text-[#9a9eb0]' : 'text-slate-300'}`}>
           {classifyingCount}
         </span>
       </div>

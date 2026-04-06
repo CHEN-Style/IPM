@@ -190,7 +190,7 @@ const AIGhostOverview = ({
                               </div>
                               <button
                                 type="button"
-                                className="px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-violet-600 rounded hover:bg-violet-50 hover:border-violet-200 transition-colors"
+                                className="px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-[#3e4b9c] rounded hover:bg-[#eceef7] hover:border-[#d8dbed] transition-colors"
                                 onClick={() => onViewTrace?.(it.sourceRelPath)}
                                 title="查看 AI 分类过程"
                               >

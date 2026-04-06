@@ -24,7 +24,7 @@ const RejectPopover = ({ sourceRelPath, onConfirm, onCancel }) => {
         value={feedback}
         onChange={(e) => setFeedback(e.target.value)}
         placeholder="例如：这个文件应该归到交付成果"
-        className="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400"
+        className="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-[#3e4b9c]/20 focus:border-[#3e4b9c]/40"
         rows={2}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
@@ -45,7 +45,7 @@ const RejectPopover = ({ sourceRelPath, onConfirm, onCancel }) => {
         <button
           type="button"
           onClick={handleConfirm}
-          className="px-3 py-1 text-[11px] font-semibold bg-slate-700 text-white rounded hover:bg-slate-600 transition-colors inline-flex items-center gap-1.5"
+          className="px-3 py-1 text-[11px] font-semibold bg-[#3e4b9c] text-white rounded hover:bg-[#4e5bab] transition-colors inline-flex items-center gap-1.5"
         >
           <Ban size={11} />
           确认放弃

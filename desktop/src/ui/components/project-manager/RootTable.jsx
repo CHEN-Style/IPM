@@ -100,7 +100,7 @@ const RootTable = ({
               <td className="py-3.5 pl-4 rounded-l border-y border-transparent">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-slate-100 rounded group-hover:bg-white transition-colors">
-                    <FolderOpen size={16} className="text-blue-600" />
+                    <FolderOpen size={16} className="text-[#3e4b9c]" />
                   </div>
                   <div className={`text-sm font-medium ${String(p.status || '').toLowerCase() === 'archived' ? 'text-slate-500' : 'text-slate-800'}`}>
                     {p.name}
@@ -171,7 +171,7 @@ const RootTable = ({
               <td className="py-3.5 text-right pr-4 rounded-r text-xs text-slate-500 font-medium border-y border-transparent">
                 <button
                   type="button"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-colors shadow-sm"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#3e4b9c] text-white rounded-lg text-xs font-semibold hover:bg-[#4e5bab] transition-colors shadow-sm"
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();

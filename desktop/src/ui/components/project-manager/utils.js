@@ -35,7 +35,7 @@ const folderDecor = (relPath) => {
   if (rp === 'meta') {
     return { Icon: Database, iconClass: 'text-violet-600', boxClass: 'bg-violet-50 border border-violet-200/60' };
   }
-  return { Icon: Folder, iconClass: 'text-blue-600', boxClass: 'bg-slate-100' };
+  return { Icon: Folder, iconClass: 'text-[#3e4b9c]', boxClass: 'bg-[#eceef7]' };
 };
 
 const fileDecor = (fileName) => {
@@ -96,6 +96,20 @@ const fmtTime = (ms) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-export { normalizeRelPathPosix, folderDecor, fileDecor, fmtBytes, fmtTime };
+const HIDDEN_SYSTEM_DIRS = new Set(['snippets', 'meta']);
+
+const isHiddenSystemDir = (entry) => {
+  if (entry?.kind !== 'dir') return false;
+  const rp = normalizeRelPathPosix(entry.relPath || entry.name);
+  return HIDDEN_SYSTEM_DIRS.has(rp);
+};
+
+const folderTooltip = (relPath) => {
+  const rp = normalizeRelPathPosix(relPath);
+  if (rp === 'temp') return '本文件夹用来临时存放未分类的文件';
+  return undefined;
+};
+
+export { normalizeRelPathPosix, folderDecor, fileDecor, fmtBytes, fmtTime, HIDDEN_SYSTEM_DIRS, isHiddenSystemDir, folderTooltip };
 
 

@@ -73,6 +73,12 @@ contextBridge.exposeInMainWorld('ipm', {
     stats: (projectName, opts = {}) => ipcRenderer.invoke('knowledge/stats', { projectName, ...opts }),
     createWebclip: (projectName, url, opts = {}) => ipcRenderer.invoke('knowledge/createWebclip', { projectName, url, ...opts }),
     addWebclipImage: (projectName, itemId, pngBuffer, opts = {}) => ipcRenderer.invoke('knowledge/addWebclipImage', { projectName, itemId, pngBuffer, ...opts }),
+    listGlobal: (filters = {}) => ipcRenderer.invoke('knowledge/listGlobal', filters),
+    statsGlobal: () => ipcRenderer.invoke('knowledge/statsGlobal'),
+    createDraft: (item) => ipcRenderer.invoke('knowledge/createDraft', item),
+    assignDraft: (itemId, targetProjectName, targetDomain) => ipcRenderer.invoke('knowledge/assignDraft', { itemId, targetProjectName, targetDomain }),
+    listDrafts: (filters = {}) => ipcRenderer.invoke('knowledge/listDrafts', filters),
+    listProjects: () => ipcRenderer.invoke('knowledge/listProjects'),
     subscribe: (cb) => {
       if (typeof cb !== 'function') return () => {};
       const handler = (_evt, payload) => cb(payload);
@@ -195,6 +201,33 @@ contextBridge.exposeInMainWorld('ipm', {
       ipcRenderer.on('projectAgent:stream-event', handler);
       return () => ipcRenderer.removeListener('projectAgent:stream-event', handler);
     },
+  },
+  board: {
+    list: () => ipcRenderer.invoke('board/list'),
+    create: (name) => ipcRenderer.invoke('board/create', { name }),
+    rename: (id, name) => ipcRenderer.invoke('board/rename', { id, name }),
+    delete: (id) => ipcRenderer.invoke('board/delete', { id }),
+    setMain: (id) => ipcRenderer.invoke('board/setMain', { id }),
+    getItems: (boardId) => ipcRenderer.invoke('board/getItems', { boardId }),
+    addItem: (payload) => ipcRenderer.invoke('board/addItem', payload),
+    removeItem: (id) => ipcRenderer.invoke('board/removeItem', { id }),
+    updateLayout: (boardId, items) => ipcRenderer.invoke('board/updateLayout', { boardId, items }),
+    createAndAdd: (payload) => ipcRenderer.invoke('board/createAndAdd', payload),
+    stats: () => ipcRenderer.invoke('board/stats'),
+    listConnections: (boardId) => ipcRenderer.invoke('board/listConnections', { boardId }),
+    addConnection: (payload) => ipcRenderer.invoke('board/addConnection', payload),
+    removeConnection: (id) => ipcRenderer.invoke('board/removeConnection', { id }),
+    listGroups: (boardId) => ipcRenderer.invoke('board/listGroups', { boardId }),
+    createGroup: (payload) => ipcRenderer.invoke('board/createGroup', payload),
+    updateGroup: (id, patch) => ipcRenderer.invoke('board/updateGroup', { id, patch }),
+    deleteGroup: (id) => ipcRenderer.invoke('board/deleteGroup', { id }),
+    lockItem: (id) => ipcRenderer.invoke('board/lockItem', { id }),
+    unlockItem: (id) => ipcRenderer.invoke('board/unlockItem', { id }),
+    lockGroup: (id) => ipcRenderer.invoke('board/lockGroup', { id }),
+    unlockGroup: (id) => ipcRenderer.invoke('board/unlockGroup', { id }),
+    updateBoardStyle: (id, bgStyle, bgColor) => ipcRenderer.invoke('board/updateBoardStyle', { id, bgStyle, bgColor }),
+    convertBoardToGroup: (sourceBoardId, groupX, groupY) => ipcRenderer.invoke('board/convertBoardToGroup', { sourceBoardId, groupX, groupY }),
+    convertGroupToBoard: (groupId) => ipcRenderer.invoke('board/convertGroupToBoard', { groupId }),
   },
   supervisor: {
     sendMessage: (message) =>

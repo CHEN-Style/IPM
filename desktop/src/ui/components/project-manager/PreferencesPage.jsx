@@ -14,9 +14,9 @@ const PreferencesPage = ({ projectName, domain, onBack }) => {
   const [activeTab, setActiveTab] = useState('rules');
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-white">
+    <div className="flex-1 flex flex-col h-full bg-[#f8f9fb]">
       {/* Header */}
-      <div className="px-8 py-5 border-b border-slate-200 bg-white">
+      <div className="px-8 py-5 border-b border-[#e2e4eb] bg-white">
         <div className="flex items-center gap-4 mb-4">
           <button
             type="button"
@@ -33,7 +33,7 @@ const PreferencesPage = ({ projectName, domain, onBack }) => {
         </div>
 
         {/* Tab bar */}
-        <div className="flex gap-1 bg-slate-100 rounded-lg p-1 w-fit">
+        <div className="flex gap-1 bg-[#f0f1f5] rounded-lg p-1 w-fit">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -44,8 +44,8 @@ const PreferencesPage = ({ projectName, domain, onBack }) => {
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
                   isActive
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                    ? 'bg-white text-[#2f3545] shadow-sm'
+                    : 'text-[#6e7389] hover:text-[#414659] hover:bg-white/50'
                 }`}
               >
                 <Icon size={14} />

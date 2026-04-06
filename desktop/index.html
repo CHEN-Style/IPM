@@ -240,6 +240,14 @@
         animation: float-around 3s ease-in-out infinite;
       }
 
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .animate-fadeIn {
+        animation: fadeIn 0.25s ease-out both;
+      }
+
       /* ===== Markdown prose styles for AI chat ===== */
       .prose-chat {
         font-size: 0.875rem;
@@ -358,6 +366,56 @@
       .prose-chat a:hover { color: #1d4ed8; }
 
       .prose-chat img { max-width: 100%; border-radius: 6px; }
+
+      /* ===== Wabi-Sabi Board (侘寂看板) ===== */
+      .wabi-canvas {
+        background-color: #F9F8F4;
+      }
+      .wabi-grid-bg {
+        background-size: 40px 40px;
+        background-image:
+          linear-gradient(to right, rgba(0,0,0,0.03) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(0,0,0,0.03) 1px, transparent 1px);
+      }
+      @keyframes wabi-card-in {
+        from { opacity: 0; transform: scale(0.92) rotate(-1deg); }
+        to   { opacity: 1; transform: scale(1) rotate(0deg); }
+      }
+      .animate-wabi-card-in {
+        animation: wabi-card-in 0.3s ease-out both;
+      }
+      @keyframes wabi-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+      }
+      .animate-wabi-pulse {
+        animation: wabi-pulse 2s ease-in-out infinite;
+      }
+      /* Dots background pattern */
+      .wabi-dots-bg {
+        background-size: 24px 24px;
+        background-image: radial-gradient(circle, rgba(0,0,0,0.08) 1px, transparent 1px);
+      }
+      /* Connection rope animation */
+      @keyframes wabi-rope-sway {
+        0%, 100% { stroke-dashoffset: 0; }
+        50% { stroke-dashoffset: 10; }
+      }
+      .wabi-rope-sway {
+        animation: wabi-rope-sway 3s ease-in-out infinite;
+      }
+      /* Group frame */
+      @keyframes wabi-group-in {
+        from { opacity: 0; transform: scale(0.96); }
+        to   { opacity: 1; transform: scale(1); }
+      }
+      .animate-wabi-group-in {
+        animation: wabi-group-in 0.2s ease-out both;
+      }
+      /* Marquee select */
+      @keyframes wabi-marquee-dash {
+        to { stroke-dashoffset: -8; }
+      }
 
       /* Chat Panel overlay animations */
       @keyframes chat-backdrop-in {

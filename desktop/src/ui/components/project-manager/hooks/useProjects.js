@@ -12,14 +12,14 @@ const statusLabel = (s) => {
 const rowStyleByStatus = (s) => {
   const v = String(s || '').toLowerCase();
   if (v === 'pending') return 'bg-amber-50/60 hover:bg-amber-50';
-  if (v === 'archived') return 'bg-slate-100/60 hover:bg-slate-100 text-slate-400';
-  return 'hover:bg-slate-50/50';
+  if (v === 'archived') return 'bg-[#f0f1f5]/60 hover:bg-[#f0f1f5] text-[#9a9eb0]';
+  return 'hover:bg-[#f8f9fb]';
 };
 
 const badgeByStatus = (s) => {
   const v = String(s || '').toLowerCase();
   if (v === 'pending') return { dot: 'bg-amber-500', ring: 'ring-amber-500/20', on: 'bg-amber-500/15 text-amber-700 border-amber-300/40' };
-  if (v === 'archived') return { dot: 'bg-slate-500', ring: 'ring-slate-500/20', on: 'bg-slate-500/10 text-slate-600 border-slate-300/60' };
+  if (v === 'archived') return { dot: 'bg-[#9a9eb0]', ring: 'ring-[#9a9eb0]/20', on: 'bg-[#9a9eb0]/10 text-[#515668] border-[#cdd0da]/60' };
   return { dot: 'bg-emerald-500', ring: 'ring-emerald-500/20', on: 'bg-emerald-500/15 text-emerald-700 border-emerald-300/40' };
 };
 

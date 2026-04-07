@@ -54,7 +54,7 @@ const MyDataPage = ({ section = 'home', onSectionChange, stats, onNavigate }) =>
   return (
     <div className="flex-1 flex flex-col h-full" style={{ background: '#f8f9fb' }}>
       <div className="flex-1 overflow-y-auto">
-        <div className="w-full px-8 xl:px-10 py-8 xl:py-10">
+        <div className="w-full px-8 xl:px-10 pt-4 pb-8 xl:pt-5 xl:pb-10">
 
           {/* ── Topbar ── */}
           <div className="flex items-center justify-between mb-8">

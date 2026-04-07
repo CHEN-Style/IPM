@@ -100,6 +100,7 @@ export default function KnowledgePanorama({ onNavigateToProject }) {
   const [activeItemId, setActiveItemId] = useState(null);
   const [detailItem, setDetailItem] = useState(null);
   const [noteEditId, setNoteEditId] = useState(null);
+  const [noteEditContext, setNoteEditContext] = useState({ projectName: null, domain: 'study' });
 
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [createSnippetOpen, setCreateSnippetOpen] = useState(false);
@@ -429,8 +430,8 @@ export default function KnowledgePanorama({ onNavigateToProject }) {
   if (noteEditId) {
     return (
       <NoteEditorPage
-        projectName={null}
-        domain="study"
+        projectName={noteEditContext.projectName}
+        domain={noteEditContext.domain}
         itemId={noteEditId}
         onBack={() => { setNoteEditId(null); loadItems(); }}
         onAddToTempBoard={handleAddToTempBoard}
@@ -441,7 +442,7 @@ export default function KnowledgePanorama({ onNavigateToProject }) {
   return (
     <div className={`flex flex-col h-full bg-white transition-opacity duration-300 ${appeared ? 'opacity-100' : 'opacity-0'}`}>
       {/* Header */}
-      <div className="flex-shrink-0 px-8 pt-6 pb-0">
+      <div className="flex-shrink-0 px-8 pt-2 pb-0">
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center">
@@ -523,7 +524,12 @@ export default function KnowledgePanorama({ onNavigateToProject }) {
         onDelete={handleDelete}
         onTogglePin={handleTogglePin}
         onToggleArchive={handleToggleArchive}
-        onEditNote={(id) => setNoteEditId(id)}
+        onEditNote={(id) => {
+          const pn = detailItem?.projectName || detailItem?._projectName || null;
+          const dm = detailItem?.domain || detailItem?._domain || 'study';
+          setNoteEditContext({ projectName: pn, domain: dm });
+          setNoteEditId(id);
+        }}
         onConvertToNote={async (id) => {
           if (!detailItem) return;
           const pn = detailItem.projectName || detailItem._projectName;
@@ -536,6 +542,7 @@ export default function KnowledgePanorama({ onNavigateToProject }) {
               await api?.update?.(pn, id, { type: 'note' }, dm ? { domain: dm } : {});
             }
             loadItems();
+            setNoteEditContext({ projectName: dm === 'draft' ? null : pn, domain: dm === 'draft' ? 'study' : (dm || 'projects') });
             setNoteEditId(id);
           } catch { /* */ }
         }}
@@ -709,6 +716,7 @@ function BoardPreviewCard({ onOpenBoard }) {
   const [mainBoardItems, setMainBoardItems] = useState([]);
   const [mainBoardGroups, setMainBoardGroups] = useState([]);
   const [mainBoardConns, setMainBoardConns] = useState([]);
+  const [mainBoardTimelines, setMainBoardTimelines] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -721,15 +729,17 @@ function BoardPreviewCard({ onOpenBoard }) {
         setBoards(list);
         const main = list.find((b) => b.is_main) || list[0];
         if (main) {
-          const [itemsRes, groupsRes, connsRes] = await Promise.all([
+          const [itemsRes, groupsRes, connsRes, timelinesRes] = await Promise.all([
             window.ipm.board.getItems(main.id),
             window.ipm.board.listGroups(main.id),
             window.ipm.board.listConnections(main.id),
+            window.ipm.board.listTimelines(main.id),
           ]);
           if (!cancelled) {
             setMainBoardItems(itemsRes?.items || []);
             setMainBoardGroups(groupsRes?.groups || []);
             setMainBoardConns(connsRes?.connections || []);
+            setMainBoardTimelines(Array.isArray(timelinesRes) ? timelinesRes : []);
           }
         }
       } catch { /* */ }
@@ -745,7 +755,8 @@ function BoardPreviewCard({ onOpenBoard }) {
     const items = mainBoardItems;
     const groups = mainBoardGroups;
     const conns = mainBoardConns;
-    if (items.length === 0 && groups.length === 0) return null;
+    const tls = mainBoardTimelines;
+    if (items.length === 0 && groups.length === 0 && tls.length === 0) return null;
 
     const groupsMap = {};
     for (const g of groups) groupsMap[g.id] = g;
@@ -768,14 +779,20 @@ function BoardPreviewCard({ onOpenBoard }) {
       maxX = Math.max(maxX, g.x + g.width);
       maxY = Math.max(maxY, g.y + g.height);
     }
+    for (const t of tls) {
+      minX = Math.min(minX, t.x);
+      minY = Math.min(minY, t.y);
+      maxX = Math.max(maxX, t.x + t.width);
+      maxY = Math.max(maxY, t.y + t.height);
+    }
 
     const pad = 60;
     minX -= pad; minY -= pad; maxX += pad; maxY += pad;
     const worldW = maxX - minX || 1;
     const worldH = maxY - minY || 1;
 
-    return { absItems, groups, conns, minX, minY, worldW, worldH, groupsMap };
-  }, [mainBoardItems, mainBoardGroups, mainBoardConns]);
+    return { absItems, groups, conns, tls, minX, minY, worldW, worldH, groupsMap };
+  }, [mainBoardItems, mainBoardGroups, mainBoardConns, mainBoardTimelines]);
 
   const typeCounts = useMemo(() => {
     const m = { snippet: 0, note: 0, screenshot: 0, webclip: 0, draft: 0 };
@@ -806,11 +823,12 @@ function BoardPreviewCard({ onOpenBoard }) {
             <Layout size={16} style={{ color: '#4a9e8e' }} />
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-slate-800 leading-tight">Oryzae Board</h3>
+            <h3 className="text-sm font-semibold text-slate-800 leading-tight">Knowledge Thread Board</h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
               {mainBoard?.name || '暂无看板'} · {mainBoardItems.length} 碎片
               {mainBoardGroups.length > 0 && ` · ${mainBoardGroups.length} 分组`}
               {mainBoardConns.length > 0 && ` · ${mainBoardConns.length} 连线`}
+              {mainBoardTimelines.length > 0 && ` · ${mainBoardTimelines.length} 时间线`}
             </p>
           </div>
         </div>
@@ -918,6 +936,17 @@ function BoardPreviewCard({ onOpenBoard }) {
                 </g>
               );
             })}
+
+            {/* Timelines */}
+            {(preview.tls || []).map((tl) => (
+              <rect
+                key={tl.id}
+                x={tl.x} y={tl.y} width={tl.width} height={tl.height}
+                rx={4} ry={4}
+                fill="rgba(99,102,241,0.12)" stroke="rgba(99,102,241,0.3)" strokeWidth={1.5}
+                opacity={0.8}
+              />
+            ))}
           </svg>
         )}
 

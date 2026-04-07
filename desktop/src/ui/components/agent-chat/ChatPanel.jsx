@@ -72,7 +72,7 @@ const ChatPanel = ({ projectName, domain, onClose }) => {
     <div
       ref={backdropRef}
       onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-[2px] animate-chat-backdrop"
+      className="fixed inset-0 top-[36px] z-50 flex justify-end bg-black/20 backdrop-blur-[2px] animate-chat-backdrop"
     >
       <div
         className="w-[75%] max-w-[1100px] h-full bg-white shadow-2xl flex flex-col animate-chat-panel font-sans"

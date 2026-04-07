@@ -11,6 +11,11 @@ contextBridge.exposeInMainWorld('ipm', {
     get: () => ipcRenderer.invoke('prefs/get'),
     set: (patch) => ipcRenderer.invoke('prefs/set', { patch }),
     testLlm: (config) => ipcRenderer.invoke('prefs/testLlm', config),
+    getDataDir: () => ipcRenderer.invoke('prefs/getDataDir'),
+    chooseDataDir: () => ipcRenderer.invoke('prefs/chooseDataDir'),
+    setDataDir: (newPath) => ipcRenderer.invoke('prefs/setDataDir', { newPath }),
+    resetDataDir: () => ipcRenderer.invoke('prefs/resetDataDir'),
+    restartApp: () => ipcRenderer.invoke('prefs/restartApp'),
   },
   clipboard: {
     readText: () => clipboard.readText(),
@@ -229,6 +234,13 @@ contextBridge.exposeInMainWorld('ipm', {
     updateBoardStyle: (id, bgStyle, bgColor) => ipcRenderer.invoke('board/updateBoardStyle', { id, bgStyle, bgColor }),
     convertBoardToGroup: (sourceBoardId, groupX, groupY) => ipcRenderer.invoke('board/convertBoardToGroup', { sourceBoardId, groupX, groupY }),
     convertGroupToBoard: (groupId) => ipcRenderer.invoke('board/convertGroupToBoard', { groupId }),
+    listTimelines: (boardId) => ipcRenderer.invoke('board/listTimelines', { boardId }),
+    createTimeline: (data) => ipcRenderer.invoke('board/createTimeline', data),
+    updateTimeline: (id, patch) => ipcRenderer.invoke('board/updateTimeline', { id, patch }),
+    deleteTimeline: (id) => ipcRenderer.invoke('board/deleteTimeline', { id }),
+    addTimelinePoint: (data) => ipcRenderer.invoke('board/addTimelinePoint', data),
+    updateTimelinePoint: (id, patch) => ipcRenderer.invoke('board/updateTimelinePoint', { id, patch }),
+    deleteTimelinePoint: (id) => ipcRenderer.invoke('board/deleteTimelinePoint', { id }),
   },
   supervisor: {
     sendMessage: (message) =>

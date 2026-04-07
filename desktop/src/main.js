@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, clipboard, protocol, net } from 'electron';
+import { app, BrowserWindow, Menu, ipcMain, dialog, shell, clipboard, protocol, net } from 'electron';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -58,14 +58,36 @@ if (started) {
   app.quit();
 }
 
-// Business archive root: fixed to repo folder in dev per requirement.
-// - Dev:   <repo>/desktop/userfile
-// - Packaged: fallback to userData/IPM/userfile (install dir is often not writable)
+// Bootstrap config: tiny JSON in a fixed AppData location that stores
+// the user's chosen data directory. Separate from state.json which lives
+// inside the data directory itself.
+const getBootstrapConfigPath = () => path.join(app.getPath('userData'), 'config.json');
+
+const readBootstrapConfig = () => {
+  try {
+    const p = getBootstrapConfigPath();
+    if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8'));
+  } catch { /* ignore */ }
+  return {};
+};
+
+const writeBootstrapConfig = (patch) => {
+  const cfg = { ...readBootstrapConfig(), ...patch };
+  fs.mkdirSync(path.dirname(getBootstrapConfigPath()), { recursive: true });
+  fs.writeFileSync(getBootstrapConfigPath(), JSON.stringify(cfg, null, 2), 'utf-8');
+};
+
+const getDefaultUserFileRoot = () => path.join(app.getPath('userData'), 'IPM', 'userfile');
+
 const getUserFileRoot = () => {
   if (!app.isPackaged) {
     return path.resolve(process.cwd(), 'userfile');
   }
-  return path.join(app.getPath('userData'), 'IPM', 'userfile');
+  const cfg = readBootstrapConfig();
+  if (cfg.userFileRoot && typeof cfg.userFileRoot === 'string') {
+    return cfg.userFileRoot;
+  }
+  return getDefaultUserFileRoot();
 };
 
 const getProjectsRoot = () => path.join(getUserFileRoot(), 'projects');
@@ -1155,6 +1177,13 @@ const createMainWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    icon: path.join(app.getAppPath(), 'assets', 'icon.ico'),
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#f8f9fb',
+      symbolColor: '#414659',
+      height: 36,
+    },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1162,6 +1191,7 @@ const createMainWindow = () => {
     },
   });
 
+  Menu.setApplicationMenu(null);
   loadRenderer(mainWindow, 'main');
 
   if (!app.isPackaged) {
@@ -1260,6 +1290,59 @@ app.whenReady().then(() => {
   // ===== Core IPC (split out of main.js to keep it maintainable) =====
   registerAppIpc({ ipcMain, app, getUserFileRoot, getProjectsRoot, getCasesRoot, getStudyRoot, readState });
   registerPrefsIpc({ ipcMain, readState, writeState, normalizeFloatingUploadMode });
+
+  // ===== Data directory management =====
+  ipcMain.handle('prefs/getDataDir', async () => {
+    return { ok: true, path: getUserFileRoot(), isCustom: !!readBootstrapConfig().userFileRoot };
+  });
+
+  ipcMain.handle('prefs/chooseDataDir', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      title: '选择数据存储目录',
+    });
+    if (result.canceled || !result.filePaths.length) {
+      return { ok: false, canceled: true };
+    }
+    return { ok: true, path: result.filePaths[0] };
+  });
+
+  ipcMain.handle('prefs/setDataDir', async (_evt, { newPath }) => {
+    const oldPath = getUserFileRoot();
+    if (path.resolve(newPath) === path.resolve(oldPath)) {
+      return { ok: true, changed: false };
+    }
+    try {
+      fs.mkdirSync(newPath, { recursive: true });
+      // Move existing data to new location
+      if (fs.existsSync(oldPath)) {
+        const entries = fs.readdirSync(oldPath);
+        for (const entry of entries) {
+          const src = path.join(oldPath, entry);
+          const dest = path.join(newPath, entry);
+          if (!fs.existsSync(dest)) {
+            fs.cpSync(src, dest, { recursive: true });
+          }
+        }
+      }
+      writeBootstrapConfig({ userFileRoot: newPath });
+      return { ok: true, changed: true };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+
+  ipcMain.handle('prefs/resetDataDir', async () => {
+    const cfg = readBootstrapConfig();
+    delete cfg.userFileRoot;
+    fs.writeFileSync(getBootstrapConfigPath(), JSON.stringify(cfg, null, 2), 'utf-8');
+    return { ok: true };
+  });
+
+  ipcMain.handle('prefs/restartApp', async () => {
+    app.relaunch();
+    app.exit(0);
+  });
   registerMetaIpc({
     ipcMain,
     getWorkspaceDirOrThrow,

@@ -172,13 +172,17 @@ const App = () => {
 
         {/* Column 2: Main Area */}
         <main
-          className="flex-1 min-w-0 flex flex-col min-h-0"
+          className="flex-1 min-w-0 flex flex-col min-h-0 relative"
           onMouseDownCapture={() => {
-            // Click on main area collapses sidebar if not pinned
             if (sidebarPinned) return;
             setSidebarCollapsed(true);
           }}
         >
+          {/* Top drag strip — also prevents content from overlapping window-control overlay */}
+          <div
+            className="h-[36px] shrink-0 w-full"
+            style={{ WebkitAppRegion: 'drag', background: '#f8f9fb' }}
+          />
           <div className="flex-1 min-h-0 relative">
             <div
               className={`absolute inset-0 bg-white transition-opacity duration-200 ease-in-out pointer-events-none z-10 ${

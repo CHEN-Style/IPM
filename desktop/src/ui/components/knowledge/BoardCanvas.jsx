@@ -3,6 +3,7 @@ import { RotateCw, Trash2, SquareArrowOutUpRight, Lock, Unlock, Link2, Link2Off 
 import BoardCard from './BoardCard.jsx';
 import ConnectionLayer from './ConnectionLayer.jsx';
 import GroupFrame from './GroupFrame.jsx';
+import TimelineStrip from './TimelineStrip.jsx';
 import Minimap from './Minimap.jsx';
 
 const MIN_SIZE = 120;
@@ -36,6 +37,12 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   undoRedoRef,
   viewerMode = false,
   onViewerDoubleClick,
+  timelines = [],
+  onUpdateTimeline,
+  onDeleteTimeline,
+  onAddTimelinePoint,
+  onUpdateTimelinePoint,
+  onDeleteTimelinePoint,
 }, ref) {
   const canvasRef = useRef(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -48,6 +55,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const zCounterRef = useRef(100);
   const [localItems, setLocalItems] = useState([]);
   const [localGroups, setLocalGroups] = useState([]);
+  const [localTimelines, setLocalTimelines] = useState([]);
 
   const [viewportX, setViewportX] = useState(viewportState?.x ?? 0);
   const [viewportY, setViewportY] = useState(viewportState?.y ?? 0);
@@ -95,6 +103,10 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   useEffect(() => {
     setLocalGroups(groups.map((g) => ({ ...g })));
   }, [groups]);
+
+  useEffect(() => {
+    setLocalTimelines(timelines.map((t) => ({ ...t })));
+  }, [timelines]);
 
   useEffect(() => {
     if (onViewportChange && enablePanZoom) {
@@ -695,6 +707,22 @@ const BoardCanvas = forwardRef(function BoardCanvas({
           />
         ))}
 
+        {/* Timelines */}
+        {localTimelines.map((tl) => (
+          <TimelineStrip
+            key={tl.id}
+            timeline={tl}
+            scale={enablePanZoom ? scale : 1}
+            readOnly={effectiveReadOnly}
+            viewerMode={viewerMode}
+            onUpdate={onUpdateTimeline}
+            onDelete={onDeleteTimeline}
+            onAddPoint={onAddTimelinePoint}
+            onUpdatePoint={onUpdateTimelinePoint}
+            onDeletePoint={onDeleteTimelinePoint}
+          />
+        ))}
+
         {/* Connections — pass both items and groups for mixed endpoints */}
         <ConnectionLayer
           connections={connections}
@@ -928,7 +956,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       {/* Minimap */}
       {enablePanZoom && (
         <Minimap
-          items={absItems} groups={localGroups}
+          items={absItems} groups={localGroups} timelines={localTimelines}
           viewportX={viewportX} viewportY={viewportY} scale={scale}
           canvasRef={canvasRef}
           onNavigate={(x, y) => { setViewportX(x); setViewportY(y); }}

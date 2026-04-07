@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
 
-const CURRENT_VERSION = 7;
+const CURRENT_VERSION = 8;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS suggestions (
@@ -257,6 +257,34 @@ export function initDb(db) {
 
   if (version < 7) {
     safeAlter(db, "ALTER TABLE board_groups ADD COLUMN frame_style TEXT DEFAULT 'default'");
+  }
+
+  if (version < 8) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS board_timelines (
+        id          TEXT PRIMARY KEY,
+        board_id    TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+        name        TEXT NOT NULL DEFAULT '',
+        orientation TEXT NOT NULL DEFAULT 'vertical',
+        x           REAL NOT NULL DEFAULT 0,
+        y           REAL NOT NULL DEFAULT 0,
+        width       REAL NOT NULL DEFAULT 160,
+        height      REAL NOT NULL DEFAULT 500,
+        z_index     INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_bt_board ON board_timelines(board_id);
+
+      CREATE TABLE IF NOT EXISTS board_timeline_points (
+        id          TEXT PRIMARY KEY,
+        timeline_id TEXT NOT NULL REFERENCES board_timelines(id) ON DELETE CASCADE,
+        label       TEXT NOT NULL DEFAULT '',
+        position    REAL NOT NULL DEFAULT 0,
+        color       TEXT NOT NULL DEFAULT '#4a9e8e',
+        created_at  TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_btp_timeline ON board_timeline_points(timeline_id);
+    `);
   }
 
   if (version < CURRENT_VERSION) {

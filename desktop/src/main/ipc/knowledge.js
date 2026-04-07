@@ -40,7 +40,16 @@ import {
   updateBoardStyle,
   copyBoardToGroup,
   copyGroupToBoard,
+  createTimeline,
+  listTimelines,
+  updateTimeline,
+  deleteTimeline,
+  addTimelinePoint,
+  updateTimelinePoint,
+  deleteTimelinePoint,
+  listTimelinePoints,
 } from '../../../Agent/db/board.js';
+
 import { fetchAndExtract, summarizeContent } from '../../../Agent/services/webclip.js';
 
 export function registerKnowledgeIpc({
@@ -1055,5 +1064,45 @@ export function registerKnowledgeIpc({
     const { db } = getStudyDb();
     const board = updateBoardStyle(db, payload.id, { bgStyle: payload.bgStyle, bgColor: payload.bgColor });
     return { ok: true, board };
+  });
+
+  // --- Timelines ---
+
+  ipcMain.handle('board/listTimelines', async (_evt, payload) => {
+    const { db } = getStudyDb();
+    const tls = listTimelines(db, payload.boardId);
+    return tls.map(tl => ({ ...tl, points: listTimelinePoints(db, tl.id) }));
+  });
+
+  ipcMain.handle('board/createTimeline', async (_evt, payload) => {
+    const { db } = getStudyDb();
+    return createTimeline(db, payload);
+  });
+
+  ipcMain.handle('board/updateTimeline', async (_evt, payload) => {
+    const { db } = getStudyDb();
+    return updateTimeline(db, payload.id, payload.patch);
+  });
+
+  ipcMain.handle('board/deleteTimeline', async (_evt, payload) => {
+    const { db } = getStudyDb();
+    deleteTimeline(db, payload.id);
+    return { ok: true };
+  });
+
+  ipcMain.handle('board/addTimelinePoint', async (_evt, payload) => {
+    const { db } = getStudyDb();
+    return addTimelinePoint(db, payload);
+  });
+
+  ipcMain.handle('board/updateTimelinePoint', async (_evt, payload) => {
+    const { db } = getStudyDb();
+    return updateTimelinePoint(db, payload.id, payload.patch);
+  });
+
+  ipcMain.handle('board/deleteTimelinePoint', async (_evt, payload) => {
+    const { db } = getStudyDb();
+    deleteTimelinePoint(db, payload.id);
+    return { ok: true };
   });
 }

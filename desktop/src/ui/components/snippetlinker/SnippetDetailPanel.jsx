@@ -67,7 +67,7 @@ export const SnippetDetailPanel = ({ snippet, isOpen, onClose, onUpdate }) => {
       {/* Slide-in Panel */}
       <div
         className={`
-          fixed top-0 right-0 h-full w-[400px] bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out border-l border-gray-200 flex flex-col
+          fixed top-[36px] right-0 bottom-0 w-[400px] bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out border-l border-gray-200 flex flex-col
           ${isOpen ? 'translate-x-0' : 'translate-x-full'}
         `}
       >

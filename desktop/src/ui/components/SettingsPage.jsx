@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { CheckCircle2, Clock, Eye, EyeOff, Settings2, ShieldCheck, ToggleLeft, Cpu, Loader2 } from 'lucide-react';
+import { CheckCircle2, Clock, Eye, EyeOff, FolderOpen, RefreshCw, Settings2, ShieldCheck, ToggleLeft, Cpu, Loader2 } from 'lucide-react';
 
 const Card = ({ title, description, children }) => {
   return (
@@ -47,6 +47,125 @@ const RadioPill = ({ checked, label, hint, onClick }) => {
       </div>
       {hint ? <div className={`text-xs mt-1 ${checked ? 'text-slate-200' : 'text-slate-500'}`}>{hint}</div> : null}
     </button>
+  );
+};
+
+const DataDirCard = () => {
+  const [currentPath, setCurrentPath] = useState('');
+  const [isCustom, setIsCustom] = useState(false);
+  const [changing, setChanging] = useState(false);
+  const [message, setMessage] = useState(null); // { type: 'success'|'error', text }
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.ipm?.prefs?.getDataDir?.();
+        if (cancelled) return;
+        if (res?.ok) {
+          setCurrentPath(res.path);
+          setIsCustom(res.isCustom);
+        }
+      } catch (e) {
+        console.error('Failed to load data dir:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleChange = useCallback(async () => {
+    setMessage(null);
+    const chosen = await window.ipm?.prefs?.chooseDataDir?.();
+    if (!chosen?.ok || chosen.canceled) return;
+
+    setChanging(true);
+    try {
+      const res = await window.ipm?.prefs?.setDataDir?.(chosen.path);
+      if (res?.ok && res.changed) {
+        setCurrentPath(chosen.path);
+        setIsCustom(true);
+        setMessage({ type: 'success', text: '数据目录已更新，需要重启应用生效。' });
+      } else if (res?.ok && !res.changed) {
+        setMessage({ type: 'success', text: '所选目录与当前相同，无需更改。' });
+      } else {
+        setMessage({ type: 'error', text: '更改失败：' + (res?.error || '未知错误') });
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: '更改失败：' + (e?.message || String(e)) });
+    } finally {
+      setChanging(false);
+    }
+  }, []);
+
+  const handleReset = useCallback(async () => {
+    setMessage(null);
+    try {
+      await window.ipm?.prefs?.resetDataDir?.();
+      const res = await window.ipm?.prefs?.getDataDir?.();
+      if (res?.ok) setCurrentPath(res.path);
+      setIsCustom(false);
+      setMessage({ type: 'success', text: '已恢复默认路径，需要重启应用生效。' });
+    } catch (e) {
+      setMessage({ type: 'error', text: '重置失败：' + (e?.message || String(e)) });
+    }
+  }, []);
+
+  const handleRestart = useCallback(() => {
+    window.ipm?.prefs?.restartApp?.();
+  }, []);
+
+  return (
+    <Card title="数据存储位置" description="所有项目文件、案件资料、数据库均存储在此目录下。">
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-medium text-slate-700 mb-1.5">当前路径</label>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 truncate font-mono" title={currentPath}>
+              {currentPath || '加载中…'}
+            </div>
+            <button
+              type="button"
+              onClick={handleChange}
+              disabled={changing}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+            >
+              {changing ? <Loader2 size={14} className="animate-spin" /> : <FolderOpen size={14} />}
+              更改
+            </button>
+            {isCustom && (
+              <button
+                type="button"
+                onClick={handleReset}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 transition-colors whitespace-nowrap"
+                title="恢复默认路径"
+              >
+                <RefreshCw size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {message && (
+          <div className={`text-xs px-3 py-2 rounded-lg flex items-center justify-between ${message.type === 'success' ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+            <span>{message.text}</span>
+            {message.type === 'success' && message.text.includes('重启') && (
+              <button
+                type="button"
+                onClick={handleRestart}
+                className="ml-3 inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 transition-colors whitespace-nowrap"
+              >
+                <RefreshCw size={12} />
+                立即重启
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="text-xs text-slate-400">
+          更改后，已有数据会自动复制到新目录，需重启应用生效。
+        </div>
+      </div>
+    </Card>
   );
 };
 
@@ -272,6 +391,7 @@ const SettingsPage = () => {
 
       <div className="flex-1 overflow-y-auto px-8 py-6 bg-slate-50/40">
         <div className="grid grid-cols-1 gap-6 max-w-4xl">
+          <DataDirCard />
           <LlmConfigCard />
 
           <Card

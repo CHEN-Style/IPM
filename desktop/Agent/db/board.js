@@ -220,6 +220,68 @@ export function copyGroupToBoard(db, { groupId, sourceBoardId, newBoardName }) {
   return { boardId, itemCount: items.length };
 }
 
+// --- Timelines ---
+
+export function createTimeline(db, { id, boardId, name, orientation, x, y, width, height }) {
+  const now = new Date().toISOString();
+  const maxZ = db.prepare('SELECT MAX(z_index) as mz FROM board_timelines WHERE board_id = ?').get(boardId)?.mz || 0;
+  db.prepare(
+    `INSERT INTO board_timelines (id, board_id, name, orientation, x, y, width, height, z_index, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, boardId, name || '', orientation || 'vertical', x ?? 0, y ?? 0, width ?? 160, height ?? 500, maxZ + 1, now);
+  return db.prepare('SELECT * FROM board_timelines WHERE id = ?').get(id);
+}
+
+export function listTimelines(db, boardId) {
+  return db.prepare('SELECT * FROM board_timelines WHERE board_id = ? ORDER BY z_index ASC').all(boardId);
+}
+
+export function updateTimeline(db, id, patch) {
+  const tl = db.prepare('SELECT * FROM board_timelines WHERE id = ?').get(id);
+  if (!tl) return null;
+  const fields = ['name', 'x', 'y', 'width', 'height', 'z_index'];
+  for (const f of fields) {
+    if (patch[f] !== undefined) tl[f] = patch[f];
+  }
+  db.prepare('UPDATE board_timelines SET name=?, x=?, y=?, width=?, height=?, z_index=? WHERE id=?')
+    .run(tl.name, tl.x, tl.y, tl.width, tl.height, tl.z_index, id);
+  return db.prepare('SELECT * FROM board_timelines WHERE id = ?').get(id);
+}
+
+export function deleteTimeline(db, id) {
+  db.prepare('DELETE FROM board_timeline_points WHERE timeline_id = ?').run(id);
+  db.prepare('DELETE FROM board_timelines WHERE id = ?').run(id);
+}
+
+export function addTimelinePoint(db, { id, timelineId, label, position, color }) {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO board_timeline_points (id, timeline_id, label, position, color, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(id, timelineId, label || '', position ?? 0, color || '#4a9e8e', now);
+  return db.prepare('SELECT * FROM board_timeline_points WHERE id = ?').get(id);
+}
+
+export function updateTimelinePoint(db, id, patch) {
+  const pt = db.prepare('SELECT * FROM board_timeline_points WHERE id = ?').get(id);
+  if (!pt) return null;
+  const fields = ['label', 'position', 'color'];
+  for (const f of fields) {
+    if (patch[f] !== undefined) pt[f] = patch[f];
+  }
+  db.prepare('UPDATE board_timeline_points SET label=?, position=?, color=? WHERE id=?')
+    .run(pt.label, pt.position, pt.color, id);
+  return db.prepare('SELECT * FROM board_timeline_points WHERE id = ?').get(id);
+}
+
+export function deleteTimelinePoint(db, id) {
+  db.prepare('DELETE FROM board_timeline_points WHERE id = ?').run(id);
+}
+
+export function listTimelinePoints(db, timelineId) {
+  return db.prepare('SELECT * FROM board_timeline_points WHERE timeline_id = ? ORDER BY position ASC').all(timelineId);
+}
+
 // --- Board style ---
 
 export function updateBoardStyle(db, id, { bgStyle, bgColor }) {

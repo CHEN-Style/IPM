@@ -12,8 +12,8 @@ import {
   Pin,
   PinOff,
   Brain,
-  FolderOpen,
 } from 'lucide-react';
+import appIconUrl from '../../../assets/icon.png';
 
 const ACCENT = '#3e4b9c';
 
@@ -74,8 +74,11 @@ const Sidebar = ({
         requestExpand();
       }}
     >
-      {/* ── Logo / workspace ── */}
-      <div className={isCollapsed ? 'px-3 pt-7 pb-5' : 'px-5 pt-7 pb-6'}>
+      {/* ── Logo / workspace (top area is drag zone for frameless window) ── */}
+      <div
+        className={isCollapsed ? 'px-3 pt-[42px] pb-5' : 'px-5 pt-[42px] pb-6'}
+        style={{ WebkitAppRegion: 'drag' }}
+      >
         <div className="relative" ref={menuAnchorRef}>
           <button
             type="button"
@@ -85,9 +88,10 @@ const Sidebar = ({
             }}
             className={`flex items-center gap-2.5 group ${isCollapsed ? 'justify-center w-full' : ''}`}
             title="工作区"
+            style={{ WebkitAppRegion: 'no-drag' }}
           >
-            <div className="w-7 h-7 rounded-[7px] flex items-center justify-center shrink-0" style={{ background: ACCENT }}>
-              <FolderOpen size={14} className="text-white" strokeWidth={2} />
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 overflow-hidden">
+              <img src={appIconUrl} alt="" className="w-9 h-9 object-cover" draggable={false} />
             </div>
             {!isCollapsed && (
               <>
@@ -99,7 +103,7 @@ const Sidebar = ({
 
           {/* Workspace mode menu */}
           {!isCollapsed && workspaceMenuOpen && (
-            <div className="absolute left-0 right-0 mt-2 z-50">
+            <div className="absolute left-0 right-0 mt-2 z-50" style={{ WebkitAppRegion: 'no-drag' }}>
               <div className="rounded-lg shadow-2xl overflow-hidden border" style={{ background: '#1a1a1a', borderColor: '#2a2a2a' }}>
                 <div className="px-3 py-2 text-[10px] uppercase tracking-[0.06em] font-medium" style={{ color: '#525252', borderBottom: '1px solid #2a2a2a' }}>模式</div>
                 <button

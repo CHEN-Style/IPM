@@ -5,7 +5,7 @@ import {
   MoreHorizontal, Star, Pencil, Trash2,
   Grid3X3, Circle, Minus, Palette, HelpCircle,
   Layers, ArrowRightLeft, Undo2, Redo2, Group,
-  Pin, PinOff, Eye, EyeOff,
+  Pin, PinOff, Eye, EyeOff, Clock,
 } from 'lucide-react';
 import BoardCanvas from './BoardCanvas.jsx';
 import CardReaderModal from './CardReaderModal.jsx';
@@ -152,7 +152,7 @@ function CollectModal({ isOpen, onClose, boardId, existingCountMap, onAdd }) {
   );
 }
 
-function CreateMenu({ isOpen, onClose, onSelect, onCreateBoard, onCreateEmptyGroup, isMainBoard }) {
+function CreateMenu({ isOpen, onClose, onSelect, onCreateBoard, onCreateEmptyGroup, onCreateTimeline, isMainBoard }) {
   if (!isOpen) return null;
   const knowledgeOpts = [
     { key: 'snippet', label: '文本碎片', icon: FileText, color: '#D97706' },
@@ -192,6 +192,13 @@ function CreateMenu({ isOpen, onClose, onSelect, onCreateBoard, onCreateEmptyGro
       <div style={{ borderTop: '1px solid #F3F4F6', margin: '4px 6px' }} />
       {menuBtn(() => { onCreateBoard?.(); onClose(); }, Star, '新建看板', '#D97706')}
       {isMainBoard && menuBtn(() => { onCreateEmptyGroup?.(); onClose(); }, Group, '新建空分组', '#4a9e8e')}
+      {isMainBoard && (
+        <>
+          <div style={{ borderTop: '1px solid #F3F4F6', margin: '4px 6px' }} />
+          {menuBtn(() => { onCreateTimeline?.('vertical'); onClose(); }, Clock, '竖向时间线', '#6366F1')}
+          {menuBtn(() => { onCreateTimeline?.('horizontal'); onClose(); }, Clock, '横向时间线', '#6366F1')}
+        </>
+      )}
     </div>
   );
 }
@@ -388,6 +395,19 @@ const HELP_SECTIONS = [
     ],
   },
   {
+    title: '时间线',
+    items: [
+      { key: '新建时间线', desc: '右上角「新建」→ 竖向/横向时间线' },
+      { key: '移动时间线', desc: '拖拽标题栏移动位置' },
+      { key: '拉伸时间线', desc: '拖拽底部（竖向）/ 右侧（横向）手柄' },
+      { key: '添加时间点', desc: '双击时间线空白区域' },
+      { key: '编辑标签', desc: '单击时间点标签文字' },
+      { key: '移动时间点', desc: '拖拽时间点圆点沿轴方向移动' },
+      { key: '删除时间点', desc: 'hover 时间点 → 点击删除图标' },
+      { key: '重命名', desc: '双击标题栏名称' },
+    ],
+  },
+  {
     title: '看板管理',
     items: [
       { key: '切换看板', desc: '底部看板名称切换' },
@@ -435,7 +455,7 @@ function HelpTooltip({ onCreateGuideNote }) {
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#1F2937' }}>
-              Oryzae Board 使用指南
+              Knowledge Thread Board 使用指南
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {onCreateGuideNote && (
@@ -727,6 +747,7 @@ export default function WabiBoardPage({ onBack }) {
   const [boardItems, setBoardItems] = useState([]);
   const [connections, setConnections] = useState([]);
   const [groups, setGroups] = useState([]);
+  const [timelines, setTimelines] = useState([]);
   const [collectOpen, setCollectOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [quickCreateType, setQuickCreateType] = useState(null);
@@ -831,6 +852,12 @@ export default function WabiBoardPage({ onBack }) {
     if (res?.ok) setGroups(res.groups || []);
   }, []);
 
+  const loadTimelines = useCallback(async (boardId) => {
+    if (!boardId) return;
+    const list = await window.ipm.board.listTimelines(boardId);
+    setTimelines(Array.isArray(list) ? list : []);
+  }, []);
+
   useEffect(() => { loadBoards(); }, []);
 
   useEffect(() => {
@@ -844,6 +871,7 @@ export default function WabiBoardPage({ onBack }) {
       loadItems(currentBoardId);
       loadConnections(currentBoardId);
       loadGroups(currentBoardId);
+      loadTimelines(currentBoardId);
       const board = boards.find((b) => b.id === currentBoardId);
       if (board) {
         setActiveBgStyle(board.bg_style || 'grid');
@@ -855,7 +883,7 @@ export default function WabiBoardPage({ onBack }) {
       setUndoCount(0);
       setRedoCount(0);
     }
-  }, [currentBoardId, loadItems, loadConnections, loadGroups, boards]);
+  }, [currentBoardId, loadItems, loadConnections, loadGroups, loadTimelines, boards]);
 
   const handleLayoutChange = useCallback(async (items) => {
     if (!currentBoardId) return;
@@ -1093,6 +1121,48 @@ export default function WabiBoardPage({ onBack }) {
     loadGroups(currentBoardId);
   }, [currentBoardId, loadGroups]);
 
+  // --- Timeline handlers ---
+  const handleCreateTimeline = useCallback(async (orientation) => {
+    const boardId = await ensureBoardId();
+    if (!boardId) return;
+    const id = `tl-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const center = canvasRef.current?.getViewportCenter?.() || { x: 400, y: 300 };
+    const isVert = orientation === 'vertical';
+    await window.ipm.board.createTimeline({
+      id, boardId, name: '', orientation,
+      x: center.x - (isVert ? 80 : 250),
+      y: center.y - (isVert ? 250 : 40),
+      width: isVert ? 160 : 500,
+      height: isVert ? 500 : 80,
+    });
+    loadTimelines(boardId);
+  }, [ensureBoardId, loadTimelines]);
+
+  const handleUpdateTimeline = useCallback(async (id, patch) => {
+    await window.ipm.board.updateTimeline(id, patch);
+    loadTimelines(currentBoardId);
+  }, [currentBoardId, loadTimelines]);
+
+  const handleDeleteTimeline = useCallback(async (id) => {
+    await window.ipm.board.deleteTimeline(id);
+    loadTimelines(currentBoardId);
+  }, [currentBoardId, loadTimelines]);
+
+  const handleAddTimelinePoint = useCallback(async (data) => {
+    await window.ipm.board.addTimelinePoint(data);
+    loadTimelines(currentBoardId);
+  }, [currentBoardId, loadTimelines]);
+
+  const handleUpdateTimelinePoint = useCallback(async (id, patch) => {
+    await window.ipm.board.updateTimelinePoint(id, patch);
+    loadTimelines(currentBoardId);
+  }, [currentBoardId, loadTimelines]);
+
+  const handleDeleteTimelinePoint = useCallback(async (id) => {
+    await window.ipm.board.deleteTimelinePoint(id);
+    loadTimelines(currentBoardId);
+  }, [currentBoardId, loadTimelines]);
+
   // Create guide note and add to board
   const handleCreateGuideNote = useCallback(async () => {
     const boardId = await ensureBoardId();
@@ -1103,7 +1173,7 @@ export default function WabiBoardPage({ onBack }) {
     await window.ipm.board.createAndAdd({
       boardId,
       type: 'note',
-      title: 'Oryzae Board 使用指南',
+      title: 'Knowledge Thread Board 使用指南',
       content_text: content,
     });
     loadItems(boardId);
@@ -1189,7 +1259,7 @@ export default function WabiBoardPage({ onBack }) {
               {currentBoard?.is_main ? (
                 <Star size={10} color="#D97706" fill="#D97706" style={{ flexShrink: 0 }} />
               ) : null}
-              {currentBoard?.name || 'Oryzae Board'}
+              {currentBoard?.name || 'Knowledge Thread Board'}
             </h1>
           )}
           <div style={{ position: 'relative' }}>
@@ -1367,6 +1437,7 @@ export default function WabiBoardPage({ onBack }) {
                   onSelect={(type) => setQuickCreateType(type)}
                   onCreateBoard={handleCreateBoard}
                   onCreateEmptyGroup={handleCreateEmptyGroup}
+                  onCreateTimeline={handleCreateTimeline}
                   isMainBoard={isMainBoard}
                 />
               </div>
@@ -1400,6 +1471,12 @@ export default function WabiBoardPage({ onBack }) {
         undoRedoRef={undoRedoRef}
         viewerMode={viewerMode}
         onViewerDoubleClick={(item) => setViewerReaderItem(item)}
+        timelines={timelines}
+        onUpdateTimeline={handleUpdateTimeline}
+        onDeleteTimeline={handleDeleteTimeline}
+        onAddTimelinePoint={handleAddTimelinePoint}
+        onUpdateTimelinePoint={handleUpdateTimelinePoint}
+        onDeleteTimelinePoint={handleDeleteTimelinePoint}
       />
 
       {/* Footer */}
@@ -1559,7 +1636,7 @@ export default function WabiBoardPage({ onBack }) {
           <ShapeLoader />
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 15, fontWeight: 600, color: '#4a9e8e', letterSpacing: '0.05em', marginBottom: 5 }}>
-              Oryzae Board
+              Knowledge Thread Board
             </div>
             <div style={{ fontSize: 11, color: '#9CA3AF', fontWeight: 400 }}>
               正在加载看板...

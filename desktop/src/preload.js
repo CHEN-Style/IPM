@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('ipm', {
   prefs: {
     get: () => ipcRenderer.invoke('prefs/get'),
     set: (patch) => ipcRenderer.invoke('prefs/set', { patch }),
+    testLlm: (config) => ipcRenderer.invoke('prefs/testLlm', config),
   },
   clipboard: {
     readText: () => clipboard.readText(),

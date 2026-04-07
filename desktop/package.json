@@ -1,8 +1,8 @@
 {
-  "name": "desktop",
-  "productName": "desktop",
+  "name": "ipm",
+  "productName": "IPM",
   "version": "1.0.0",
-  "description": "My Electron application description",
+  "description": "Intelligent Project Manager — AI-driven knowledge and project management for legal professionals",
   "main": ".vite/build/main.js",
   "scripts": {
     "start": "chcp 65001 >nul & electron-forge start",
@@ -22,13 +22,16 @@
     "@electron-forge/maker-deb": "^7.10.2",
     "@electron-forge/maker-rpm": "^7.10.2",
     "@electron-forge/maker-squirrel": "^7.10.2",
+    "@electron-forge/maker-wix": "^7.11.1",
     "@electron-forge/maker-zip": "^7.10.2",
     "@electron-forge/plugin-auto-unpack-natives": "^7.10.2",
     "@electron-forge/plugin-fuses": "^7.10.2",
     "@electron-forge/plugin-vite": "^7.10.2",
     "@electron/fuses": "^1.8.0",
+    "@tailwindcss/vite": "^4.2.2",
     "@vitejs/plugin-react": "^5.0.0",
     "electron": "39.2.7",
+    "tailwindcss": "^4.2.2",
     "vite": "^5.4.21"
   },
   "dependencies": {

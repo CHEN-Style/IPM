@@ -1164,8 +1164,9 @@ const createMainWindow = () => {
 
   loadRenderer(mainWindow, 'main');
 
-  // Open the DevTools.
-  mainWindow.webContents.openDevTools();
+  if (!app.isPackaged) {
+    mainWindow.webContents.openDevTools();
+  }
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -1226,6 +1227,9 @@ protocol.registerSchemesAsPrivileged([
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  process.env.IPM_USER_DATA = app.getPath('userData');
+  process.env.IPM_STATE_PATH = getStatePath();
+
   protocol.handle('ipm-file', (request) => {
     const url = new URL(request.url);
     let filePath = decodeURIComponent(url.pathname);

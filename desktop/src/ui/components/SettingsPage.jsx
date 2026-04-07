@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Clock, Settings2, ShieldCheck, ToggleLeft } from 'lucide-react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { CheckCircle2, Clock, Eye, EyeOff, Settings2, ShieldCheck, ToggleLeft, Cpu, Loader2 } from 'lucide-react';
 
 const Card = ({ title, description, children }) => {
   return (
@@ -50,9 +50,169 @@ const RadioPill = ({ checked, label, hint, onClick }) => {
   );
 };
 
+const LlmConfigCard = () => {
+  const [apiKey, setApiKey] = useState('');
+  const [baseURL, setBaseURL] = useState('');
+  const [model, setModel] = useState('');
+  const [summaryModel, setSummaryModel] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null); // { ok, error? }
+  const [saveMsg, setSaveMsg] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.ipm?.prefs?.get?.();
+        if (cancelled) return;
+        const llm = res?.prefs?.llm;
+        if (llm) {
+          setApiKey(llm.apiKey || '');
+          setBaseURL(llm.baseURL || '');
+          setModel(llm.model || '');
+          setSummaryModel(llm.summaryModel || '');
+        }
+      } catch (e) {
+        console.error('Failed to load LLM config:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleChange = useCallback((setter) => (e) => {
+    setter(e.target.value);
+    setDirty(true);
+    setTestResult(null);
+    setSaveMsg('');
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    setSaveMsg('');
+    try {
+      await window.ipm?.prefs?.set?.({ llm: { apiKey, baseURL, model, summaryModel } });
+      setDirty(false);
+      setSaveMsg('已保存');
+      setTimeout(() => setSaveMsg(''), 2000);
+    } catch (e) {
+      setSaveMsg('保存失败：' + (e?.message || String(e)));
+    } finally {
+      setSaving(false);
+    }
+  }, [apiKey, baseURL, model, summaryModel]);
+
+  const handleTest = useCallback(async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await window.ipm?.prefs?.testLlm?.({ apiKey, baseURL, model });
+      setTestResult(res);
+    } catch (e) {
+      setTestResult({ ok: false, error: e?.message || String(e) });
+    } finally {
+      setTesting(false);
+    }
+  }, [apiKey, baseURL, model]);
+
+  const inputCls = 'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 transition-colors';
+
+  return (
+    <Card title="AI 模型配置" description="配置大语言模型的连接参数，用于驱动所有 AI 功能。">
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-medium text-slate-700 mb-1.5">API Key</label>
+          <div className="relative">
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={apiKey}
+              onChange={handleChange(setApiKey)}
+              placeholder="sk-..."
+              className={inputCls + ' pr-10'}
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              onClick={() => setShowKey((v) => !v)}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+              tabIndex={-1}
+            >
+              {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-slate-700 mb-1.5">API Base URL</label>
+          <input
+            type="text"
+            value={baseURL}
+            onChange={handleChange(setBaseURL)}
+            placeholder="https://api.openai.com/v1"
+            className={inputCls}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1.5">主模型名称</label>
+            <input
+              type="text"
+              value={model}
+              onChange={handleChange(setModel)}
+              placeholder="gpt-4o"
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1.5">总结模型名称 <span className="text-slate-400 font-normal">(可选，留空则使用主模型)</span></label>
+            <input
+              type="text"
+              value={summaryModel}
+              onChange={handleChange(setSummaryModel)}
+              placeholder="gpt-4o-mini"
+              className={inputCls}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 pt-2">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || (!apiKey && !baseURL && !model)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            保存
+          </button>
+          <button
+            type="button"
+            onClick={handleTest}
+            disabled={testing || !apiKey || !baseURL || !model}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {testing && <Loader2 size={14} className="animate-spin" />}
+            测试连接
+          </button>
+          {saveMsg && <span className="text-xs text-green-600 font-medium">{saveMsg}</span>}
+        </div>
+
+        {testResult && (
+          <div className={`text-xs px-3 py-2 rounded-lg ${testResult.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+            {testResult.ok ? '连接成功，模型可正常使用。' : `连接失败：${testResult.error || '未知错误'}`}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+};
+
 const SettingsPage = () => {
   const [saving, setSaving] = useState(false);
-  const [prefs, setPrefs] = useState({ floatingUploadMode: 'confirm' }); // confirm | auto
+  const [prefs, setPrefs] = useState({ floatingUploadMode: 'confirm' });
 
   useEffect(() => {
     let cancelled = false;
@@ -112,6 +272,8 @@ const SettingsPage = () => {
 
       <div className="flex-1 overflow-y-auto px-8 py-6 bg-slate-50/40">
         <div className="grid grid-cols-1 gap-6 max-w-4xl">
+          <LlmConfigCard />
+
           <Card
             title="悬浮窗上传文件模式（真实功能）"
             description="决定悬浮窗里拖拽/选择文件后的行为。"

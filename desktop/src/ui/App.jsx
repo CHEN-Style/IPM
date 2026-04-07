@@ -227,12 +227,11 @@ const App = () => {
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-            <span>本地模式</span>
+            <span>内测版本</span>
           </div>
-          <span>v0.0.1-mvp</span>
+          <span>v1.0</span>
         </div>
         <div className="flex items-center gap-3">
-          <span>Workspace: userfile</span>
         </div>
       </div>
     </div>

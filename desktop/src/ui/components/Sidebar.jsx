@@ -210,12 +210,12 @@ const Sidebar = ({
         {/* User */}
         <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-2.5 px-1'}`}>
           <div className="w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-semibold text-white shrink-0" style={{ background: ACCENT }}>
-            李
+            我
           </div>
           {!isCollapsed && (
             <div className="flex flex-col min-w-0">
-              <span className="text-[13px] font-medium truncate" style={{ color: '#d4d4d4' }}>用户</span>
-              <span className="text-[11px] truncate" style={{ color: '#525252' }}>本地模式</span>
+              <span className="text-[13px] font-medium truncate" style={{ color: '#d4d4d4' }}>我</span>
+              <span className="text-[11px] truncate" style={{ color: '#525252' }}>内测版本</span>
             </div>
           )}
         </div>

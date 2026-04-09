@@ -140,6 +140,7 @@ const DropTray = ({
         ${getContainerStyle()}
         ${heightClass || (isCompact ? 'h-20' : 'h-32')}
       `}
+      data-tour="float-drop-tray"
     >
       <input type="file" ref={inputRef} onChange={handleInputChange} className="hidden" disabled={disabled} multiple />
 
@@ -172,22 +173,18 @@ const DropTray = ({
       <div className={`z-10 flex flex-col items-center text-center transition-all duration-300 ${isCompact ? 'p-2' : 'p-4'}`}>
         {disabled ? (
           <div className="flex flex-col items-center">
-            <div
-              className={`rounded-full bg-slate-200/80 flex items-center justify-center text-slate-500 ${
-                isCompact ? 'w-8 h-8 mb-0' : 'w-10 h-10 mb-2'
-              }`}
-            >
-              <UploadCloud size={isCompact ? 16 : 20} />
-            </div>
             {!isCompact && (
               <>
                 <p className="text-sm font-semibold text-slate-500">已禁用</p>
                 <p className="text-xs text-slate-400 mt-1">{disabledText || '该分类暂无可用目标'}</p>
               </>
             )}
+            {isCompact && (
+              <p className="text-[10px] text-slate-400 px-1 text-center leading-tight">禁用</p>
+            )}
           </div>
         ) : null}
-        {state === TrayState.IDLE && (
+        {state === TrayState.IDLE && !disabled && (
           <div className="animate-slide-up flex flex-col items-center">
             <div
               className={`rounded-full bg-slate-200/80 flex items-center justify-center text-slate-500 transition-transform group-hover:scale-110 ${
@@ -196,7 +193,7 @@ const DropTray = ({
             >
               <UploadCloud size={isCompact ? 16 : 20} />
             </div>
-            {!isCompact && !hideIdleText && !disabled && (
+            {!isCompact && !hideIdleText && (
               <>
                 <p className="text-sm font-medium text-slate-600 mt-1">拖拽文件到这里</p>
                 <p className="text-xs text-slate-400">或点击选择文件</p>

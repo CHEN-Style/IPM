@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { useConfirmDialog } from '../../../hooks/useConfirmDialog.jsx';
 
 const useFileActions = ({
   cwd,
@@ -11,6 +12,7 @@ const useFileActions = ({
   setNotice,
   setErrorText,
 }) => {
+  const confirm = useConfirmDialog();
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderBaseRelPath, setNewFolderBaseRelPath] = useState('');
@@ -104,7 +106,13 @@ const useFileActions = ({
     async (entry) => {
       if (cwd.type !== 'project' && cwd.type !== 'local') return;
       const label = entry.kind === 'dir' ? '文件夹' : '文件';
-      if (!window.confirm(`确定删除${label}「${entry.name}」吗？此操作不可恢复。`)) return;
+      const ok = await confirm({
+        title: `删除${label}`,
+        message: `确定删除${label}「${entry.name}」吗？此操作不可恢复。`,
+        confirmLabel: '删除',
+        danger: true,
+      });
+      if (!ok) return;
       setErrorText?.('');
       try {
         if (cwd.type === 'project') {

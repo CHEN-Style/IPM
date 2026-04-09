@@ -10,10 +10,21 @@ function sanitizeLlm(llm) {
   };
 }
 
+const DEFAULT_LLM = {
+  apiKey: 'sk-Cx3Ls3gJLkqsrQLI2Fi1aUd3LlI06CEsBcNG1IgpEDH3jd7P',
+  baseURL: 'https://api.openai-proxy.org/v1',
+  model: 'gpt-5.1',
+  summaryModel: 'gpt-5.4-nano',
+};
+
 function buildPrefsResponse(prefs, normalizeFloatingUploadMode) {
+  const llm = sanitizeLlm(prefs.llm);
+  const hasLlm = llm && (llm.apiKey || llm.baseURL || llm.model);
   return {
-    floatingUploadMode: normalizeFloatingUploadMode(prefs.floatingUploadMode || 'confirm'),
-    llm: sanitizeLlm(prefs.llm) || { apiKey: '', baseURL: '', model: '', summaryModel: '' },
+    floatingUploadMode: normalizeFloatingUploadMode(prefs.floatingUploadMode || 'auto'),
+    llm: hasLlm ? llm : { ...DEFAULT_LLM },
+    onboardingDone: Boolean(prefs.onboardingDone),
+    userName: typeof prefs.userName === 'string' ? prefs.userName : '',
   };
 }
 
@@ -35,6 +46,12 @@ export function registerPrefsIpc({ ipcMain, readState, writeState, normalizeFloa
     }
     if (Object.prototype.hasOwnProperty.call(patch, 'llm')) {
       state.prefs.llm = sanitizeLlm(patch.llm);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'onboardingDone')) {
+      state.prefs.onboardingDone = Boolean(patch.onboardingDone);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'userName')) {
+      state.prefs.userName = String(patch.userName || '').slice(0, 20);
     }
     writeState(state);
     return { ok: true, prefs: buildPrefsResponse(state.prefs, normalizeFloatingUploadMode) };

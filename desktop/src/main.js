@@ -26,6 +26,8 @@ import { getSession as getAgentSession, removeSession as removeAgentSession } fr
 import { registerSupervisorIpc } from './main/ipc/supervisor.js';
 import { registerPreferencesIpc } from './main/ipc/preferences.js';
 import { registerKnowledgeIpc } from './main/ipc/knowledge.js';
+import { registerAnalyticsIpc, uploadPendingAnalytics } from './main/ipc/analytics.js';
+import { registerSearchIpc } from './main/ipc/search.js';
 import { ClassifyTracker } from './main/classifyTracker.js';
 import { getProjectDb, closeProjectDb, closeAllDbs } from '../Agent/db/index.js';
 import { getSupervisorDb, closeSupervisorDb } from '../Agent/db/supervisorDb.js';
@@ -1572,6 +1574,11 @@ app.whenReady().then(() => {
     mainWindowRef,
     floatingWindowRef,
   });
+
+  registerAnalyticsIpc({ ipcMain, getAppRoot });
+  registerSearchIpc({ ipcMain, getProjectsRoot, getCasesRoot, getStudyRoot });
+
+  uploadPendingAnalytics(getAppRoot()).catch(() => {});
 
   // ui/* moved to `src/main/ipc/ui.js`
   // floating/* moved to `src/main/ipc/floating.js`

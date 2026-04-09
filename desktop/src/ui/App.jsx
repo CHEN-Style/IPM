@@ -7,10 +7,17 @@ import KnowledgePanorama from './components/knowledge/KnowledgePanorama.jsx';
 import MyDataPage from './components/MyDataPage.jsx';
 import OverviewPage from './components/OverviewPage.jsx';
 import KnowClawPage from './components/knowclaw/KnowClawPage.jsx';
+import TutorialPage from './components/TutorialPage.jsx';
 import SupervisorBubble from './components/SupervisorBubble.jsx';
+import { TourProvider } from './components/tour/TourProvider.jsx';
+import TourOverlay from './components/tour/TourOverlay.jsx';
 import { ToastProvider } from './hooks/useToast.js';
+import { ConfirmDialogProvider } from './hooks/useConfirmDialog.jsx';
+import useUsageTracker from './hooks/useUsageTracker.js';
+import OnboardingScreen from './components/OnboardingScreen.jsx';
 
 const App = () => {
+  const [showOnboarding, setShowOnboarding] = useState(null); // null = loading, true/false = resolved
   const [activeNav, setActiveNav] = useState('mydata');
   const [myDataSection, setMyDataSection] = useState('home'); // home | projects | cases | study
   const [selectedDoc, setSelectedDoc] = useState(null); // 右侧详情后续接入
@@ -32,8 +39,28 @@ const App = () => {
     }
   }); // main | floating
 
+  const trackerPage = useMemo(() => {
+    if (uiMode === 'floating') return 'floating';
+    if (activeNav === 'mydata' && myDataSection !== 'home') return `mydata/${myDataSection}`;
+    return activeNav;
+  }, [uiMode, activeNav, myDataSection]);
+  useUsageTracker(trackerPage);
+
   useEffect(() => {
-    // In floating mode, remove the "mid-platform" background color.
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.ipm?.prefs?.get?.();
+        if (cancelled) return;
+        setShowOnboarding(!res?.prefs?.onboardingDone);
+      } catch {
+        if (!cancelled) setShowOnboarding(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     document.body.classList.toggle('ui-floating', uiMode === 'floating');
     return () => document.body.classList.remove('ui-floating');
   }, [uiMode]);
@@ -55,7 +82,7 @@ const App = () => {
   const [displayNav, setDisplayNav] = useState(activeNav);
   const fadeTimerRef = useRef(null);
 
-  const fadeEligible = useMemo(() => new Set(['overview', 'mydata', 'knowledge', 'knowclaw']), []);
+  const fadeEligible = useMemo(() => new Set(['overview', 'mydata', 'knowledge', 'knowclaw', 'tutorial']), []);
 
   useEffect(() => {
     if (fadeTimerRef.current) {
@@ -133,29 +160,72 @@ const App = () => {
     if (activeNav === 'mydata' && myDataSection === 'home') void refreshWorkspaceStats();
   }, [activeNav, myDataSection, refreshWorkspaceStats]);
 
+  const [searchNavTarget, setSearchNavTarget] = useState(null);
+  const sidebarSearchRef = useRef(null);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        if (sidebarCollapsed) setSidebarCollapsed(false);
+        setTimeout(() => sidebarSearchRef.current?.focus(), sidebarCollapsed ? 350 : 0);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [sidebarCollapsed]);
+
+  const handleSearchNavigate = useCallback((item) => {
+    const domain = item.domain;
+    if (domain === 'cases' || domain === 'projects' || domain === 'study') {
+      setMyDataSection(domain);
+    }
+    setSearchNavTarget({ ...item, _ts: Date.now() });
+    setActiveNav('mydata');
+  }, []);
+
   const openMyDataDomain = (domain) => {
     const d = String(domain || '').toLowerCase();
     if (d === 'cases' || d === 'projects' || d === 'study') setMyDataSection(d);
     setActiveNav('mydata');
   };
 
+  const finishOnboarding = useCallback((name) => {
+    const patch = { onboardingDone: true };
+    if (name) patch.userName = name;
+    window.ipm?.prefs?.set?.(patch).catch(() => {});
+    setShowOnboarding(false);
+  }, []);
+
+  if (showOnboarding === null) {
+    return <div className="h-screen w-full" style={{ background: '#060608' }} />;
+  }
+
+  if (showOnboarding) {
+    return <OnboardingScreen onComplete={finishOnboarding} />;
+  }
+
   if (uiMode === 'floating') {
     return (
-      <FloatingMode
-        onBackToMain={() => {
-          // 优先走主进程窗口切换；否则降级为同窗口 UI 切换
-          if (window?.ipm?.ui?.backToMain) {
-            window.ipm.ui.backToMain().catch(() => setUiMode('main'));
-            return;
-          }
-          setUiMode('main');
-        }}
-      />
+      <TourProvider navigate={setActiveNav} setMyDataSection={setMyDataSection}>
+        <FloatingMode
+          onBackToMain={() => {
+            if (window?.ipm?.ui?.backToMain) {
+              window.ipm.ui.backToMain().catch(() => setUiMode('main'));
+              return;
+            }
+            setUiMode('main');
+          }}
+        />
+        <TourOverlay />
+      </TourProvider>
     );
   }
 
   return (
+    <ConfirmDialogProvider>
     <ToastProvider>
+    <TourProvider navigate={setActiveNav} setMyDataSection={setMyDataSection}>
     <div className="flex flex-col h-screen w-full overflow-hidden select-auto antialiased">
       <div className="flex flex-1 min-h-0 w-full overflow-hidden">
         {/* Column 1: Navigation Sidebar */}
@@ -168,6 +238,8 @@ const App = () => {
           collapsed={sidebarCollapsed}
           onPinnedChange={setSidebarPinned}
           onCollapsedChange={setSidebarCollapsed}
+          onSearchNavigate={handleSearchNavigate}
+          searchInputRef={sidebarSearchRef}
         />
 
         {/* Column 2: Main Area */}
@@ -191,6 +263,8 @@ const App = () => {
             />
             {displayNav === 'settings' ? (
             <SettingsPage />
+            ) : displayNav === 'tutorial' ? (
+            <TutorialPage />
             ) : displayNav === 'overview' ? (
               <OverviewPage />
             ) : displayNav === 'knowledge' ? (
@@ -202,9 +276,9 @@ const App = () => {
             ) : displayNav === 'knowclaw' ? (
             <KnowClawPage />
             ) : displayNav === 'mydata' ? (
-              <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} onNavigate={setActiveNav} />
+              <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} onNavigate={setActiveNav} searchNavTarget={searchNavTarget} onSearchNavDone={() => setSearchNavTarget(null)} />
           ) : (
-              <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} onNavigate={setActiveNav} />
+              <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} onNavigate={setActiveNav} searchNavTarget={searchNavTarget} onSearchNavDone={() => setSearchNavTarget(null)} />
           )}
           </div>
         </main>
@@ -235,7 +309,10 @@ const App = () => {
         </div>
       </div>
     </div>
+    <TourOverlay />
+    </TourProvider>
     </ToastProvider>
+    </ConfirmDialogProvider>
   );
 };
 

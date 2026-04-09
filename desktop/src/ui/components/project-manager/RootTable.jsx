@@ -90,12 +90,13 @@ const RootTable = ({
               </tr>
             );
           })}
-          {projects.map((p) => (
+          {projects.map((p, pIdx) => (
             <tr
               key={p.name}
               onClick={() => onEnterProject?.(p.name)}
               onContextMenu={(e) => onContextMenuProject?.(e, p.name)}
               className={`group cursor-pointer transition-all duration-200 ${rowStyleByStatus?.(p.status) || ''}`}
+              data-tour={pIdx === 0 ? 'project-card-first' : undefined}
             >
               <td className="py-3.5 pl-4 rounded-l border-y border-transparent">
                 <div className="flex items-center gap-3">
@@ -148,6 +149,7 @@ const RootTable = ({
                     onOpenPreferences?.(p);
                   }}
                   title="管理分类偏好与历史记录"
+                  data-tour={pIdx === 0 ? 'btn-preferences-first' : undefined}
                 >
                   <Settings2 size={14} />
                   偏好与记录
@@ -178,6 +180,7 @@ const RootTable = ({
                     onOpenKnowledge?.(p);
                   }}
                   title="知识碎片管理与关联"
+                  data-tour={pIdx === 0 ? 'btn-knowledge-first' : undefined}
                 >
                   <BookOpen size={14} />
                   知识管理

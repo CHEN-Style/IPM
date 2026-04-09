@@ -18,7 +18,7 @@ const DOMAINS = [
 
 /* ── Main page ── */
 
-const MyDataPage = ({ section = 'home', onSectionChange, stats, onNavigate }) => {
+const MyDataPage = ({ section = 'home', onSectionChange, stats, onNavigate, searchNavTarget, onSearchNavDone }) => {
   const meta = useMemo(() => {
     if (section === 'cases') return { domain: 'cases' };
     if (section === 'projects') return { domain: 'projects' };
@@ -27,10 +27,10 @@ const MyDataPage = ({ section = 'home', onSectionChange, stats, onNavigate }) =>
   }, [section]);
 
   if (section === 'projects' || section === 'cases') {
-    return <ProjectManager domain={meta.domain} onBackHome={() => onSectionChange?.('home')} />;
+    return <ProjectManager domain={meta.domain} onBackHome={() => onSectionChange?.('home')} searchNavTarget={searchNavTarget} onSearchNavDone={onSearchNavDone} />;
   }
   if (section === 'study') {
-    return <ProjectManager domain="study" onBackHome={() => onSectionChange?.('home')} />;
+    return <ProjectManager domain="study" onBackHome={() => onSectionChange?.('home')} searchNavTarget={searchNavTarget} onSearchNavDone={onSearchNavDone} />;
   }
 
   const totalItems = [stats?.cases?.count, stats?.projects?.count, stats?.study?.count]
@@ -84,6 +84,7 @@ const MyDataPage = ({ section = 'home', onSectionChange, stats, onNavigate }) =>
                   style={{ border: '1px solid #e2e4eb' }}
                   onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#d8dbed'; e.currentTarget.style.boxShadow = '0 1px 3px rgba(62,75,156,0.06), 0 4px 12px rgba(62,75,156,0.04)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e2e4eb'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'none'; }}
+                  data-tour={`section-${d.key}`}
                 >
                   <div className="flex items-start justify-between mb-4">
                     <div className="w-8 h-8 rounded-[7px] flex items-center justify-center" style={{ background: '#f0f1f5' }}>

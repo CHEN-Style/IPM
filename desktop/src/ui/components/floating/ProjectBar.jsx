@@ -4,7 +4,7 @@ import { Briefcase, Folder, GraduationCap } from 'lucide-react';
 const ProjectBar = ({ projects, activeProjectId, onSelect, title = 'Active Projects', icon = 'projects', emptyText = '暂无可用条目' }) => {
   const Icon = icon === 'cases' ? Briefcase : icon === 'study' ? GraduationCap : Briefcase;
   return (
-    <div className="w-full bg-slate-100/80 border-t border-slate-200 backdrop-blur-sm rounded-b-xl overflow-hidden flex flex-col">
+    <div className="w-full bg-slate-100/80 border-t border-slate-200 backdrop-blur-sm rounded-b-xl overflow-hidden flex flex-col" data-tour="float-project-bar">
       <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider font-bold text-slate-400 flex items-center gap-1">
         <Icon size={10} />
         <span>{title}</span>

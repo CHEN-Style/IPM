@@ -15,7 +15,28 @@ const VARIANT_DOT = {
   error: 'bg-rose-500',
   warn: 'bg-amber-500',
   warning: 'bg-amber-500',
+  tip: 'bg-violet-400',
 };
+
+const USAGE_TIPS = [
+  '💡 拖拽文件到悬浮窗即可快速上传到当前项目',
+  '💡 想要快速移动文件? 进入项目，打开 Explorer 视图，拖拽文件到目标位置',
+  '💡 右键点击 KnowClaw 气泡可跳转到完整界面',
+  '💡 Ctrl+K 可快速搜索所有项目、案件和文件',
+  '💡 上传文件后 AI 会自动分类，你可以在暂存区审核结果',
+  '💡 在偏好与记录中添加"硬规则"，可跳过 AI 直接分类特定文件',
+  '💡 "软偏好"会影响 AI 的分类倾向，但不会强制执行',
+  '💡 支持用自然语言描述偏好，AI 会自动解析为结构化规则',
+  '💡 知识碎片可以关联到项目文件夹，方便跨项目复用笔记',
+  '💡 在文件详情面板中可以查看 AI 分类的完整推理过程',
+  '💡 点击面包屑导航可以快速跳转到上级目录',
+  '💡 temp 文件夹用于临时存放未分类的文件',
+  '💡 删除案件或项目前需要输入名称确认，防止误操作',
+  '💡 AI 助理可以帮你分析项目结构并提供整理建议',
+  '💡 KnowClaw 会从你的分类习惯中自动学习新的模式',
+  '💡 设置页可以配置 AI 模型参数和上传行为',
+  '💡 想要可视化的整理知识碎片? 快去试试 Knowledge Thread Board',
+];
 
 /* ── Main component ── */
 
@@ -91,31 +112,34 @@ const SupervisorBubble = ({ onNavigateToKnowClaw }) => {
   const { queue, dequeue } = useToast();
   const [morphState, setMorphState] = useState('idle'); // idle | expanding | showing | collapsing
   const [currentToast, setCurrentToast] = useState(null);
+  const [isTip, setIsTip] = useState(false);
   const morphTimerRef = useRef(null);
 
   const clearMorphTimer = () => {
     if (morphTimerRef.current) { clearTimeout(morphTimerRef.current); morphTimerRef.current = null; }
   };
 
-  const dismissMorph = useCallback(() => {
+  const dismissMorph = useCallback((skipDequeue) => {
     clearMorphTimer();
     setMorphState('collapsing');
     morphTimerRef.current = setTimeout(() => {
       setMorphState('idle');
       setCurrentToast(null);
-      dequeue();
+      setIsTip(false);
+      if (!skipDequeue) dequeue();
     }, 300);
   }, [dequeue]);
 
-  const startMorph = useCallback((toast) => {
+  const startMorph = useCallback((toast, tip = false) => {
     clearMorphTimer();
     setCurrentToast(toast);
+    setIsTip(tip);
     setMorphState('expanding');
-    const showDuration = toast.action ? 6000 : 3500;
+    const showDuration = tip ? 5000 : toast.action ? 6000 : 3500;
     morphTimerRef.current = setTimeout(() => {
       setMorphState('showing');
       morphTimerRef.current = setTimeout(() => {
-        dismissMorph();
+        dismissMorph(tip);
       }, showDuration);
     }, 300);
   }, [dismissMorph]);
@@ -125,15 +149,67 @@ const SupervisorBubble = ({ onNavigateToKnowClaw }) => {
     startMorph(queue[0]);
   }, [queue, morphState, expanded, startMorph]);
 
+  // Toast arriving interrupts any active tip
+  useEffect(() => {
+    if (queue.length > 0 && isTip && morphState !== 'idle') {
+      clearMorphTimer();
+      setMorphState('idle');
+      setCurrentToast(null);
+      setIsTip(false);
+    }
+  }, [queue.length, isTip, morphState]);
+
   useEffect(() => {
     if (expanded && morphState !== 'idle') {
       clearMorphTimer();
       setMorphState('idle');
       setCurrentToast(null);
+      setIsTip(false);
     }
   }, [expanded]);
 
   useEffect(() => () => clearMorphTimer(), []);
+
+  /* ── Usage tips (lowest priority) ── */
+
+  const tipTimerRef = useRef(null);
+  const tipIndexPool = useRef([]);
+  const morphStateRef = useRef(morphState);
+  const queueLenRef = useRef(queue.length);
+  const expandedRef = useRef(expanded);
+  morphStateRef.current = morphState;
+  queueLenRef.current = queue.length;
+  expandedRef.current = expanded;
+
+  const clearTipTimer = useCallback(() => {
+    if (tipTimerRef.current) { clearTimeout(tipTimerRef.current); tipTimerRef.current = null; }
+  }, []);
+
+  useEffect(() => {
+    const scheduleNext = () => {
+      clearTipTimer();
+      const delay = (5 + Math.random() * 5) * 60_000;
+      tipTimerRef.current = setTimeout(() => {
+        tipTimerRef.current = null;
+        if (morphStateRef.current !== 'idle' || queueLenRef.current > 0 || expandedRef.current) {
+          scheduleNext();
+          return;
+        }
+        if (tipIndexPool.current.length === 0) {
+          tipIndexPool.current = Array.from({ length: USAGE_TIPS.length }, (_, i) => i);
+          for (let i = tipIndexPool.current.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [tipIndexPool.current[i], tipIndexPool.current[j]] = [tipIndexPool.current[j], tipIndexPool.current[i]];
+          }
+        }
+        const idx = tipIndexPool.current.pop();
+        startMorph({ message: USAGE_TIPS[idx], variant: 'tip' }, true);
+        scheduleNext();
+      }, delay);
+    };
+    scheduleNext();
+    return () => clearTipTimer();
+  }, [startMorph, clearTipTimer]);
 
   const isMorphing = morphState !== 'idle' && currentToast;
   const dotColor = currentToast ? (VARIANT_DOT[currentToast.variant] || VARIANT_DOT.info) : VARIANT_DOT.info;
@@ -148,7 +224,7 @@ const SupervisorBubble = ({ onNavigateToKnowClaw }) => {
             onClick={(e) => {
               if (e.defaultPrevented) return;
               if (isMorphing) {
-                dismissMorph();
+                dismissMorph(isTip);
                 return;
               }
               setExpanded(true);

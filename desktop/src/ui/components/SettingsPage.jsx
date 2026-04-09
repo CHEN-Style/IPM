@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { CheckCircle2, Clock, Eye, EyeOff, FolderOpen, RefreshCw, Settings2, ShieldCheck, ToggleLeft, Cpu, Loader2 } from 'lucide-react';
+import { CheckCircle2, Clock, Eye, EyeOff, FolderOpen, RefreshCw, Settings2, Cpu, Loader2 } from 'lucide-react';
 
 const Card = ({ title, description, children }) => {
   return (
@@ -331,7 +331,7 @@ const LlmConfigCard = () => {
 
 const SettingsPage = () => {
   const [saving, setSaving] = useState(false);
-  const [prefs, setPrefs] = useState({ floatingUploadMode: 'confirm' });
+  const [prefs, setPrefs] = useState({ floatingUploadMode: 'auto' });
 
   useEffect(() => {
     let cancelled = false;
@@ -363,18 +363,6 @@ const SettingsPage = () => {
     }
   };
 
-  const mockSwitch = useMemo(() => {
-    return (
-      <button
-        type="button"
-        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-500 hover:bg-slate-50"
-        title="Mock"
-      >
-        <ToggleLeft size={14} className="text-slate-400" />
-        未接入
-      </button>
-    );
-  }, []);
 
   return (
     <div className="flex-1 flex flex-col h-full bg-white">
@@ -410,23 +398,6 @@ const SettingsPage = () => {
                 label="手动确认模式"
                 hint="拖拽/选择后需要点击“确认并保存”，行为与当前一致。"
                 onClick={() => setFloatingUploadMode('confirm')}
-              />
-            </div>
-          </Card>
-
-          <Card title="外观与交互（Mock）" description="这些选项先占位，后续逐步接入。">
-            <div className="divide-y divide-slate-100">
-              <OptionRow
-                icon={<ShieldCheck size={16} />}
-                title="启动时打开悬浮窗"
-                desc="应用启动后自动打开悬浮窗（后续接入）。"
-                right={mockSwitch}
-              />
-              <OptionRow
-                icon={<Clock size={16} />}
-                title="悬浮窗提示音"
-                desc="保存成功/失败提示音（后续接入）。"
-                right={mockSwitch}
               />
             </div>
           </Card>

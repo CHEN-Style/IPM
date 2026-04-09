@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { useConfirmDialog } from '../../../hooks/useConfirmDialog.jsx';
 
 const useProjectActions = ({
   entityApi,
@@ -11,6 +12,7 @@ const useProjectActions = ({
   setNotice,
   setCurrentProject,
 }) => {
+  const confirm = useConfirmDialog();
   const [newProjectName, setNewProjectName] = useState('');
 
   const enterProject = useCallback(
@@ -68,7 +70,15 @@ const useProjectActions = ({
         setErrorText?.('delete 未就绪：请重启应用（不要只刷新页面）');
         return;
       }
-      if (!window.confirm(`确定删除${entityLabel}「${name}」吗？此操作将删除整个文件夹（不可恢复）。`)) return;
+      const ok = await confirm({
+        title: `删除${entityLabel}`,
+        message: `确定删除${entityLabel}「${name}」吗？\n此操作将删除整个文件夹及其所有内容，不可恢复。`,
+        confirmLabel: `删除${entityLabel}`,
+        danger: true,
+        requireInput: name,
+        inputHint: `输入${entityLabel}名称`,
+      });
+      if (!ok) return;
       setErrorText?.('');
       try {
         await entityApi.delete(name);

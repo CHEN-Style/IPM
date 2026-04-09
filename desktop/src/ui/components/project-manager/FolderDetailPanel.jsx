@@ -74,7 +74,7 @@ const FolderDetailPanel = ({
             )}
           </section>
 
-          <section className="bg-white border border-slate-200 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.02)] p-4">
+          <section className="bg-white border border-slate-200 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.02)] p-4" data-tour="folder-detail-desc">
             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Description</div>
             <div className="flex items-center justify-between mb-2">
               <div className="text-[11px] text-slate-400">

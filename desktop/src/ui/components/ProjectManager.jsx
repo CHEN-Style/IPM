@@ -27,7 +27,25 @@ import CreateKnowledgeModal from './project-manager/CreateKnowledgeModal.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { fileDecor, folderDecor, fmtBytes, fmtTime } from './project-manager/utils.js';
 
-const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
+/** Stable analytics ids for context menu rows (labels come from useContextMenu). */
+function pmContextMenuTrack(label) {
+  const t = String(label || '');
+  if (/^新建(项目|案件|学习)$/.test(t)) return 'pm-create-project';
+  if (t === '新建文件夹') return 'pm-new-folder';
+  if (t === '上传文件') return 'pm-upload-files';
+  if (t === '上传并AI分类') return 'pm-ai-classify-upload';
+  if (t === '新建知识碎片') return 'pm-knowledge';
+  if (t.startsWith('上传文件到文件夹')) return 'pm-upload-to-folder';
+  if (/^在「.+」中新建文件夹$/.test(t)) return 'pm-new-folder-in-folder';
+  if (t.startsWith('重命名：')) return 'pm-rename-entry';
+  if (t.startsWith('删除文件夹：')) return 'pm-delete-folder';
+  if (t.startsWith('删除文件：')) return 'pm-delete-file';
+  if (t.startsWith('取消关联：')) return 'pm-unlink-local-folder';
+  if (/^删除.+：/.test(t)) return 'pm-delete-project';
+  return undefined;
+}
+
+const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarget = null, onSearchNavDone = null }) => {
   const raw = String(domain || 'projects').toLowerCase();
   const normalizedDomain = raw === 'cases' ? 'cases' : raw === 'study' ? 'study' : 'projects';
   const isCases = normalizedDomain === 'cases';
@@ -391,6 +409,26 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
 
   useResumeRefresh({ normalizedDomain, cwd, refreshProjects, refreshEntries, refreshGhosts });
 
+  const lastNavTs = useRef(0);
+  useEffect(() => {
+    if (!searchNavTarget || !searchNavTarget._ts) return;
+    if (searchNavTarget._ts === lastNavTs.current) return;
+    lastNavTs.current = searchNavTarget._ts;
+
+    const { projectName, relPath, kind } = searchNavTarget;
+
+    const targetDir = kind === 'dir' ? relPath : (relPath.includes('/') ? relPath.slice(0, relPath.lastIndexOf('/')) : '');
+
+    if (isStudy) {
+      setCwd({ type: 'project', name: '', relPath: targetDir });
+    } else if (projectName) {
+      entityApi?.setCurrent?.(projectName).catch(() => {});
+      setCurrentProject?.(projectName);
+      setCwd({ type: 'project', name: projectName, relPath: targetDir });
+    }
+    onSearchNavDone?.();
+  }, [searchNavTarget, isStudy, entityApi, setCurrentProject, setCwd, onSearchNavDone]);
+
   useEffect(() => {
     if (!filterPersistent) {
       setFileFilters([]);
@@ -487,6 +525,15 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
         goRootLabel={entityLabelAll}
         createLabel={entityLabel}
         showAgentChat={false}
+        projectName={cwd.type === 'project' ? cwd.name : ''}
+        domain={normalizedDomain}
+        onNavigateToResult={(item) => {
+          if (!item) return;
+          const targetDir = item.kind === 'dir'
+            ? item.relPath
+            : (item.relPath.includes('/') ? item.relPath.slice(0, item.relPath.lastIndexOf('/')) : '');
+          setCwd({ ...cwd, relPath: targetDir });
+        }}
       />
 
       {/* Content */}
@@ -607,10 +654,20 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
               }}
             />
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded" onClick={() => setNewFolderOpen(false)}>
+              <button
+                type="button"
+                data-track="pm-new-folder-cancel"
+                className="px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded"
+                onClick={() => setNewFolderOpen(false)}
+              >
                 取消
               </button>
-              <button type="button" className="px-3 py-2 text-sm bg-[#3e4b9c] text-white rounded hover:bg-[#4e5bab]" onClick={createFolder}>
+              <button
+                type="button"
+                data-track="pm-new-folder-submit"
+                className="px-3 py-2 text-sm bg-[#3e4b9c] text-white rounded hover:bg-[#4e5bab]"
+                onClick={createFolder}
+              >
                 创建
               </button>
             </div>
@@ -635,10 +692,20 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
               }}
             />
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded" onClick={() => setRenameOpen(false)}>
+              <button
+                type="button"
+                data-track="pm-rename-cancel"
+                className="px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded"
+                onClick={() => setRenameOpen(false)}
+              >
                 取消
               </button>
-              <button type="button" className="px-3 py-2 text-sm bg-[#3e4b9c] text-white rounded hover:bg-[#4e5bab]" onClick={doRename}>
+              <button
+                type="button"
+                data-track="pm-rename-submit"
+                className="px-3 py-2 text-sm bg-[#3e4b9c] text-white rounded hover:bg-[#4e5bab]"
+                onClick={doRename}
+              >
                 确认
               </button>
             </div>
@@ -658,6 +725,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null }) => {
               <button
                 key={it.label}
                 type="button"
+                data-track={pmContextMenuTrack(it.label)}
                 className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition-colors ${
                   it.danger ? 'text-rose-600 hover:bg-rose-50' : 'text-slate-700'
                 }`}

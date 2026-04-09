@@ -567,11 +567,12 @@ export default function KnowledgePage({ projectName, domain, onBack }) {
               className="w-full px-3 py-2 border border-slate-200 rounded text-sm focus:outline-none focus:border-slate-400"
               autoFocus
               onKeyDown={(e) => { if (e.key === 'Enter') handleCreateNote(); }}
+              data-tour="knowledge-note-title"
             />
             <p className="text-xs text-slate-400 mt-2">创建后可在详情面板中使用富文本编辑器编写内容</p>
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" className="px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded" onClick={() => setCreateNoteOpen(false)}>取消</button>
-              <button type="button" disabled={createBusy || !createNoteTitle.trim()} className="px-3 py-2 text-sm bg-slate-900 text-white rounded hover:bg-slate-800 disabled:opacity-50" onClick={handleCreateNote}>创建</button>
+              <button type="button" disabled={createBusy || !createNoteTitle.trim()} className="px-3 py-2 text-sm bg-slate-900 text-white rounded hover:bg-slate-800 disabled:opacity-50" onClick={handleCreateNote} data-tour="knowledge-note-confirm">创建</button>
             </div>
           </div>
         </div>

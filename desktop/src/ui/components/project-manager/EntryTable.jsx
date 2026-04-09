@@ -104,13 +104,14 @@ const EntryTable = ({
               </tr>
             )}
             {!loading &&
-              filterList.map((e) => (
+              filterList.map((e, eIdx) => (
                 <tr
                   key={e.relPath}
                   onContextMenu={e.kind === 'ghost' ? undefined : (evt) => onContextMenuEntry?.(evt, e)}
                   onClick={() => {
                     if (e.kind === 'dir') onEnterDir?.(e.relPath);
                   }}
+                  data-tour={e.kind === 'dir' && filterList.slice(0, eIdx).every((x) => x.kind !== 'dir') ? 'folder-first' : undefined}
                   onDoubleClick={(evt) => {
                     // Double-click to open file via OS default app
                     if (e.kind === 'file') {

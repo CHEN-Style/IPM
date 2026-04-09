@@ -285,7 +285,7 @@ function NLPreviewCard({ result, onConfirm, onEditThenAdd, onCancel }) {
   );
 }
 
-const PreferencesPanel = ({ projectName, domain, embedded = false }) => {
+const PreferencesPanel = ({ projectName, domain, embedded = false, addTriggerRef }) => {
   const [prefs, setPrefs] = useState([]);
   const [folders, setFolders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -325,6 +325,13 @@ const PreferencesPanel = ({ projectName, domain, embedded = false }) => {
   useEffect(() => {
     if (active) loadData();
   }, [active, loadData]);
+
+  useEffect(() => {
+    if (addTriggerRef) {
+      addTriggerRef.current = () => { setEditingPref(null); setShowForm(true); };
+    }
+    return () => { if (addTriggerRef) addTriggerRef.current = null; };
+  }, [addTriggerRef]);
 
   const handleAdd = async (data) => {
     try {
@@ -512,7 +519,7 @@ const PreferencesPanel = ({ projectName, domain, embedded = false }) => {
         ) : null}
       </div>
 
-      {!showForm ? (
+      {!showForm && !embedded ? (
         <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between">
           <div className="text-[11px] text-slate-400">{prefs.length} 条偏好</div>
           <button

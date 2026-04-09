@@ -122,17 +122,17 @@ function RuleForm({ folders, initial, onSave, onCancel }) {
   const labelCls = 'block text-xs font-medium text-slate-600 mb-1';
 
   return (
-    <form onSubmit={handleSubmit} className="px-4 py-4 border-t border-slate-200 bg-slate-50/60 space-y-3">
+    <form onSubmit={handleSubmit} className="px-4 py-4 border-t border-slate-200 bg-slate-50/60 space-y-3" data-tour="rules-form">
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className={labelCls}>规则名称</label>
-          <input className={inputCls} placeholder="如：草稿类归过程文档" value={form.label} onChange={(e) => set('label', e.target.value)} />
+          <input className={inputCls} placeholder="如：草稿类归过程文档" value={form.label} onChange={(e) => set('label', e.target.value)} data-tour="rules-form-label" />
         </div>
         <div>
           <label className={labelCls}>
             目标文件夹 <span className="text-red-400">*</span>
           </label>
-          <select className={inputCls} value={form.targetFolder} onChange={(e) => set('targetFolder', e.target.value)}>
+          <select className={inputCls} value={form.targetFolder} onChange={(e) => set('targetFolder', e.target.value)} data-tour="rules-form-folder">
             <option value="">选择文件夹...</option>
             {(folders || []).map((f) => (
               <option key={f.relPath} value={f.relPath}>
@@ -148,7 +148,7 @@ function RuleForm({ folders, initial, onSave, onCancel }) {
         <label className={labelCls}>
           文件名包含关键词 <span className="text-slate-400 font-normal">（逗号分隔，满足任一即命中）</span>
         </label>
-        <input className={inputCls} placeholder="如：草稿, 修改意见, v2" value={form.nameIncludes} onChange={(e) => set('nameIncludes', e.target.value)} />
+        <input className={inputCls} placeholder="如：草稿, 修改意见, v2" value={form.nameIncludes} onChange={(e) => set('nameIncludes', e.target.value)} data-tour="rules-form-keywords" />
       </div>
 
       <div>
@@ -184,6 +184,7 @@ function RuleForm({ folders, initial, onSave, onCancel }) {
         <button
           type="submit"
           className="px-4 py-1.5 text-xs rounded-lg bg-[#3e4b9c] text-white hover:bg-[#4e5bab] font-medium"
+          data-tour="rules-form-submit"
         >
           {initial ? '保存修改' : '添加规则'}
         </button>
@@ -192,7 +193,7 @@ function RuleForm({ folders, initial, onSave, onCancel }) {
   );
 }
 
-const ClassifyRulesPanel = ({ projectName, domain, open, onClose, embedded = false }) => {
+const ClassifyRulesPanel = ({ projectName, domain, open, onClose, embedded = false, addTriggerRef }) => {
   const [rules, setRules] = useState([]);
   const [folders, setFolders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -227,6 +228,13 @@ const ClassifyRulesPanel = ({ projectName, domain, open, onClose, embedded = fal
   useEffect(() => {
     if (active) loadData();
   }, [active, loadData]);
+
+  useEffect(() => {
+    if (addTriggerRef) {
+      addTriggerRef.current = () => { setEditingRule(null); setShowForm(true); };
+    }
+    return () => { if (addTriggerRef) addTriggerRef.current = null; };
+  }, [addTriggerRef]);
 
   const handleAdd = async (data) => {
     try {
@@ -309,7 +317,7 @@ const ClassifyRulesPanel = ({ projectName, domain, open, onClose, embedded = fal
         ) : null}
       </div>
 
-      {!showForm ? (
+      {!showForm && !embedded ? (
         <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between">
           <div className="text-[11px] text-slate-400">{rules.length} 条规则</div>
           <button
@@ -319,6 +327,7 @@ const ClassifyRulesPanel = ({ projectName, domain, open, onClose, embedded = fal
               setShowForm(true);
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-[#3e4b9c] text-white hover:bg-[#4e5bab] font-medium"
+            data-tour="rules-add-btn"
           >
             <Plus size={13} />
             添加规则

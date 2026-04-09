@@ -295,4 +295,12 @@ contextBridge.exposeInMainWorld('ipm', {
       return () => ipcRenderer.removeListener('supervisor:stream-event', handler);
     },
   },
+  search: {
+    global: (query) => ipcRenderer.invoke('search/global', { query }),
+    project: (projectName, domain, query) => ipcRenderer.invoke('search/project', { projectName, domain, query }),
+  },
+  analytics: {
+    flush: (events, userName) => ipcRenderer.invoke('analytics/flush', { events, userName }),
+    getDataPath: () => ipcRenderer.invoke('analytics/getDataPath'),
+  },
 });

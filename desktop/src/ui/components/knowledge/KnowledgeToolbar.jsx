@@ -120,6 +120,7 @@ export default function KnowledgeToolbar({
           type="button"
           onClick={() => setCreateOpen(!createOpen)}
           className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-slate-800 rounded-md hover:bg-slate-700 transition-colors"
+          data-tour="knowledge-create-btn"
         >
           <Plus size={14} />
           新建
@@ -141,6 +142,7 @@ export default function KnowledgeToolbar({
                 type="button"
                 onClick={() => { setCreateOpen(false); onCreateNote?.(); }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                data-tour="knowledge-create-note"
               >
                 <StickyNote size={14} className="text-slate-400" />
                 富文本笔记

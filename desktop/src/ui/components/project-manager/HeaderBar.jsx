@@ -165,9 +165,9 @@ const HeaderBar = ({
 
   return (
     <header className="bg-white border-b border-[#e2e4eb] sticky top-0 z-10">
-      <div className="px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 relative">
+      <div className="px-4 sm:px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 relative">
         <div className="flex items-center gap-3 overflow-hidden w-full md:w-auto pr-16 md:pr-0">
-          <div className="flex items-center gap-3 pr-3 border-r border-slate-200 mr-3 shrink-0 max-w-[70%] sm:max-w-none">
+          <div className="flex items-center gap-2 sm:gap-3 pr-3 border-r border-slate-200 mr-2 sm:mr-3 shrink-0 max-w-[60%] sm:max-w-[70%] md:max-w-none">
             {showBackHome ? (
               <button
                 type="button"
@@ -233,8 +233,8 @@ const HeaderBar = ({
         </div>
       </div>
 
-      <div className="px-6 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
+      <div className="px-4 sm:px-6 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+        <div className="flex items-center gap-2 min-w-0">
           {showGoParent ? (
             <button
               type="button"
@@ -269,7 +269,7 @@ const HeaderBar = ({
                   onFocus={() => setPFocused(true)}
                   onKeyDown={handlePKeyDown}
                   placeholder="搜索文件..."
-                  className="h-9 w-44 pl-8 pr-7 rounded-lg border text-sm transition-all focus:outline-none focus:w-56"
+                  className="h-9 w-32 sm:w-44 pl-8 pr-7 rounded-lg border text-sm transition-all focus:outline-none focus:w-48 sm:focus:w-56"
                   style={{
                     background: pFocused ? '#fff' : '#f8f9fb',
                     borderColor: pFocused ? '#3e4b9c66' : '#e2e4eb',
@@ -448,7 +448,7 @@ const HeaderBar = ({
                     value={newProjectName}
                     onChange={(e) => onNewProjectNameChange?.(e.target.value)}
                     placeholder={`输入${createLabel}名`}
-                    className="h-9 px-3 border border-slate-200 rounded-lg text-sm text-slate-700 w-48 focus:outline-none focus:border-slate-400"
+                    className="h-9 px-3 border border-slate-200 rounded-lg text-sm text-slate-700 w-28 sm:w-48 focus:outline-none focus:border-slate-400"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') onCreateProject?.();
                     }}
@@ -490,24 +490,26 @@ const HeaderBar = ({
               <button
                 type="button"
                 onClick={onOpenNewFolder}
-                className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors text-sm"
+                className="inline-flex items-center gap-2 h-9 px-2.5 sm:px-3 rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors text-sm whitespace-nowrap"
+                title="新建文件夹"
               >
-                <FolderPlus size={14} /> 新建文件夹
+                <FolderPlus size={14} /> <span className="hidden sm:inline">新建文件夹</span>
               </button>
               <button
                 type="button"
                 onClick={onUploadFiles}
-                className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors text-sm shadow-sm"
+                className="inline-flex items-center gap-2 h-9 px-2.5 sm:px-3 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors text-sm shadow-sm whitespace-nowrap"
                 disabled={aiUploadRunning}
                 data-tour="btn-upload"
+                title="上传文件"
               >
-                <Upload size={14} /> 上传文件
+                <Upload size={14} /> <span className="hidden sm:inline">上传文件</span>
               </button>
               <button
                 type="button"
                 onClick={onPickFilesAndAiClassify}
                 disabled={aiUploadRunning || !allowAiUpload}
-                className={`inline-flex items-center gap-2 h-9 px-3 rounded-lg text-sm font-medium transition-colors shadow-sm ${
+                className={`inline-flex items-center gap-2 h-9 px-2.5 sm:px-3 rounded-lg text-sm font-medium transition-colors shadow-sm whitespace-nowrap ${
                   aiUploadRunning || !allowAiUpload
                     ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
                     : 'bg-[#3e4b9c] text-white hover:bg-[#4e5bab]'
@@ -515,8 +517,7 @@ const HeaderBar = ({
                 title="选择一个或多个文件，逐个放入 temp，并逐个触发 AI 分类推荐"
                 data-tour="btn-ai-upload"
               >
-                <Sparkles size={14} /> {aiUploadRunning ? '上传并AI分类…' : '上传并AI分类'}
-              </button>
+                <Sparkles size={14} /> <span className="hidden sm:inline">{aiUploadRunning ? '上传并AI分类…' : '上传并AI分类'}</span>
             </>
           )}
         </div>

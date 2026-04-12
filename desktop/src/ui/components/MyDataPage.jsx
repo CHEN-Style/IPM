@@ -54,24 +54,24 @@ const MyDataPage = ({ section = 'home', onSectionChange, stats, onNavigate, sear
   return (
     <div className="flex-1 flex flex-col h-full" style={{ background: '#f8f9fb' }}>
       <div className="flex-1 overflow-y-auto">
-        <div className="w-full px-8 xl:px-10 pt-4 pb-8 xl:pt-5 xl:pb-10">
+        <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 pt-4 pb-8 xl:pt-5 xl:pb-10">
 
           {/* ── Topbar ── */}
-          <div className="flex items-center justify-between mb-8">
-            <div>
+          <div className="flex items-center justify-between gap-3 mb-6 sm:mb-8">
+            <div className="min-w-0">
               <div className="flex items-baseline gap-2.5">
-                <h1 className="text-xl font-bold tracking-tight" style={{ color: '#252a38', letterSpacing: '-0.02em' }}>{greeting}</h1>
-                <span className="text-[12.5px]" style={{ color: '#9a9eb0' }}>{dateStr}</span>
+                <h1 className="text-lg sm:text-xl font-bold tracking-tight truncate" style={{ color: '#252a38', letterSpacing: '-0.02em' }}>{greeting}</h1>
+                <span className="text-[12.5px] shrink-0" style={{ color: '#9a9eb0' }}>{dateStr}</span>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <TopbarBtn icon={<Search size={14} />} label="搜索" />
               <TopbarBtn icon={<Plus size={14} />} label="新建案件" primary onClick={() => onSectionChange?.('cases')} />
             </div>
           </div>
 
           {/* ── Workspace cards ── */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6">
             {DOMAINS.map((d) => {
               const count = stats?.[d.key]?.count;
               const active = stats?.[d.key]?.active;
@@ -80,7 +80,7 @@ const MyDataPage = ({ section = 'home', onSectionChange, stats, onNavigate, sear
                   key={d.key}
                   type="button"
                   onClick={() => onSectionChange?.(d.key)}
-                  className="bg-white rounded-[10px] p-5 flex flex-col text-left relative group outline-none transition-all duration-200"
+                  className="bg-white rounded-[10px] p-4 sm:p-5 flex flex-col text-left relative group outline-none transition-all duration-200"
                   style={{ border: '1px solid #e2e4eb' }}
                   onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#d8dbed'; e.currentTarget.style.boxShadow = '0 1px 3px rgba(62,75,156,0.06), 0 4px 12px rgba(62,75,156,0.04)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e2e4eb'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'none'; }}
@@ -136,7 +136,7 @@ const MyDataPage = ({ section = 'home', onSectionChange, stats, onNavigate, sear
 
             {/* Data overview */}
             <Panel title="数据概览">
-              <div className="grid grid-cols-4 gap-3 mb-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                 <DataCell value={totalItems || '—'} label="总文件" />
                 <DataCell value={totalActive || '—'} label="活跃案件" />
                 <DataCell value={stats?.study?.count ?? '—'} label="学习主题" />
@@ -150,7 +150,7 @@ const MyDataPage = ({ section = 'home', onSectionChange, stats, onNavigate, sear
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {/* Quick actions */}
             <Panel title="快捷操作">
-              <div className="grid grid-cols-2 gap-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-1.5">
                 <QABtn icon={<Plus size={14} />} label="新建案件" onClick={() => onSectionChange?.('cases')} />
                 <QABtn icon={<FolderKanban size={14} />} label="新建项目" onClick={() => onSectionChange?.('projects')} />
                 <QABtn icon={<Camera size={14} />} label="截图收集" onClick={() => {
@@ -215,7 +215,7 @@ const TopbarBtn = ({ icon, label, primary, onClick }) => (
 );
 
 const Panel = ({ title, link, onLink, children, className = '' }) => (
-  <div className={`bg-white rounded-[10px] p-5 ${className}`} style={{ border: '1px solid #e2e4eb' }}>
+  <div className={`bg-white rounded-[10px] p-4 sm:p-5 ${className}`} style={{ border: '1px solid #e2e4eb' }}>
     <div className="flex items-center justify-between mb-4">
       <span className="text-xs font-semibold uppercase tracking-[0.04em]" style={{ color: '#9a9eb0' }}>{title}</span>
       {link && (

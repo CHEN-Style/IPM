@@ -1263,13 +1263,13 @@ const createFloatingWindow = () => {
     },
   });
 
-  floatingWindow.setAlwaysOnTop(true, 'screen-saver');
+  floatingWindow.setAlwaysOnTop(true, 'floating');
 
   loadRenderer(floatingWindow, 'floating');
 
   floatingWindow.on('blur', () => {
     if (floatingWindow && !floatingWindow.isDestroyed()) {
-      floatingWindow.setAlwaysOnTop(true, 'screen-saver');
+      floatingWindow.setAlwaysOnTop(true, 'floating');
     }
   });
 

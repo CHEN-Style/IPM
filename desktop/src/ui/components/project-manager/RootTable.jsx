@@ -52,37 +52,37 @@ const RootTable = ({
     </div>
   );
 
-  /* ── Action buttons (shared) ── */
-  const ActionButtons = ({ project, isFirst }) => (
-    <div className="flex items-center gap-1.5 flex-wrap">
+  /* ── Action buttons (shared, compact=true for card layout) ── */
+  const ActionButtons = ({ project, isFirst, compact }) => (
+    <div className="flex items-center gap-1.5">
       <button
         type="button"
-        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-medium hover:bg-slate-50 transition-colors whitespace-nowrap"
+        className={`inline-flex items-center gap-1.5 ${compact ? 'px-2 py-1' : 'px-2.5 py-1.5'} bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-medium hover:bg-slate-50 transition-colors whitespace-nowrap`}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenPreferences?.(project); }}
         title="管理分类偏好与历史记录"
         data-tour={isFirst ? 'btn-preferences-first' : undefined}
       >
         <Settings2 size={13} />
-        <span className="hidden sm:inline">偏好与记录</span>
+        {!compact && <span>偏好</span>}
       </button>
       <button
         type="button"
-        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 transition-colors shadow-sm whitespace-nowrap"
+        className={`inline-flex items-center gap-1.5 ${compact ? 'px-2 py-1' : 'px-2.5 py-1.5'} bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 transition-colors shadow-sm whitespace-nowrap`}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenAgent?.(project); }}
         title="打开 AI 助理对话"
       >
         <Bot size={13} />
-        <span className="hidden sm:inline">AI 助理</span>
+        {!compact && <span>AI</span>}
       </button>
       <button
         type="button"
-        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#3e4b9c] text-white rounded-lg text-xs font-semibold hover:bg-[#4e5bab] transition-colors shadow-sm whitespace-nowrap"
+        className={`inline-flex items-center gap-1.5 ${compact ? 'px-2 py-1' : 'px-2.5 py-1.5'} bg-[#3e4b9c] text-white rounded-lg text-xs font-semibold hover:bg-[#4e5bab] transition-colors shadow-sm whitespace-nowrap`}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenKnowledge?.(project); }}
         title="知识碎片管理与关联"
         data-tour={isFirst ? 'btn-knowledge-first' : undefined}
       >
         <BookOpen size={13} />
-        <span className="hidden sm:inline">知识管理</span>
+        {!compact && <span>知识</span>}
       </button>
     </div>
   );
@@ -97,13 +97,13 @@ const RootTable = ({
 
       {/* ════════ Wide screen: table layout (≥1024px) ════════ */}
       <div className="hidden lg:block overflow-x-auto">
-        <table className="w-full text-left border-separate border-spacing-y-1" style={{ minWidth: '780px' }}>
+        <table className="w-full text-left border-separate border-spacing-y-1 table-fixed" style={{ minWidth: '700px' }}>
           <thead>
             <tr className="text-[11px] text-slate-400 uppercase tracking-widest font-bold">
-              <th className="pb-4 pl-4 font-bold" style={{ width: '22%', minWidth: '140px' }}>{entityLabel}名称</th>
-              <th className="pb-4 font-bold" style={{ width: '28%', minWidth: '120px' }}>路径</th>
-              <th className="pb-4 text-center font-bold whitespace-nowrap">状态</th>
-              <th className="pb-4 text-right pr-4 font-bold whitespace-nowrap">操作</th>
+              <th className="pb-4 pl-4 font-bold" style={{ width: '20%' }}>{entityLabel}名称</th>
+              <th className="pb-4 font-bold" style={{ width: '30%' }}>路径</th>
+              <th className="pb-4 text-center font-bold whitespace-nowrap" style={{ width: '28%' }}>状态</th>
+              <th className="pb-4 text-right pr-4 font-bold whitespace-nowrap" style={{ width: '22%' }}>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -140,8 +140,8 @@ const RootTable = ({
                       </div>
                     </div>
                   </td>
-                  <td className="py-3.5 border-y border-transparent">
-                    <div className="text-xs text-slate-400 font-medium truncate max-w-[320px]" title={p}>{p}</div>
+                  <td className="py-3.5 border-y border-transparent overflow-hidden">
+                    <div className="text-xs text-slate-400 font-medium truncate" title={p}>{p}</div>
                   </td>
                   <td className="py-3.5 text-center border-y border-transparent">
                     <span className="text-[10px] font-bold px-2 py-1 rounded bg-white border border-slate-200 text-slate-600 whitespace-nowrap">
@@ -170,14 +170,14 @@ const RootTable = ({
                     </div>
                   </div>
                 </td>
-                <td className="py-3.5 border-y border-transparent">
-                  <div className="text-xs text-slate-400 font-medium truncate max-w-[320px]" title={p.path}>{p.path}</div>
+                <td className="py-3.5 border-y border-transparent overflow-hidden">
+                  <div className="text-xs text-slate-400 font-medium truncate" title={p.path}>{p.path}</div>
                 </td>
                 <td className="py-3.5 text-center border-y border-transparent">
                   <StatusToggle project={p} />
                 </td>
                 <td className="py-3.5 text-right pr-4 rounded-r border-y border-transparent">
-                  <div className="flex items-center justify-end gap-1.5">
+                  <div className="flex items-center justify-end">
                     <ActionButtons project={p} isFirst={pIdx === 0} />
                   </div>
                 </td>
@@ -255,7 +255,7 @@ const RootTable = ({
             </div>
             {/* Row 2: action buttons */}
             <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-end">
-              <ActionButtons project={p} isFirst={pIdx === 0} />
+              <ActionButtons project={p} isFirst={pIdx === 0} compact />
             </div>
           </div>
         ))}

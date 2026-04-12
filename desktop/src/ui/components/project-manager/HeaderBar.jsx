@@ -233,13 +233,13 @@ const HeaderBar = ({
         </div>
       </div>
 
-      <div className="px-4 sm:px-6 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="px-4 sm:px-6 pb-4 flex items-center gap-2 overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-2 shrink-0">
           {showGoParent ? (
             <button
               type="button"
               onClick={onGoParent}
-              className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors text-sm"
+              className="inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors text-sm whitespace-nowrap shrink-0"
               title="返回上一级"
             >
               <ArrowLeft size={14} /> 上一级
@@ -249,16 +249,16 @@ const HeaderBar = ({
             <button
               type="button"
               onClick={onGoRoot}
-              className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors text-sm"
+              className="inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors text-sm whitespace-nowrap shrink-0"
               title={`返回${goRootLabel}`}
             >
-              <ArrowLeft size={14} /> 返回{goRootLabel}
+              <ArrowLeft size={14} /> {goRootLabel}
             </button>
           ) : null}
 
           {/* In-project search */}
           {!isRoot && (
-            <div className="relative" ref={pWrapRef}>
+            <div className="relative shrink-0" ref={pWrapRef}>
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" size={13} style={{ color: pFocused ? '#64748b' : '#94a3b8' }} />
                 <input
@@ -269,7 +269,7 @@ const HeaderBar = ({
                   onFocus={() => setPFocused(true)}
                   onKeyDown={handlePKeyDown}
                   placeholder="搜索文件..."
-                  className="h-9 w-32 sm:w-44 pl-8 pr-7 rounded-lg border text-sm transition-all focus:outline-none focus:w-48 sm:focus:w-56"
+                  className="h-9 w-32 sm:w-40 pl-8 pr-7 rounded-lg border text-sm transition-all focus:outline-none focus:w-48"
                   style={{
                     background: pFocused ? '#fff' : '#f8f9fb',
                     borderColor: pFocused ? '#3e4b9c66' : '#e2e4eb',
@@ -330,7 +330,7 @@ const HeaderBar = ({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 shrink-0 ml-auto">
           <div className="hidden md:flex items-center bg-slate-100 rounded-lg p-1 border border-slate-200">
             <button
               type="button"
@@ -366,9 +366,9 @@ const HeaderBar = ({
               onClick={() => setFilterOpen((v) => !v)}
             >
               <ListFilter size={14} />
-              <span>筛选</span>
+              <span className="hidden sm:inline">筛选</span>
               {hasActiveFilter ? (
-                <span className="text-xs text-slate-500">· {activeFilterLabel}</span>
+                <span className="text-xs text-slate-500 hidden sm:inline">· {activeFilterLabel}</span>
               ) : null}
             </button>
             {filterOpen ? (
@@ -429,26 +429,26 @@ const HeaderBar = ({
             ) : null}
           </div>
 
-          <div className="w-px h-8 bg-slate-200 mx-1 hidden sm:block"></div>
+          <div className="w-px h-8 bg-slate-200 mx-0.5 hidden sm:block shrink-0"></div>
 
           {isRoot ? (
             <>
               <button
                 type="button"
                 disabled
-                className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-slate-100 text-slate-400 border border-slate-200 text-sm cursor-not-allowed"
+                className="inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg bg-slate-100 text-slate-400 border border-slate-200 text-sm cursor-not-allowed whitespace-nowrap shrink-0"
                 title="正在开发中"
               >
                 导入本地
               </button>
               {showCreateProject ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <input
                     ref={newProjectInputRef}
                     value={newProjectName}
                     onChange={(e) => onNewProjectNameChange?.(e.target.value)}
                     placeholder={`输入${createLabel}名`}
-                    className="h-9 px-3 border border-slate-200 rounded-lg text-sm text-slate-700 w-28 sm:w-48 focus:outline-none focus:border-slate-400"
+                    className="h-9 px-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 w-24 sm:w-36 focus:outline-none focus:border-slate-400"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') onCreateProject?.();
                     }}
@@ -457,7 +457,7 @@ const HeaderBar = ({
                   <button
                     type="button"
                     onClick={onCreateProject}
-                    className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-[#3e4b9c] text-white hover:bg-[#4e5bab] transition-colors text-sm shadow-sm"
+                    className="inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg bg-[#3e4b9c] text-white hover:bg-[#4e5bab] transition-colors text-sm shadow-sm whitespace-nowrap"
                     data-tour="btn-create-confirm"
                   >
                     <Plus size={14} /> 新建{createLabel}
@@ -468,11 +468,11 @@ const HeaderBar = ({
           ) : (
             <>
               {pendingGhostCount ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={onAcceptAllGhostsHere}
-                    className="h-9 px-3 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition-colors shadow-sm inline-flex items-center gap-2"
+                    className="h-9 px-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition-colors shadow-sm inline-flex items-center gap-1.5 whitespace-nowrap"
                     title="接受本目录所有 AI 建议并移动"
                   >
                     <Check size={14} /> 接受全部（{pendingGhostCount}）
@@ -480,7 +480,7 @@ const HeaderBar = ({
                   <button
                     type="button"
                     onClick={onRejectAllGhostsHere}
-                    className="h-9 px-3 rounded-lg bg-white border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 transition-colors inline-flex items-center gap-2"
+                    className="h-9 px-2.5 rounded-lg bg-white border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap"
                     title="放弃本目录所有 AI 建议"
                   >
                     <Ban size={14} /> 放弃全部
@@ -490,26 +490,26 @@ const HeaderBar = ({
               <button
                 type="button"
                 onClick={onOpenNewFolder}
-                className="inline-flex items-center gap-2 h-9 px-2.5 sm:px-3 rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors text-sm whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors text-sm whitespace-nowrap shrink-0"
                 title="新建文件夹"
               >
-                <FolderPlus size={14} /> <span className="hidden sm:inline">新建文件夹</span>
+                <FolderPlus size={14} /> 新建文件夹
               </button>
               <button
                 type="button"
                 onClick={onUploadFiles}
-                className="inline-flex items-center gap-2 h-9 px-2.5 sm:px-3 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors text-sm shadow-sm whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors text-sm shadow-sm whitespace-nowrap shrink-0"
                 disabled={aiUploadRunning}
                 data-tour="btn-upload"
                 title="上传文件"
               >
-                <Upload size={14} /> <span className="hidden sm:inline">上传文件</span>
+                <Upload size={14} /> 上传文件
               </button>
               <button
                 type="button"
                 onClick={onPickFilesAndAiClassify}
                 disabled={aiUploadRunning || !allowAiUpload}
-                className={`inline-flex items-center gap-2 h-9 px-2.5 sm:px-3 rounded-lg text-sm font-medium transition-colors shadow-sm whitespace-nowrap ${
+                className={`inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg text-sm font-medium transition-colors shadow-sm whitespace-nowrap shrink-0 ${
                   aiUploadRunning || !allowAiUpload
                     ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
                     : 'bg-[#3e4b9c] text-white hover:bg-[#4e5bab]'
@@ -517,7 +517,7 @@ const HeaderBar = ({
                 title="选择一个或多个文件，逐个放入 temp，并逐个触发 AI 分类推荐"
                 data-tour="btn-ai-upload"
               >
-                <Sparkles size={14} /> <span className="hidden sm:inline">{aiUploadRunning ? '上传并AI分类…' : '上传并AI分类'}</span>
+                <Sparkles size={14} /> {aiUploadRunning ? 'AI分类…' : 'AI分类'}
               </button>
             </>
           )}

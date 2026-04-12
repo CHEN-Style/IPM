@@ -518,6 +518,7 @@ const HeaderBar = ({
                 data-tour="btn-ai-upload"
               >
                 <Sparkles size={14} /> <span className="hidden sm:inline">{aiUploadRunning ? '上传并AI分类…' : '上传并AI分类'}</span>
+              </button>
             </>
           )}
         </div>

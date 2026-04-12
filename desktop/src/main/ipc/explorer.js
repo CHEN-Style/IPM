@@ -47,7 +47,7 @@ export function registerExplorerIpc({
   ipcMain.handle('explorer/list', async (_evt, payload) => {
     const projectName = sanitizeProjectName(payload?.projectName);
     // Normalize relPath to a safe posix-style relative path.
-    // This prevents subtle Windows path separator issues (e.g. "\"), extra slashes,
+    // This prevents subtle path separator issues, extra slashes,
     // or leading/trailing whitespace from breaking directory expansion in Explorer View.
     const relPath = normalizeRelPathPosix(payload?.relPath ?? '');
     const domain = normalizeWorkspaceDomain(payload?.domain);

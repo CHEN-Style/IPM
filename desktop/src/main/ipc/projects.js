@@ -49,7 +49,7 @@ export function registerProjectsIpc({
         continue;
       }
       const fullPath = path.join(root, name);
-      // Clean up ghost project dirs that may remain as empty stubs after deletion (Windows edge cases).
+      // Clean up ghost project dirs that may remain as empty stubs after deletion.
       if (isEmptyDirSync(fullPath)) {
         try {
           safeRmSync(fullPath);
@@ -98,7 +98,7 @@ export function registerProjectsIpc({
         throw new Error(`项目已存在：${name}`);
       }
 
-      // ENHANCED: Make writable first (Windows EPERM fix)
+      // Make writable first to avoid permission issues
       try {
         makeWritableRecursiveSync(projDir);
       } catch {
@@ -265,7 +265,7 @@ export function registerProjectsIpc({
         // ignore
       }
 
-      // Try recycle bin first (often works better than fs.rmSync on Windows)
+      // Try Trash first
       try {
         await shell.trashItem(projectDir);
         if (!fs.existsSync(projectDir)) {
@@ -306,7 +306,7 @@ export function registerProjectsIpc({
       }
 
       // Both rename and delete failed => cannot proceed safely
-      throw new Error(`无法删除项目文件夹：${name}。\n\n可能原因：\n1. 文件夹被其他程序占用\n2. 权限不足\n3. Windows资源管理器正在访问该文件夹\n\n建议：\n- 关闭可能访问该文件夹的程序\n- 或重启应用后重试`);
+      throw new Error(`无法删除项目文件夹：${name}。\n\n可能原因：\n1. 文件夹被其他程序占用\n2. 权限不足\n3. 访达或其他应用正在访问该文件夹\n\n建议：\n- 关闭可能访问该文件夹的程序\n- 或重启应用后重试`);
     }
 
     // Rename succeeded! Now the original name is FREE.
@@ -332,7 +332,7 @@ export function registerProjectsIpc({
       }
     }
 
-    // CRITICAL: Double-check that original name is truly free (Windows edge case: may recreate empty stub)
+    // Double-check that original name is truly free (edge case: may recreate empty stub)
     if (fs.existsSync(projectDir)) {
       try {
         makeWritableRecursiveSync(projectDir);

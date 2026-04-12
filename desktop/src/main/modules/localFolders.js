@@ -22,9 +22,8 @@ const normalizeAbsDirPath = (p) => {
   const raw = String(p || '').trim();
   if (!raw) return '';
   const abs = path.resolve(raw);
-  const root = path.parse(abs).root;
-  if (abs === root) return abs; // keep drive root "C:\"
-  return abs.replace(/[\\/]+$/, '');
+  if (abs === '/') return abs;
+  return abs.replace(/\/+$/, '');
 };
 
 const getLocalFolderPathsFromState = (state) => {
@@ -49,8 +48,7 @@ const setLocalFolderPathsToState = (state, absPaths) => {
 
 const getFolderDisplayName = (absPath) => {
   const abs = String(absPath || '');
-  const root = path.parse(abs).root;
-  if (abs === root) return root; // e.g. "C:\"
+  if (abs === '/') return '/';
   const base = path.basename(abs);
   return base || abs;
 };

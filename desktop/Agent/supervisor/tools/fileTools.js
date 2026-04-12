@@ -68,9 +68,7 @@ const DOCUMENT_EXTRACTORS = {
 };
 
 function findPython() {
-  const candidates = process.platform === 'win32'
-    ? ['python', 'python3', 'py']
-    : ['python3', 'python'];
+  const candidates = ['python3', 'python'];
   for (const cmd of candidates) {
     try {
       execFileSync(cmd, ['--version'], { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' });

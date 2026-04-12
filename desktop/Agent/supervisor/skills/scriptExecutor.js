@@ -8,11 +8,11 @@ const MAX_TIMEOUT_MS = 300_000;
 const MAX_OUTPUT_BYTES = 1024 * 1024; // 1 MB per stream
 
 const DANGEROUS_PATTERNS = [
-  /rm\s+-rf\s+[\/\\]/i,
-  /format\s+[a-z]:/i,
-  /del\s+\/[sq]/i,
+  /rm\s+-rf\s+\//i,
+  /sudo\s+rm/i,
   /shutdown/i,
   /mkfs/i,
+  /diskutil\s+erase/i,
 ];
 
 const log = (msg) => console.log(`[IPM][ScriptExecutor] ${msg}`);
@@ -22,13 +22,10 @@ const log = (msg) => console.log(`[IPM][ScriptExecutor] ${msg}`);
  * Prefers embedded runtime if present, falls back to system python.
  */
 export function resolvePythonBin(sandboxRoot) {
-  const embeddedWin = path.join(sandboxRoot, 'runtime', 'python', 'python.exe');
-  if (fs.existsSync(embeddedWin)) return embeddedWin;
+  const embedded = path.join(sandboxRoot, 'runtime', 'python', 'bin', 'python3');
+  if (fs.existsSync(embedded)) return embedded;
 
-  const embeddedUnix = path.join(sandboxRoot, 'runtime', 'python', 'bin', 'python3');
-  if (fs.existsSync(embeddedUnix)) return embeddedUnix;
-
-  return process.platform === 'win32' ? 'python' : 'python3';
+  return 'python3';
 }
 
 /**
@@ -91,10 +88,8 @@ export function executeScript({ scriptPath, args = [], sandboxRoot, timeout, ext
     PATH: process.env.PATH || '',
     PYTHONPATH: process.env.PYTHONPATH || '',
     PYTHONIOENCODING: 'utf-8',
-    HOME: process.env.HOME || process.env.USERPROFILE || '',
-    USERPROFILE: process.env.USERPROFILE || '',
-    TEMP: path.join(sandboxRoot, 'workspace'),
-    TMP: path.join(sandboxRoot, 'workspace'),
+    HOME: process.env.HOME || '',
+    TMPDIR: path.join(sandboxRoot, 'workspace'),
     ...extraEnv,
   };
 
@@ -110,7 +105,6 @@ export function executeScript({ scriptPath, args = [], sandboxRoot, timeout, ext
       cwd,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
     });
 
     const timer = setTimeout(() => {

@@ -2,7 +2,6 @@ import { app, BrowserWindow, Menu, ipcMain, dialog, shell, clipboard, protocol, 
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
-import started from 'electron-squirrel-startup';
 import { classifyFile } from '../Agent/index.js';
 import { upsertAiSuggestion, listAiSuggestions, setAiSuggestionStatus } from '../Agent/storage/aiStorage.js';
 import { registerLocalFoldersIpc } from './main/modules/localFolders.js';
@@ -55,14 +54,10 @@ const agentLog = (level, msg, extra = null) => {
   }
 };
 
-// Handle creating/removing shortcuts on Windows when installing/uninstalling.
-if (started) {
-  app.quit();
-}
 
-// Bootstrap config: tiny JSON in a fixed AppData location that stores
-// the user's chosen data directory. Separate from state.json which lives
-// inside the data directory itself.
+// Bootstrap config: tiny JSON in the app's Application Support directory
+// that stores the user's chosen data directory. Separate from state.json
+// which lives inside the data directory itself.
 const getBootstrapConfigPath = () => path.join(app.getPath('userData'), 'config.json');
 
 const readBootstrapConfig = () => {
@@ -149,12 +144,11 @@ const sanitizeProjectName = (name) => {
   const raw = String(name ?? '').trim();
   if (!raw) return '';
 
-  // Windows reserved characters: < > : " / \ | ? *
-  let safe = raw.replace(/[<>:"/\\|?*]/g, '_');
+  // macOS disallows : and / in filenames (HFS+/APFS)
+  let safe = raw.replace(/[/:]/g, '_');
 
-  // Prevent path traversal / oddities
+  // Prevent path traversal
   safe = safe.replace(/\.\./g, '_');
-  safe = safe.replace(/[. ]+$/g, ''); // Windows: no trailing dot/space
 
   return safe.trim();
 };
@@ -162,9 +156,8 @@ const sanitizeProjectName = (name) => {
 const sanitizeFileName = (name) => {
   const raw = String(name ?? '').trim();
   if (!raw) return '';
-  let safe = raw.replace(/[<>:"/\\|?*]/g, '_');
+  let safe = raw.replace(/[/:]/g, '_');
   safe = safe.replace(/\.\./g, '_');
-  safe = safe.replace(/[. ]+$/g, '');
   return safe.trim();
 };
 
@@ -650,27 +643,19 @@ const makeWritableRecursiveSync = (targetPath) => {
 };
 
 const safeRmSync = (targetPath) => {
-  // Windows may throw EPERM/EBUSY if files are read-only or temporarily locked.
-  // We retry a few times and attempt to chmod to writable before retry.
-  const maxRetries = 3;
-  let lastErr = null;
-  for (let i = 0; i <= maxRetries; i += 1) {
-    try {
+  try {
+    fs.rmSync(targetPath, { recursive: true, force: true });
+    return;
+  } catch (e) {
+    const code = e?.code;
+    if (code === 'EPERM' || code === 'EACCES' || code === 'ENOTEMPTY') {
+      makeWritableRecursiveSync(targetPath);
+      sleepSync(120);
       fs.rmSync(targetPath, { recursive: true, force: true });
       return;
-    } catch (e) {
-      lastErr = e;
-      const code = e?.code;
-      // ENOTEMPTY can still happen on Windows due to filesystem delays/races even with recursive=true.
-      if (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES' || code === 'ENOTEMPTY') {
-        makeWritableRecursiveSync(targetPath);
-        sleepSync(120 * (i + 1));
-        continue;
-      }
-      throw e;
     }
+    throw e;
   }
-  throw lastErr || new Error('删除失败');
 };
 
 const waitUntilGoneSync = (targetPath, timeoutMs = 2500) => {
@@ -683,7 +668,7 @@ const waitUntilGoneSync = (targetPath, timeoutMs = 2500) => {
 };
 
 const trashOrRm = async (targetPath) => {
-  // Prefer recycle bin: behaves closer to Explorer and can reduce Windows locking edge cases.
+  // Prefer macOS Trash; fall back to hard delete.
   try {
     await shell.trashItem(targetPath);
     return;
@@ -1072,7 +1057,7 @@ let lastClipboardText = '';
 let lastClipboardImageHash = '';
 const clipboardImageCache = new Map(); // token -> { png: Buffer, width, height, createdAt, hash }
 
-// Best-effort async deletion queue (Windows filesystem can delay deletes while handles are around).
+// Best-effort async deletion queue for deferred cleanup.
 const pendingDeleteDirs = new Set(); // absolute paths
 let pendingDeleteTimer = null;
 const enqueueDeleteDir = (absPath) => {
@@ -1179,13 +1164,9 @@ const createMainWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    icon: path.join(app.getAppPath(), 'assets', 'icon.ico'),
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: '#f8f9fb',
-      symbolColor: '#414659',
-      height: 36,
-    },
+    icon: path.join(app.getAppPath(), 'assets', 'icon.png'),
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 16, y: 12 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1193,7 +1174,60 @@ const createMainWindow = () => {
     },
   });
 
-  Menu.setApplicationMenu(null);
+  const menuTemplate = [
+    {
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: '编辑',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: '视图',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: '窗口',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { type: 'separator' },
+        { role: 'front' },
+        { type: 'separator' },
+        { role: 'window' },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
   loadRenderer(mainWindow, 'main');
 
   if (!app.isPackaged) {
@@ -1221,7 +1255,7 @@ const createFloatingWindow = () => {
     minimizable: false,
     fullscreenable: false,
     alwaysOnTop: true,
-    skipTaskbar: false,
+    skipTaskbar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1264,9 +1298,8 @@ app.whenReady().then(() => {
 
   protocol.handle('ipm-file', (request) => {
     const url = new URL(request.url);
-    let filePath = decodeURIComponent(url.pathname);
-    if (/^\/[A-Za-z]:/.test(filePath)) filePath = filePath.slice(1);
-    return net.fetch(`file:///${filePath.replace(/\\/g, '/')}`);
+    const filePath = decodeURIComponent(url.pathname);
+    return net.fetch(`file://${filePath}`);
   });
   fs.mkdirSync(getUserFileRoot(), { recursive: true });
   fs.mkdirSync(getProjectsRoot(), { recursive: true });

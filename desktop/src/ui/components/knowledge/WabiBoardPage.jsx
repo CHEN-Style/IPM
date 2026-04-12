@@ -361,7 +361,7 @@ const HELP_SECTIONS = [
       { key: '单选', desc: '点击卡片' },
       { key: '多选', desc: 'Shift + 点击 追加选择' },
       { key: '框选', desc: '在空白区域拖拽框选' },
-      { key: '全选', desc: 'Ctrl + A' },
+      { key: '全选', desc: '⌘A' },
       { key: '取消选择', desc: 'Esc / 点击空白区域' },
     ],
   },
@@ -370,7 +370,7 @@ const HELP_SECTIONS = [
     items: [
       { key: '编辑碎片', desc: '选中后点击左侧 ↗ 图标跳转编辑' },
       { key: '删除卡片', desc: '选中后点击右上角 × / Delete 键' },
-      { key: '锁定/解锁', desc: 'Ctrl + L（仅自由卡片，组内卡片跟随组锁定）' },
+      { key: '锁定/解锁', desc: '⌘L（仅自由卡片，组内卡片跟随组锁定）' },
     ],
   },
   {
@@ -415,7 +415,7 @@ const HELP_SECTIONS = [
       { key: '重命名/删除', desc: '看板名称旁 ··· 菜单' },
       { key: '画布背景', desc: '右上角调色板图标' },
       { key: '收集碎片', desc: '右上角「收集」按钮添加已有碎片' },
-      { key: '撤回/重做', desc: 'Ctrl + Z / Ctrl + Shift + Z' },
+      { key: '撤回/重做', desc: '⌘Z / ⇧⌘Z' },
     ],
   },
 ];
@@ -1345,7 +1345,7 @@ export default function WabiBoardPage({ onBack }) {
                 <button
                   onClick={handleUndo}
                   disabled={undoCount === 0}
-                  title="撤回 (Ctrl+Z)"
+                  title="撤回 (⌘Z)"
                   style={{
                     display: 'flex', alignItems: 'center', padding: '6px 8px',
                     borderRadius: 6, background: 'none', border: 'none',
@@ -1361,7 +1361,7 @@ export default function WabiBoardPage({ onBack }) {
                 <button
                   onClick={handleRedo}
                   disabled={redoCount === 0}
-                  title="重做 (Ctrl+Shift+Z)"
+                  title="重做 (⇧⌘Z)"
                   style={{
                     display: 'flex', alignItems: 'center', padding: '6px 8px',
                     borderRadius: 6, background: 'none', border: 'none',

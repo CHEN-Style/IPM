@@ -184,7 +184,7 @@ export function registerCasesIpc({
     // Step 2: checkpoint WAL + close DB
     try { closeProjectDb?.(projectDir); } catch { /* ignore */ }
 
-    // Step 3: brief delay for Windows to release file handles
+    // Step 3: brief delay to release file handles
     await new Promise((r) => setTimeout(r, 150));
 
     if (!fs.existsSync(projectDir)) {
@@ -259,7 +259,7 @@ export function registerCasesIpc({
         // ignore
       }
 
-      throw new Error(`无法删除案件文件夹：${name}。\n\n可能原因：\n1. 文件夹被其他程序占用\n2. 权限不足\n3. Windows资源管理器正在访问该文件夹\n\n建议：\n- 关闭可能访问该文件夹的程序\n- 或重启应用后重试`);
+      throw new Error(`无法删除案件文件夹：${name}。\n\n可能原因：\n1. 文件夹被其他程序占用\n2. 权限不足\n3. 访达或其他应用正在访问该文件夹\n\n建议：\n- 关闭可能访问该文件夹的程序\n- 或重启应用后重试`);
     }
 
     try {

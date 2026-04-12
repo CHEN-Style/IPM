@@ -66,10 +66,8 @@ module.exports = {
       unpack: '**/*.node',
     },
     icon: './assets/icon',
-    rebuild: false,
-  },
-  rebuildConfig: {
-    onlyModules: [],
+    appBundleId: 'com.ipm.app',
+    appCategoryType: 'public.app-category.productivity',
   },
   hooks: {
     packageAfterCopy: async (_forgeConfig, buildPath) => {
@@ -90,28 +88,15 @@ module.exports = {
   },
   makers: [
     {
-      name: '@electron-forge/maker-wix',
+      name: '@electron-forge/maker-dmg',
       config: {
         name: 'IPM',
-        manufacturer: 'IPM Team',
-        description: 'Intelligent Project Manager - AI-driven knowledge and project management',
-        icon: './assets/icon.ico',
-        ui: {
-          chooseDirectory: true,
-        },
+        format: 'ULFO',
       },
     },
     {
       name: '@electron-forge/maker-zip',
       platforms: ['darwin'],
-    },
-    {
-      name: '@electron-forge/maker-deb',
-      config: {},
-    },
-    {
-      name: '@electron-forge/maker-rpm',
-      config: {},
     },
   ],
   plugins: [

@@ -250,9 +250,9 @@ const App = () => {
             setSidebarCollapsed(true);
           }}
         >
-          {/* Top drag strip — also prevents content from overlapping window-control overlay */}
+          {/* Top drag strip — macOS traffic lights sit in Sidebar; this strip enables dragging the rest of the titlebar */}
           <div
-            className="h-[36px] shrink-0 w-full"
+            className="h-[40px] shrink-0 w-full"
             style={{ WebkitAppRegion: 'drag', background: '#f8f9fb' }}
           />
           <div className="flex-1 min-h-0 relative">

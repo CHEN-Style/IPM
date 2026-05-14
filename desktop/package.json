@@ -39,6 +39,7 @@
     "@blocknote/core": "^0.47.3",
     "@blocknote/mantine": "^0.47.3",
     "@blocknote/react": "^0.47.3",
+    "@earendil-works/pi-coding-agent": "^0.74.0",
     "@langchain/core": "^1.1.31",
     "@langchain/langgraph": "^1.2.1",
     "@langchain/openai": "^1.2.12",
@@ -53,7 +54,6 @@
     "marked": "^17.0.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "zod": "^3.25.76",
-    "zod-to-json-schema": "^3.25.1"
+    "zod": "^3.25.76"
   }
 }

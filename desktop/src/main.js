@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu, ipcMain, dialog, shell, clipboard, protocol, 
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import { classifyFile } from '../Agent/index.js';
 import { upsertAiSuggestion, listAiSuggestions, setAiSuggestionStatus } from '../Agent/storage/aiStorage.js';
@@ -21,9 +22,7 @@ import { registerUiIpc } from './main/ipc/ui.js';
 import { registerClassifyRulesIpc } from './main/ipc/classifyRules.js';
 import { registerClassifyEventsIpc } from './main/ipc/classifyEvents.js';
 import { seedDefaultRules } from '../Agent/storage/classifyRules.js';
-import { registerProjectAgentIpc } from './main/ipc/projectAgent.js';
-import { getSession as getAgentSession, removeSession as removeAgentSession } from '../Agent/project-agent/session.js';
-import { registerSupervisorIpc } from './main/ipc/supervisor.js';
+import { registerKnowClawIpc } from './main/ipc/knowclaw.js';
 import { registerPreferencesIpc } from './main/ipc/preferences.js';
 import { registerKnowledgeIpc } from './main/ipc/knowledge.js';
 import { registerAnalyticsIpc, uploadPendingAnalytics } from './main/ipc/analytics.js';
@@ -31,8 +30,6 @@ import { registerSearchIpc } from './main/ipc/search.js';
 import { ClassifyTracker } from './main/classifyTracker.js';
 import { getProjectDb, closeProjectDb, closeAllDbs } from '../Agent/db/index.js';
 import { getSupervisorDb, closeSupervisorDb } from '../Agent/db/supervisorDb.js';
-import { ensureBuiltinSkills } from '../Agent/supervisor/skills/builtinSkills.js';
-import { runProactiveCheck } from '../Agent/supervisor/proactiveChecker.js';
 import { upsertSourceRecord, deleteSourceRecord, getSourceInfo as dbGetSourceInfo } from '../Agent/db/sourceRecords.js';
 import { appendLog as dbAppendLog } from '../Agent/db/activityLog.js';
 
@@ -1261,6 +1258,79 @@ protocol.registerSchemesAsPrivileged([
 app.whenReady().then(() => {
   process.env.IPM_USER_DATA = app.getPath('userData');
   process.env.IPM_STATE_PATH = getStatePath();
+  process.env.KNOWCLAW_SESSION_ROOT = path.join(app.getPath('userData'), 'knowclaw-sessions');
+
+  // Phase 8 follow-up: user-authored skills directory. Global (not cwd-scoped)
+  // so a skill created once is usable across all IPM workspaces. First-run
+  // seeds an empty directory with a README so users can discover what it is.
+  const userSkillsRoot = path.join(app.getPath('userData'), 'knowclaw-skills');
+  process.env.KNOWCLAW_USER_SKILLS_ROOT = userSkillsRoot;
+  try {
+    fs.mkdirSync(userSkillsRoot, { recursive: true });
+
+    // Seed a .ignore so pi's skill scanner (which loads any root-level .md as
+    // a "flat skill") doesn't try to parse README.md as a skill and emit a
+    // noisy "description is required" diagnostic on every session boot.
+    // pi reads .gitignore / .ignore / .fdignore from each scanned directory.
+    const skillsIgnorePath = path.join(userSkillsRoot, '.ignore');
+    if (!fs.existsSync(skillsIgnorePath)) {
+      fs.writeFileSync(
+        skillsIgnorePath,
+        [
+          '# Files pi should skip when scanning this directory for skills.',
+          '# Do NOT delete this file — without it, README.md gets misread as a skill.',
+          'README.md',
+          'README.txt',
+          '.DS_Store',
+          'Thumbs.db',
+          '',
+        ].join('\n'),
+        'utf-8',
+      );
+    }
+
+    const skillsReadmePath = path.join(userSkillsRoot, 'README.md');
+    if (!fs.existsSync(skillsReadmePath)) {
+      fs.writeFileSync(
+        skillsReadmePath,
+        [
+          '# KnowClaw 用户技能目录',
+          '',
+          '这个目录用来存放**你自己写的** KnowClaw 技能（skill）。每个 skill 是一个子目录，',
+          '里面至少包含一个 `SKILL.md` 文件。例如：',
+          '',
+          '```',
+          'knowclaw-skills/',
+          '├── .ignore            ← 告诉 KnowClaw 忽略 README 等非 skill 文件，请勿删除',
+          '├── README.md          ← 本文件',
+          '└── my-skill/',
+          '    └── SKILL.md       ← 技能定义',
+          '```',
+          '',
+          '## 怎么用',
+          '',
+          '- KnowClaw 启动时会自动扫描这个目录，把每个 skill 的 `name + description`',
+          '  注入到系统提示中。当你的请求匹配某个 skill 的 description 时，模型会',
+          '  自动读取对应的 `SKILL.md` 并按里面的指令执行。',
+          '- **新增 / 修改 skill 后需要重新创建会话才能生效**（开新会话或重启 IPM）。',
+          '',
+          '## 怎么创建',
+          '',
+          '在 KnowClaw 对话里说"帮我创建一个 skill"，内置的 `skill-builder` 会引导你',
+          '完成 frontmatter 编写、目录结构、写作原则等所有细节，并把成品写到这里。',
+          '',
+          '## 注意',
+          '',
+          '- 不要删除 `.ignore` 文件——它告诉 KnowClaw 哪些根级文件不是 skill。',
+          '- 删除某个 skill 子目录即可下线它，下次创建会话时模型就看不到了。',
+          '- 如果想加额外的非 skill 文件（如笔记、临时草稿），把文件名加到 `.ignore` 里。',
+        ].join('\n'),
+        'utf-8',
+      );
+    }
+  } catch (err) {
+    console.warn('[KnowClaw] failed to seed user skills dir:', err?.message || err);
+  }
 
   protocol.handle('ipm-file', (request) => {
     const url = new URL(request.url);
@@ -1375,19 +1445,16 @@ app.whenReady().then(() => {
   registerClassifyRulesIpc({ ipcMain, getWorkspaceDirOrThrow });
   registerClassifyEventsIpc({ ipcMain, getWorkspaceDirOrThrow });
   registerPreferencesIpc({ ipcMain, getWorkspaceDirOrThrow });
-  registerProjectAgentIpc({ ipcMain, getWorkspaceDirOrThrow, syncStructureJson });
-  registerSupervisorIpc({
+  registerKnowClawIpc({
     ipcMain,
-    getAppRoot,
-    getSandboxRoot,
+    getUserFileRoot,
     getWorkspaceDirs: () => ({
       projectsRoot: getProjectsRoot(),
       casesRoot: getCasesRoot(),
       studyRoot: getStudyRoot(),
     }),
-    getWorkspaceDirOrThrow,
-    syncStructureJson,
     readState,
+    getWorkspaceDirOrThrow,
   });
 
   ipcMain.handle('classify:getSnapshot', async (_evt, payload) => {
@@ -1457,8 +1524,6 @@ app.whenReady().then(() => {
     sleepSync,
     trashOrRm,
     closeProjectDb,
-    getAgentSession,
-    removeAgentSession,
   });
 
   registerCasesIpc({
@@ -1482,8 +1547,6 @@ app.whenReady().then(() => {
     sleepSync,
     trashOrRm,
     closeProjectDb,
-    getAgentSession,
-    removeAgentSession,
   });
 
   registerSnippetsIpc({
@@ -1596,28 +1659,42 @@ app.whenReady().then(() => {
   // Initialize Supervisor DB early
   try { getSupervisorDb(getAppRoot()); } catch { /* ignore */ }
 
-  // Install builtin skills if missing
-  try { ensureBuiltinSkills(getSandboxRoot()); } catch { /* ignore */ }
-
   createMainWindow();
 
-  const proactiveCheckArgs = () => ({
-    appRoot: getAppRoot(),
-    projectsRoot: getProjectsRoot(),
-    casesRoot: getCasesRoot(),
-    studyRoot: getStudyRoot(),
-    readState,
-  });
-
-  // Proactive check: run every 30 minutes
-  const proactiveCheckInterval = setInterval(() => {
-    try { runProactiveCheck(proactiveCheckArgs()); } catch { /* ignore */ }
-  }, 30 * 60 * 1000);
-
-  // Initial proactive check after a short delay (let things settle)
-  setTimeout(() => {
-    try { runProactiveCheck(proactiveCheckArgs()); } catch { /* ignore */ }
-  }, 10_000);
+  // ===== KnowClaw v2 (pi-coding-agent) Phase-0 PoC =====
+  // Opt-in only: set KNOWCLAW_PI_POC=1 to trigger one in-memory session
+  // and stream pi events to the main-process console. Zero impact on
+  // the rest of IPM when the env var is unset.
+  //
+  // IMPORTANT: we load `pi-runtime/index.js` via an absolute file:// URL
+  // wrapped with the `@vite-ignore` hint so Vite does NOT statically
+  // analyze (and therefore does NOT inline) this dynamic import into the
+  // CJS main bundle. That keeps pi-runtime on Node's native ESM loader,
+  // which in turn satisfies the ESM-only `@earendil-works/pi-coding-agent`
+  // package's `exports."."` (it only exposes an "import" condition).
+  //
+  // See: desktop/Agent/KNOWCLAW_REBUILD_PLAN.md (Phase 0)
+  if (process.env.KNOWCLAW_PI_POC === '1') {
+    setTimeout(async () => {
+      try {
+        // __dirname at runtime is <desktop>/.vite/build/ ; pi-runtime lives at
+        // <desktop>/Agent/pi-runtime/ — i.e. two levels up.
+        const piRuntimePath = path.resolve(__dirname, '..', '..', 'Agent', 'pi-runtime', 'index.js');
+        const piRuntimeUrl = pathToFileURL(piRuntimePath).href;
+        const mod = await import(/* @vite-ignore */ piRuntimeUrl);
+        const { createKnowClawSession } = mod;
+        console.log('[KnowClaw-PoC] starting…');
+        const out = await createKnowClawSession({
+          cwd: getUserFileRoot(),
+          prompt: process.env.KNOWCLAW_PI_POC_PROMPT || '',
+          mode: process.env.KNOWCLAW_PI_POC_MODE || undefined,
+        });
+        console.log('[KnowClaw-PoC] done', out);
+      } catch (e) {
+        console.error('[KnowClaw-PoC] failed:', e);
+      }
+    }, 3000);
+  }
 
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.

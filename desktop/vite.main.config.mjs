@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   build: {
     rollupOptions: {
-      external: ['better-sqlite3', 'canvas', 'jsdom'],
+      external: ['better-sqlite3', 'canvas', 'jsdom', '@earendil-works/pi-coding-agent'],
     },
   },
 });

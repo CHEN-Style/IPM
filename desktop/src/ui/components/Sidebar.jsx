@@ -393,7 +393,7 @@ const Sidebar = ({
         <nav className="space-y-0.5">
           <NavItem icon={<HardDrive size={17} />} label="我的资料" active={activeNav === 'mydata'} collapsed={isCollapsed} navDirectWhenCollapsed onClick={() => navSelectDirect('mydata')} dataTour="nav-mydata" dataTrack="nav-mydata" />
           <NavItem icon={<BookMarked size={17} />} label="知识库" active={activeNav === 'knowledge'} collapsed={isCollapsed} navDirectWhenCollapsed onClick={() => navSelectDirect('knowledge')} dataTrack="nav-knowledge" />
-          <NavItem icon={<Brain size={17} />} label="KnowClaw" active={activeNav === 'knowclaw'} collapsed={isCollapsed} navDirectWhenCollapsed onClick={() => navSelectDirect('knowclaw')} dataTrack="nav-knowclaw" />
+          <NavItem icon={<Brain size={17} />} label="KnowClaw" active={activeNav === 'knowclaw-v2'} collapsed={isCollapsed} navDirectWhenCollapsed onClick={() => navSelectDirect('knowclaw-v2')} dataTrack="nav-knowclaw" />
         </nav>
 
         <div className={isCollapsed ? 'mt-4' : 'mt-7'}>

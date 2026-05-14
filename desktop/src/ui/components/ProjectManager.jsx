@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import KnowledgePage from './knowledge/KnowledgePage.jsx';
 import FolderDetailPanel from './project-manager/FolderDetailPanel.jsx';
@@ -22,7 +22,6 @@ import useTraceView from './project-manager/hooks/useTraceView.js';
 import useClassifyPipeline from './project-manager/hooks/useClassifyPipeline.js';
 import ClassifyTraceView from './project-manager/ClassifyTraceView.jsx';
 import PreferencesPage from './project-manager/PreferencesPage.jsx';
-import ChatPanel from './agent-chat/ChatPanel.jsx';
 import CreateKnowledgeModal from './project-manager/CreateKnowledgeModal.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { fileDecor, folderDecor, fmtBytes, fmtTime } from './project-manager/utils.js';
@@ -65,7 +64,6 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
   }, [notice, showToast]);
   const [fileFilters, setFileFilters] = useState([]);
   const [filterPersistent, setFilterPersistent] = useState(false);
-  const [chatProjectCtx, setChatProjectCtx] = useState(null);
   const {
     projects,
     currentProject,
@@ -193,6 +191,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
     createFolder,
     uploadFiles,
     uploadFilesTo,
+    dropUploadFiles,
     deleteEntry,
     openRename,
     doRename,
@@ -472,8 +471,59 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
 
   const inProject = cwd.type === 'project';
 
+  /* ── Invisible page-level drag-drop upload ── */
+  const [pageDragOver, setPageDragOver] = useState(false);
+  const pageDragCounter = useRef(0);
+
+  const handlePageDragEnter = useCallback((e) => {
+    if (!inProject || isRoot) return;
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    pageDragCounter.current += 1;
+    if (pageDragCounter.current === 1) setPageDragOver(true);
+  }, [inProject, isRoot]);
+
+  const handlePageDragOver = useCallback((e) => {
+    if (!inProject || isRoot) return;
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, [inProject, isRoot]);
+
+  const handlePageDragLeave = useCallback((e) => {
+    e.preventDefault();
+    pageDragCounter.current -= 1;
+    if (pageDragCounter.current <= 0) {
+      pageDragCounter.current = 0;
+      setPageDragOver(false);
+    }
+  }, []);
+
+  const handlePageDrop = useCallback((e) => {
+    e.preventDefault();
+    pageDragCounter.current = 0;
+    setPageDragOver(false);
+    if (!inProject || isRoot) return;
+    const files = e.dataTransfer?.files;
+    if (!files?.length) return;
+    const paths = Array.from(files)
+      .map((f) => window.ipm?.files?.getPathForFile?.(f) || f.path || '')
+      .filter(Boolean);
+    if (paths.length) dropUploadFiles(paths);
+  }, [inProject, isRoot, dropUploadFiles]);
+
   return (
-    <div className="flex-1 flex h-full bg-[#f8f9fb] relative" onClick={closeMenu}>
+    <div
+      className="flex-1 flex h-full bg-[#f8f9fb] relative"
+      onClick={closeMenu}
+      onDragEnter={handlePageDragEnter}
+      onDragOver={handlePageDragOver}
+      onDragLeave={handlePageDragLeave}
+      onDrop={handlePageDrop}
+    >
+    {pageDragOver && inProject && !isRoot && (
+      <div className="absolute inset-0 z-40 pointer-events-none rounded-lg" style={{ border: '2px dashed rgba(62,75,156,0.35)', background: 'rgba(62,75,156,0.03)' }} />
+    )}
     <div className="flex-1 flex flex-col min-w-0 h-full">
       {/* Hidden file input for “Upload & AI classify” (Electron gives file.path) */}
       <input
@@ -577,7 +627,6 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
             onSetProjectStatus={setProjectStatus}
             onOpenKnowledge={(p) => setKnowledgeCtx({ name: p.name, path: p.path })}
             onOpenPreferences={(p) => setPreferencesCtx({ name: p.name, path: p.path })}
-            onOpenAgent={(p) => setChatProjectCtx({ name: p.name, path: p.path })}
           />
         ) : (
           <EntryTable
@@ -750,15 +799,6 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
       />
 
     </div>
-
-    {/* AI Chat Overlay — fixed positioning, renders above everything */}
-    {chatProjectCtx && (
-      <ChatPanel
-        projectName={chatProjectCtx.name}
-        domain={normalizedDomain}
-        onClose={() => setChatProjectCtx(null)}
-      />
-    )}
 
     {createKnowledgeTarget && (
       <CreateKnowledgeModal

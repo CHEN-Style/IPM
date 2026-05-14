@@ -1,0 +1,7 @@
+{
+  "name": "@ipm/pi-runtime",
+  "private": true,
+  "type": "module",
+  "description": "ESM-only marker so Node loads pi-runtime/*.js as ES modules. Required because @earendil-works/pi-coding-agent is ESM-only and must be loaded via the Node ESM resolver, not via Vite's CJS bundle.",
+  "main": "./index.js"
+}

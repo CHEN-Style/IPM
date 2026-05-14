@@ -78,21 +78,28 @@ const EntryTable = ({
   });
 
   return (
-    <div className="px-8 py-4 relative">
+    <div className="px-4 sm:px-8 py-4 relative">
       {errorText && (
         <div className="mb-4 px-4 py-3 rounded border border-rose-200 bg-rose-50 text-rose-700 text-sm">
           {errorText}
         </div>
       )}
       {viewMode === 'list' ? (
-        <table className="w-full text-left border-separate border-spacing-y-1">
+        <table className="w-full text-left border-separate border-spacing-y-1" style={{ tableLayout: 'fixed' }}>
+          <colgroup>
+            <col />
+            <col style={{ width: 60 }} />
+            <col style={{ width: 128 }} />
+            <col style={{ width: 72 }} />
+            <col style={{ width: 80 }} />
+          </colgroup>
           <thead>
             <tr className="text-[11px] text-slate-400 uppercase tracking-widest font-bold">
               <th className="pb-4 pl-4 font-bold">名称</th>
               <th className="pb-4 font-bold">类型</th>
               <th className="pb-4 font-bold">修改时间</th>
               <th className="pb-4 text-right font-bold">大小</th>
-              <th className="pb-4 text-right pr-4 font-bold">详情</th>
+              <th className="pb-4 text-right pr-2 font-bold">详情</th>
             </tr>
           </thead>
           <tbody>
@@ -140,9 +147,9 @@ const EntryTable = ({
                   onDrop={e.kind === 'ghost' ? undefined : (evt) => onDropOnFolder?.(evt, e)}
                 >
                   <td className="py-3.5 pl-4 rounded-l border-y border-transparent">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div
-                        className={`p-2 rounded ${
+                        className={`p-2 rounded shrink-0 ${
                           e.kind === 'dir'
                             ? folderDecor?.(e.relPath).boxClass
                             : e.kind === 'file'
@@ -166,22 +173,22 @@ const EntryTable = ({
                           })()
                         )}
                       </div>
-                      <div className="text-sm font-medium text-slate-800">{e.name}</div>
-                      {e.kind === 'ghost' ? (
-                        <span className="ml-2 text-[10px] font-bold tracking-widest uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200">
+                      <span className="text-sm font-medium text-slate-800 truncate" title={e.name}>{e.name}</span>
+                      {e.kind === 'ghost' && (
+                        <span className="ml-1 text-[10px] font-bold tracking-widest uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 shrink-0">
                           AI 建议
                         </span>
-                      ) : null}
+                      )}
                     </div>
                   </td>
-                  <td className="py-3.5 text-xs text-slate-500 border-y border-transparent">{getTypeLabel(e)}</td>
-                  <td className="py-3.5 text-xs text-slate-400 font-medium border-y border-transparent">
+                  <td className="py-3.5 text-xs text-slate-500 border-y border-transparent whitespace-nowrap truncate">{getTypeLabel(e)}</td>
+                  <td className="py-3.5 text-xs text-slate-400 font-medium border-y border-transparent whitespace-nowrap truncate">
                     {e.kind === 'ghost' ? '-' : fmtTime?.(e.mtimeMs)}
                   </td>
-                  <td className="py-3.5 text-right text-xs text-slate-500 font-medium border-y border-transparent">
+                  <td className="py-3.5 text-right text-xs text-slate-500 font-medium border-y border-transparent whitespace-nowrap">
                     {e.kind === 'file' ? fmtBytes?.(e.sizeBytes) : '-'}
                   </td>
-                  <td className="py-3.5 text-right pr-4 rounded-r border-y border-transparent">
+                  <td className="py-3.5 text-right pr-2 rounded-r border-y border-transparent">
                     {e.kind === 'ghost' ? (
                       <div className="inline-flex items-center gap-2">
                         <button

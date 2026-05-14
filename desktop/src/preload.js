@@ -133,6 +133,7 @@ contextBridge.exposeInMainWorld('ipm', {
     readText: (projectName, relPath, opts = {}) => ipcRenderer.invoke('explorer/readText', { projectName, relPath, ...opts }),
     mkdir: (projectName, relPath, folderName, opts = {}) => ipcRenderer.invoke('explorer/mkdir', { projectName, relPath, folderName, ...opts }),
     upload: (projectName, destRelPath, opts = {}) => ipcRenderer.invoke('explorer/upload', { projectName, destRelPath, ...opts }),
+    dropUpload: (projectName, destRelPath, filePaths, opts = {}) => ipcRenderer.invoke('explorer/drop-upload', { projectName, destRelPath, filePaths, ...opts }),
     delete: (projectName, relPath, opts = {}) => ipcRenderer.invoke('explorer/delete', { projectName, relPath, ...opts }),
     rename: (projectName, relPath, newName, opts = {}) => ipcRenderer.invoke('explorer/rename', { projectName, relPath, newName, ...opts }),
     move: (projectName, srcRelPath, destDirRelPath, opts = {}) =>
@@ -181,33 +182,6 @@ contextBridge.exposeInMainWorld('ipm', {
       return () => ipcRenderer.removeListener('classify:status-changed', handler);
     },
   },
-  agent: {
-    sendMessage: (projectName, domain, message) =>
-      ipcRenderer.invoke('projectAgent/sendMessage', { projectName, domain, message }),
-    executePlan: (projectName, domain, plan, selectedIds) =>
-      ipcRenderer.invoke('projectAgent/executePlan', { projectName, domain, plan, selectedIds }),
-    cancelPlan: (projectName, domain) =>
-      ipcRenderer.invoke('projectAgent/cancelPlan', { projectName, domain }),
-    endSession: (projectName, domain) =>
-      ipcRenderer.invoke('projectAgent/endSession', { projectName, domain }),
-    getSessionInfo: (projectName, domain) =>
-      ipcRenderer.invoke('projectAgent/getSessionInfo', { projectName, domain }),
-    resumeSession: (projectName, domain, sessionId) =>
-      ipcRenderer.invoke('projectAgent/resumeSession', { projectName, domain, sessionId }),
-    listSessions: (projectName, domain, opts = {}) =>
-      ipcRenderer.invoke('projectAgent/listSessions', { projectName, domain, ...opts }),
-    loadSession: (projectName, domain, sessionId) =>
-      ipcRenderer.invoke('projectAgent/loadSession', { projectName, domain, sessionId }),
-    deleteSession: (projectName, domain, sessionId) =>
-      ipcRenderer.invoke('projectAgent/deleteSession', { projectName, domain, sessionId }),
-    undoAction: (projectName, domain, actionId) =>
-      ipcRenderer.invoke('projectAgent/undoAction', { projectName, domain, actionId }),
-    onStreamEvent: (callback) => {
-      const handler = (_e, data) => callback(data);
-      ipcRenderer.on('projectAgent:stream-event', handler);
-      return () => ipcRenderer.removeListener('projectAgent:stream-event', handler);
-    },
-  },
   board: {
     list: () => ipcRenderer.invoke('board/list'),
     create: (name) => ipcRenderer.invoke('board/create', { name }),
@@ -242,59 +216,6 @@ contextBridge.exposeInMainWorld('ipm', {
     updateTimelinePoint: (id, patch) => ipcRenderer.invoke('board/updateTimelinePoint', { id, patch }),
     deleteTimelinePoint: (id) => ipcRenderer.invoke('board/deleteTimelinePoint', { id }),
   },
-  supervisor: {
-    sendMessage: (message) =>
-      ipcRenderer.invoke('supervisor/sendMessage', { message }),
-    executePlan: (plan, selectedIds) =>
-      ipcRenderer.invoke('supervisor/executePlan', { plan, selectedIds }),
-    cancelPlan: () =>
-      ipcRenderer.invoke('supervisor/cancelPlan'),
-    endSession: () =>
-      ipcRenderer.invoke('supervisor/endSession'),
-    getSessionInfo: () =>
-      ipcRenderer.invoke('supervisor/getSessionInfo'),
-    resumeSession: (sessionId) =>
-      ipcRenderer.invoke('supervisor/resumeSession', { sessionId }),
-    listSessions: (opts = {}) =>
-      ipcRenderer.invoke('supervisor/listSessions', opts),
-    loadSession: (sessionId) =>
-      ipcRenderer.invoke('supervisor/loadSession', { sessionId }),
-    deleteSession: (sessionId) =>
-      ipcRenderer.invoke('supervisor/deleteSession', { sessionId }),
-    setAutonomousMode: (enabled) =>
-      ipcRenderer.invoke('supervisor/setAutonomousMode', { enabled }),
-    getNotifications: (opts = {}) =>
-      ipcRenderer.invoke('supervisor/getNotifications', opts),
-    markNotificationRead: (id, all = false) =>
-      ipcRenderer.invoke('supervisor/markNotificationRead', { id, all }),
-    listPreferenceCandidates: (opts = {}) =>
-      ipcRenderer.invoke('supervisor/listPreferenceCandidates', opts),
-    acceptPreferenceCandidate: (id) =>
-      ipcRenderer.invoke('supervisor/acceptPreferenceCandidate', { id }),
-    dismissPreferenceCandidate: (id) =>
-      ipcRenderer.invoke('supervisor/dismissPreferenceCandidate', { id }),
-    checkPreferenceExtraction: () =>
-      ipcRenderer.invoke('supervisor/checkPreferenceExtraction'),
-    runPreferenceExtraction: () =>
-      ipcRenderer.invoke('supervisor/runPreferenceExtraction'),
-    rejectPreferenceExtraction: () =>
-      ipcRenderer.invoke('supervisor/rejectPreferenceExtraction'),
-    listSkills: () =>
-      ipcRenderer.invoke('supervisor/listSkills'),
-    getSkill: (skillName) =>
-      ipcRenderer.invoke('supervisor/getSkill', { skillName }),
-    setSkillMaturity: (skillName, maturity) =>
-      ipcRenderer.invoke('supervisor/setSkillMaturity', { skillName, maturity }),
-    deleteSkill: (skillName) =>
-      ipcRenderer.invoke('supervisor/deleteSkill', { skillName }),
-    listSkillExecutions: (opts = {}) =>
-      ipcRenderer.invoke('supervisor/listSkillExecutions', opts),
-    onStreamEvent: (callback) => {
-      const handler = (_e, data) => callback(data);
-      ipcRenderer.on('supervisor:stream-event', handler);
-      return () => ipcRenderer.removeListener('supervisor:stream-event', handler);
-    },
-  },
   search: {
     global: (query) => ipcRenderer.invoke('search/global', { query }),
     project: (projectName, domain, query) => ipcRenderer.invoke('search/project', { projectName, domain, query }),
@@ -302,5 +223,24 @@ contextBridge.exposeInMainWorld('ipm', {
   analytics: {
     flush: (events, userName) => ipcRenderer.invoke('analytics/flush', { events, userName }),
     getDataPath: () => ipcRenderer.invoke('analytics/getDataPath'),
+  },
+  knowclaw: {
+    send: (message) => ipcRenderer.invoke('knowclaw:send', { message }),
+    abort: () => ipcRenderer.invoke('knowclaw:abort'),
+    newSession: () => ipcRenderer.invoke('knowclaw:newSession'),
+    continueRecent: () => ipcRenderer.invoke('knowclaw:continueRecent'),
+    listModels: () => ipcRenderer.invoke('knowclaw:listModels'),
+    setModel: (providerId, modelId) => ipcRenderer.invoke('knowclaw:setModel', { providerId, modelId }),
+    getStatus: () => ipcRenderer.invoke('knowclaw:getStatus'),
+    listSessions: () => ipcRenderer.invoke('knowclaw:listSessions'),
+    openSession: (sessionFile) => ipcRenderer.invoke('knowclaw:openSession', { sessionFile }),
+    deleteSession: (sessionFile) => ipcRenderer.invoke('knowclaw:deleteSession', { sessionFile }),
+    forkSession: (sessionFile, entryIndex) =>
+      ipcRenderer.invoke('knowclaw:forkSession', { sessionFile, entryIndex }),
+    onEvent: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('knowclaw:event', handler);
+      return () => ipcRenderer.removeListener('knowclaw:event', handler);
+    },
   },
 });

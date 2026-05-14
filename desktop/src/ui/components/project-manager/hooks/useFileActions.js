@@ -102,6 +102,25 @@ const useFileActions = ({
     [cwd, domainOpts, refreshEntries, setErrorText, setNotice],
   );
 
+  const dropUploadFiles = useCallback(
+    async (filePaths) => {
+      if (cwd.type !== 'project') return;
+      if (!filePaths?.length) return;
+      setErrorText?.('');
+      try {
+        const res = await window.ipm.explorer.dropUpload(cwd.name, cwd.relPath || '', filePaths, domainOpts);
+        if (res?.ok) {
+          await refreshEntries?.();
+          setNotice?.({ variant: 'success', message: `已上传 ${filePaths.length} 个文件/文件夹` });
+        }
+      } catch (e) {
+        setErrorText?.(e?.message || String(e));
+        setNotice?.({ variant: 'error', message: e?.message || String(e) });
+      }
+    },
+    [cwd, domainOpts, refreshEntries, setErrorText, setNotice],
+  );
+
   const deleteEntry = useCallback(
     async (entry) => {
       if (cwd.type !== 'project' && cwd.type !== 'local') return;
@@ -230,6 +249,7 @@ const useFileActions = ({
     createFolder,
     uploadFiles,
     uploadFilesTo,
+    dropUploadFiles,
     deleteEntry,
     openRename,
     doRename,

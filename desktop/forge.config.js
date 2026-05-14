@@ -58,7 +58,7 @@ function scanNestedModules(modDir, onDep) {
   } catch { /* ignore */ }
 }
 
-const VITE_EXTERNALS = ['better-sqlite3', 'jsdom'];
+const VITE_EXTERNALS = ['better-sqlite3', 'jsdom', '@earendil-works/pi-coding-agent'];
 
 module.exports = {
   packagerConfig: {

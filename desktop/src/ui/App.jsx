@@ -6,9 +6,9 @@ import SettingsPage from './components/SettingsPage.jsx';
 import KnowledgePanorama from './components/knowledge/KnowledgePanorama.jsx';
 import MyDataPage from './components/MyDataPage.jsx';
 import OverviewPage from './components/OverviewPage.jsx';
-import KnowClawPage from './components/knowclaw/KnowClawPage.jsx';
+import KnowClawV2Page from './components/knowclaw-v2/KnowClawV2Page.jsx';
 import TutorialPage from './components/TutorialPage.jsx';
-import SupervisorBubble from './components/SupervisorBubble.jsx';
+import KnowClawBubble from './components/KnowClawBubble.jsx';
 import { TourProvider } from './components/tour/TourProvider.jsx';
 import TourOverlay from './components/tour/TourOverlay.jsx';
 import { ToastProvider } from './hooks/useToast.js';
@@ -82,7 +82,7 @@ const App = () => {
   const [displayNav, setDisplayNav] = useState(activeNav);
   const fadeTimerRef = useRef(null);
 
-  const fadeEligible = useMemo(() => new Set(['overview', 'mydata', 'knowledge', 'knowclaw', 'tutorial']), []);
+  const fadeEligible = useMemo(() => new Set(['overview', 'mydata', 'knowledge', 'knowclaw-v2', 'tutorial']), []);
 
   useEffect(() => {
     if (fadeTimerRef.current) {
@@ -273,8 +273,8 @@ const App = () => {
                 openMyDataDomain(domain || 'projects');
               }}
             />
-            ) : displayNav === 'knowclaw' ? (
-            <KnowClawPage />
+            ) : displayNav === 'knowclaw-v2' ? (
+            <KnowClawV2Page />
             ) : displayNav === 'mydata' ? (
               <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} onNavigate={setActiveNav} searchNavTarget={searchNavTarget} onSearchNavDone={() => setSearchNavTarget(null)} />
           ) : (
@@ -291,9 +291,9 @@ const App = () => {
         ) : null}
       </div>
 
-      {/* Supervisor Bubble (global floating) */}
-      {displayNav !== 'knowclaw' && (
-        <SupervisorBubble onNavigateToKnowClaw={() => setActiveNav('knowclaw')} />
+      {/* KnowClaw Bubble (global floating) */}
+      {displayNav !== 'knowclaw-v2' && (
+        <KnowClawBubble onNavigateToKnowClaw={() => setActiveNav('knowclaw-v2')} />
       )}
 
       {/* Global Status Bar (in layout; no overlap) */}

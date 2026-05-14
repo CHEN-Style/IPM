@@ -307,6 +307,40 @@ export function registerExplorerIpc({
     return { ok: true, projectName, copied };
   });
 
+  ipcMain.handle('explorer/drop-upload', async (_evt, payload) => {
+    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    const destRelPath = String(payload?.destRelPath ?? '');
+    const destDir = resolveInside(projectDir, destRelPath);
+    if (!fs.existsSync(destDir)) throw new Error('目标目录不存在');
+
+    const filePaths = Array.isArray(payload?.filePaths) ? payload.filePaths : [];
+    if (!filePaths.length) return { ok: true, projectName, copied: 0 };
+
+    const copyRecursive = (srcPath, parentDir) => {
+      const st = fs.statSync(srcPath);
+      const baseName = sanitizeFileName(path.basename(srcPath)) || 'file';
+      if (st.isFile()) {
+        const dest = ensureUniqueDestPath(parentDir, baseName);
+        fs.copyFileSync(srcPath, dest);
+      } else if (st.isDirectory()) {
+        const { fullPath } = ensureUniqueDirPath(parentDir, baseName);
+        fs.mkdirSync(fullPath, { recursive: true });
+        for (const child of fs.readdirSync(srcPath)) {
+          copyRecursive(path.join(srcPath, child), fullPath);
+        }
+      }
+    };
+
+    let copied = 0;
+    for (const fp of filePaths) {
+      if (!fs.existsSync(fp)) continue;
+      copyRecursive(fp, destDir);
+      copied += 1;
+    }
+
+    return { ok: true, projectName, copied };
+  });
+
   ipcMain.handle('explorer/rename', async (_evt, payload) => {
     const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
     const entryRelPath = String(payload?.relPath ?? '');

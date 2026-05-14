@@ -29,20 +29,20 @@ const AIGhostOverview = ({
   if (!show) return null;
 
   return (
-    <div className="px-8 pt-4">
+    <div className="px-4 sm:px-8 pt-4">
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         <button
           type="button"
-          className="w-full px-4 py-3 flex items-center justify-between gap-4 hover:bg-slate-50 transition-colors"
+          className="w-full px-4 py-3 flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors"
           onClick={onToggleOverview}
         >
           <div className="min-w-0 flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-amber-50 border border-amber-200/60">
+            <div className="p-2 rounded-lg bg-amber-50 border border-amber-200/60 shrink-0">
               <Wand2 size={16} className="text-amber-600" />
             </div>
             <div className="min-w-0 text-left">
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-semibold text-slate-800 truncate">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-semibold text-slate-800 whitespace-nowrap">
                   AI 暂存区：待处理 {pendingGhostCount} 个
                 </span>
                 <ClassifyPipeline
@@ -50,36 +50,30 @@ const AIGhostOverview = ({
                   classifying={pipelineClassifying}
                   pendingGhostCount={pendingGhostCount}
                 />
-                {ghostLoading ? <span className="text-[11px] text-slate-400 font-medium">同步中...</span> : null}
+                {ghostLoading && <span className="text-[11px] text-slate-400 font-medium">同步中...</span>}
               </div>
               <div className="text-[11px] text-slate-400 truncate">分布在 {pendingGhostFolderCount} 个文件夹（点击展开）</div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAcceptAll?.();
-              }}
-              className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+              onClick={(e) => { e.stopPropagation(); onAcceptAll?.(); }}
+              className="px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 transition-colors whitespace-nowrap"
               title="一键接受全部（移动）"
             >
-              <span className="inline-flex items-center gap-2">
-                <Check size={14} /> 全部接受
+              <span className="inline-flex items-center gap-1.5">
+                <Check size={13} /> 全部接受
               </span>
             </button>
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRejectAll?.();
-              }}
-              className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50 transition-colors"
+              onClick={(e) => { e.stopPropagation(); onRejectAll?.(); }}
+              className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-600 hover:bg-slate-50 transition-colors whitespace-nowrap"
               title="一键放弃全部"
             >
-              <span className="inline-flex items-center gap-2">
-                <Ban size={14} /> 全部放弃
+              <span className="inline-flex items-center gap-1.5">
+                <Ban size={13} /> 全部放弃
               </span>
             </button>
             <div className="text-slate-400">{overviewOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</div>

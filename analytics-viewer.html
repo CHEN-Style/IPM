@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPM Usage Analytics Viewer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .header { padding: 24px 32px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; justify-content: space-between; }
+  .header h1 { font-size: 20px; font-weight: 700; color: #f8fafc; }
+  .header .meta { font-size: 12px; color: #64748b; }
+  .drop-zone { margin: 32px auto; max-width: 600px; border: 2px dashed #334155; border-radius: 16px; padding: 48px; text-align: center; cursor: pointer; transition: all .2s; }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: #6366f1; background: #1e1b4b22; }
+  .drop-zone h2 { font-size: 16px; color: #94a3b8; margin-bottom: 8px; }
+  .drop-zone p { font-size: 13px; color: #64748b; }
+  .drop-zone input { display: none; }
+  .tabs { display: flex; gap: 4px; padding: 0 32px; border-bottom: 1px solid #1e293b; }
+  .tab { padding: 10px 18px; font-size: 13px; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; transition: all .2s; }
+  .tab:hover { color: #94a3b8; }
+  .tab.active { color: #818cf8; border-bottom-color: #818cf8; }
+  .content { padding: 24px 32px; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .card h3 { font-size: 14px; font-weight: 700; color: #f1f5f9; margin-bottom: 12px; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stat-box { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; text-align: center; }
+  .stat-box .value { font-size: 28px; font-weight: 800; color: #818cf8; }
+  .stat-box .label { font-size: 11px; color: #64748b; margin-top: 4px; text-transform: uppercase; letter-spacing: .05em; }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+  .bar-label { width: 220px; text-align: right; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-track { flex: 1; height: 20px; background: #0f172a; border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; background: linear-gradient(90deg, #6366f1, #818cf8); border-radius: 4px; transition: width .3s; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; font-size: 10px; font-weight: 700; color: #fff; min-width: 24px; }
+  .heatmap-container { position: relative; width: 100%; aspect-ratio: 16/10; background: #0f172a; border-radius: 8px; overflow: hidden; border: 1px solid #334155; }
+  .heatmap-container canvas { width: 100%; height: 100%; }
+  .heatmap-page-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; }
+  .heatmap-page-tab { padding: 4px 12px; font-size: 11px; font-weight: 600; border-radius: 6px; cursor: pointer; border: 1px solid #334155; color: #94a3b8; background: #0f172a; transition: all .2s; }
+  .heatmap-page-tab.active { background: #312e81; border-color: #6366f1; color: #c7d2fe; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; padding: 8px 12px; color: #64748b; border-bottom: 1px solid #334155; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  td { padding: 8px 12px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+  tr:hover td { background: #1e293b88; }
+  .empty { text-align: center; padding: 40px; color: #475569; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>IPM Usage Analytics</h1>
+  <div class="meta" id="fileMeta"></div>
+</div>
+
+<div id="dropArea">
+  <div class="drop-zone" id="dropZone">
+    <h2>拖入 .jsonl 文件</h2>
+    <p>将测试用户发回的 usage-YYYY-MM-DD.jsonl 文件拖到这里，或点击选择文件</p>
+    <input type="file" id="fileInput" accept=".jsonl,.json,.txt" multiple>
+  </div>
+</div>
+
+<div id="dashboard" style="display:none">
+  <div class="tabs">
+    <div class="tab active" data-tab="overview">总览</div>
+    <div class="tab" data-tab="heatmap">点击热力图</div>
+    <div class="tab" data-tab="elements">元素排行</div>
+    <div class="tab" data-tab="pages">页面分析</div>
+    <div class="tab" data-tab="inputs">输入框统计</div>
+    <div class="tab" data-tab="timeline">时间轴</div>
+  </div>
+  <div class="content" id="tabContent"></div>
+</div>
+
+<script>
+const state = { events: [], meta: null };
+
+// --- File Loading ---
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('drag-over'); loadFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change', e => loadFiles(e.target.files));
+
+async function loadFiles(files) {
+  const allEvents = [];
+  let meta = null;
+  for (const f of files) {
+    const text = await f.text();
+    const lines = text.split('\n').filter(l => l.trim());
+    for (const line of lines) {
+      try {
+        const obj = JSON.parse(line);
+        if (obj.type === '_meta') { meta = obj; continue; }
+        allEvents.push(obj);
+      } catch { /* skip */ }
+    }
+  }
+  state.events = allEvents;
+  state.meta = meta;
+  document.getElementById('fileMeta').textContent = `${files.length} 文件 · ${allEvents.length} 事件` + (meta ? ` · ${meta.platform} ${meta.arch}` : '');
+  document.getElementById('dropArea').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  renderTab('overview');
+}
+
+// --- Tabs ---
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    renderTab(tab.dataset.tab);
+  });
+});
+
+function renderTab(name) {
+  const el = document.getElementById('tabContent');
+  const ev = state.events;
+  switch (name) {
+    case 'overview': el.innerHTML = renderOverview(ev); break;
+    case 'heatmap': el.innerHTML = renderHeatmapShell(ev); initHeatmap(ev); break;
+    case 'elements': el.innerHTML = renderElements(ev); break;
+    case 'pages': el.innerHTML = renderPages(ev); break;
+    case 'inputs': el.innerHTML = renderInputs(ev); break;
+    case 'timeline': el.innerHTML = renderTimeline(ev); break;
+  }
+}
+
+// --- Overview ---
+function renderOverview(ev) {
+  const clicks = ev.filter(e => e.type === 'click');
+  const navs = ev.filter(e => e.type === 'nav');
+  const inputs = ev.filter(e => e.type === 'input_focus');
+  const dwells = ev.filter(e => e.type === 'dwell');
+  const sessions = ev.filter(e => e.type === 'session_start');
+  const totalDwell = dwells.reduce((s, d) => s + (d.ms || 0), 0);
+  const pages = new Set(clicks.map(c => c.page));
+  const trackedClicks = clicks.filter(c => c.track);
+
+  const topElements = countBy(trackedClicks, 'track').slice(0, 5);
+  const topPages = countBy(clicks, 'page').slice(0, 5);
+
+  return `
+    <div class="stat-grid">
+      <div class="stat-box"><div class="value">${sessions.length}</div><div class="label">会话数</div></div>
+      <div class="stat-box"><div class="value">${clicks.length}</div><div class="label">总点击</div></div>
+      <div class="stat-box"><div class="value">${inputs.length}</div><div class="label">输入交互</div></div>
+      <div class="stat-box"><div class="value">${navs.length}</div><div class="label">页面切换</div></div>
+      <div class="stat-box"><div class="value">${pages.size}</div><div class="label">涉及页面</div></div>
+      <div class="stat-box"><div class="value">${formatDuration(totalDwell)}</div><div class="label">总使用时长</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card">
+        <h3>最常点击的元素 TOP 5</h3>
+        ${topElements.length ? topElements.map(([k, v]) => barRow(k, v, topElements[0][1])).join('') : '<div class="empty">无标记元素数据</div>'}
+      </div>
+      <div class="card">
+        <h3>点击最多的页面 TOP 5</h3>
+        ${topPages.map(([k, v]) => barRow(k, v, topPages[0][1])).join('')}
+      </div>
+    </div>`;
+}
+
+// --- Heatmap ---
+function renderHeatmapShell(ev) {
+  const clicks = ev.filter(e => e.type === 'click');
+  const pages = [...new Set(clicks.map(c => c.page).filter(Boolean))];
+  return `
+    <div class="card">
+      <h3>点击热力图</h3>
+      <div class="heatmap-page-tabs" id="heatmapTabs">
+        ${pages.map((p, i) => `<div class="heatmap-page-tab${i === 0 ? ' active' : ''}" data-page="${p}">${p}</div>`).join('')}
+      </div>
+      <div class="heatmap-container"><canvas id="heatCanvas"></canvas></div>
+    </div>`;
+}
+
+function initHeatmap(ev) {
+  const clicks = ev.filter(e => e.type === 'click');
+  const pages = [...new Set(clicks.map(c => c.page).filter(Boolean))];
+  if (!pages.length) return;
+
+  const canvas = document.getElementById('heatCanvas');
+  if (!canvas) return;
+  const draw = (page) => {
+    const pts = clicks.filter(c => c.page === page && c.rx != null && c.ry != null);
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width = canvas.offsetWidth * 2;
+    const h = canvas.height = canvas.offsetHeight * 2;
+    ctx.clearRect(0, 0, w, h);
+
+    // Draw grid
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 10; i++) {
+      ctx.beginPath(); ctx.moveTo(i * w / 10, 0); ctx.lineTo(i * w / 10, h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * h / 10); ctx.lineTo(w, i * h / 10); ctx.stroke();
+    }
+
+    // Page label
+    ctx.fillStyle = '#334155';
+    ctx.font = `bold ${Math.round(h * 0.06)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(page, w / 2, h / 2);
+
+    if (!pts.length) return;
+
+    // Gaussian heatmap
+    const radius = Math.max(w, h) * 0.04;
+    const maxAlpha = 0.7;
+    const alphaCanvas = document.createElement('canvas');
+    alphaCanvas.width = w; alphaCanvas.height = h;
+    const actx = alphaCanvas.getContext('2d');
+
+    for (const p of pts) {
+      const px = p.rx * w;
+      const py = p.ry * h;
+      const grad = actx.createRadialGradient(px, py, 0, px, py, radius);
+      grad.addColorStop(0, `rgba(255,255,255,${maxAlpha})`);
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      actx.fillStyle = grad;
+      actx.fillRect(px - radius, py - radius, radius * 2, radius * 2);
+    }
+
+    const imageData = actx.getImageData(0, 0, w, h);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const v = data[i] / 255;
+      const [r, g, b] = heatColor(v);
+      data[i] = r; data[i + 1] = g; data[i + 2] = b;
+      data[i + 3] = v > 0.01 ? Math.round(v * 220) : 0;
+    }
+    actx.putImageData(imageData, 0, 0);
+    ctx.drawImage(alphaCanvas, 0, 0);
+
+    // Dot overlay
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    for (const p of pts) {
+      ctx.beginPath();
+      ctx.arc(p.rx * w, p.ry * h, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
+  draw(pages[0]);
+
+  document.getElementById('heatmapTabs')?.addEventListener('click', e => {
+    const tab = e.target.closest('.heatmap-page-tab');
+    if (!tab) return;
+    document.querySelectorAll('.heatmap-page-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    draw(tab.dataset.page);
+  });
+}
+
+function heatColor(v) {
+  if (v < 0.25) return [0, Math.round(v * 4 * 255), 255];
+  if (v < 0.5) return [0, 255, Math.round((1 - (v - 0.25) * 4) * 255)];
+  if (v < 0.75) return [Math.round((v - 0.5) * 4 * 255), 255, 0];
+  return [255, Math.round((1 - (v - 0.75) * 4) * 255), 0];
+}
+
+// --- Elements ---
+function renderElements(ev) {
+  const tracked = ev.filter(e => e.type === 'click' && e.track);
+  const counts = countBy(tracked, 'track');
+  if (!counts.length) return '<div class="card"><div class="empty">无标记元素数据（需要在组件上添加 data-track 属性）</div></div>';
+  const max = counts[0][1];
+  return `<div class="card"><h3>元素点击频率排行</h3>${counts.map(([k, v]) => barRow(k, v, max)).join('')}</div>`;
+}
+
+// --- Pages ---
+function renderPages(ev) {
+  const dwells = ev.filter(e => e.type === 'dwell');
+  const clicks = ev.filter(e => e.type === 'click');
+  const pageMap = {};
+  for (const d of dwells) {
+    if (!d.page) continue;
+    if (!pageMap[d.page]) pageMap[d.page] = { dwell: 0, visits: 0, clicks: 0 };
+    pageMap[d.page].dwell += d.ms || 0;
+    pageMap[d.page].visits += 1;
+  }
+  for (const c of clicks) {
+    if (!c.page) continue;
+    if (!pageMap[c.page]) pageMap[c.page] = { dwell: 0, visits: 0, clicks: 0 };
+    pageMap[c.page].clicks += 1;
+  }
+  const rows = Object.entries(pageMap).sort((a, b) => b[1].dwell - a[1].dwell);
+  return `<div class="card"><h3>页面停留与点击统计</h3>
+    <table><thead><tr><th>页面</th><th>访问次数</th><th>总停留时长</th><th>点击次数</th><th>平均停留</th></tr></thead>
+    <tbody>${rows.map(([page, s]) => `<tr><td>${page}</td><td>${s.visits}</td><td>${formatDuration(s.dwell)}</td><td>${s.clicks}</td><td>${s.visits ? formatDuration(s.dwell / s.visits) : '-'}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+// --- Inputs ---
+function renderInputs(ev) {
+  const inputs = ev.filter(e => e.type === 'input_focus');
+  const byTrack = countBy(inputs.filter(i => i.track), 'track');
+  const byPlaceholder = countBy(inputs.filter(i => i.placeholder), 'placeholder');
+  const combined = [...byTrack];
+  for (const [k, v] of byPlaceholder) {
+    if (!combined.find(c => c[0] === k)) combined.push([k, v]);
+  }
+  combined.sort((a, b) => b[1] - a[1]);
+  if (!combined.length) return '<div class="card"><div class="empty">无输入框交互数据</div></div>';
+  const max = combined[0][1];
+  return `<div class="card"><h3>输入框使用频率</h3>${combined.map(([k, v]) => barRow(k, v, max)).join('')}</div>`;
+}
+
+// --- Timeline ---
+function renderTimeline(ev) {
+  const relevant = ev.filter(e => ['click', 'nav', 'session_start', 'session_end'].includes(e.type)).slice(-200);
+  if (!relevant.length) return '<div class="card"><div class="empty">无事件数据</div></div>';
+  const rows = relevant.map(e => {
+    const time = new Date(e.t).toLocaleTimeString();
+    let desc = '';
+    if (e.type === 'session_start') desc = '会话开始';
+    else if (e.type === 'session_end') desc = '会话结束';
+    else if (e.type === 'nav') desc = `导航 ${e.from} → ${e.to}`;
+    else if (e.type === 'click') desc = `点击 ${e.track || e.text || e.tag || '?'} @ ${e.page}`;
+    return `<tr><td style="color:#64748b;width:80px">${time}</td><td><span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${typeColor(e.type)};color:#fff;margin-right:6px">${e.type}</span></td><td>${desc}</td></tr>`;
+  });
+  return `<div class="card"><h3>事件时间轴（最近 200 条）</h3><table><tbody>${rows.join('')}</tbody></table></div>`;
+}
+
+function typeColor(t) {
+  switch (t) {
+    case 'click': return '#6366f1';
+    case 'nav': return '#0ea5e9';
+    case 'session_start': return '#22c55e';
+    case 'session_end': return '#ef4444';
+    default: return '#64748b';
+  }
+}
+
+// --- Helpers ---
+function countBy(arr, key) {
+  const map = {};
+  for (const item of arr) {
+    const k = item[key] || '(unknown)';
+    map[k] = (map[k] || 0) + 1;
+  }
+  return Object.entries(map).sort((a, b) => b[1] - a[1]);
+}
+
+function barRow(label, value, max) {
+  const pct = max > 0 ? Math.round(value / max * 100) : 0;
+  return `<div class="bar-row"><div class="bar-label" title="${label}">${label}</div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(pct, 3)}%">${value}</div></div></div>`;
+}
+
+function formatDuration(ms) {
+  if (!ms || ms < 0) return '0s';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+</script>
+</body>
+</html>

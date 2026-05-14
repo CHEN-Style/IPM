@@ -22,8 +22,6 @@ export function registerCasesIpc({
   sleepSync,
   trashOrRm,
   closeProjectDb,
-  getAgentSession,
-  removeAgentSession,
 }) {
   if (!ipcMain) throw new Error('registerCasesIpc: ipcMain is required');
 
@@ -171,17 +169,6 @@ export function registerCasesIpc({
     const { name, projectDir } = getWorkspaceDirOrThrow(payload?.name, 'cases');
     const root = getCasesRoot();
 
-    // Step 1: end active Agent session (must happen BEFORE closing DB,
-    //         because endSession() internally calls getProjectDb())
-    try {
-      const session = getAgentSession?.(projectDir);
-      if (session) {
-        try { await session.endSession(); } catch { /* ignore */ }
-        try { removeAgentSession?.(projectDir); } catch { /* ignore */ }
-      }
-    } catch { /* ignore */ }
-
-    // Step 2: checkpoint WAL + close DB
     try { closeProjectDb?.(projectDir); } catch { /* ignore */ }
 
     // Step 3: brief delay for Windows to release file handles

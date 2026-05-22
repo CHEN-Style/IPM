@@ -602,7 +602,8 @@ export default function KnowledgePanorama({ onNavigateToProject }) {
       {createWebclipOpen && (
         <ModalOverlay onClose={() => { if (!webclipLoading) { setCreateWebclipOpen(false); setWebclipResult(null); } }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <h3 className="text-base font-semibold text-slate-900 mb-4">网页剪藏草稿</h3>
+            <h3 className="text-base font-semibold text-slate-900 mb-1">网页剪藏草稿</h3>
+            <p className="text-xs text-slate-400 mb-4">系统会启动隐藏浏览器渲染网页并提取 Markdown 正文（支持 SPA），可能需要 5–30 秒</p>
             <div className="flex gap-2">
               <input
                 autoFocus
@@ -611,12 +612,19 @@ export default function KnowledgePanorama({ onNavigateToProject }) {
                 placeholder="输入网页 URL..."
                 className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 transition"
                 onKeyDown={(e) => { if (e.key === 'Enter') handleCreateWebclip(); }}
+                disabled={webclipLoading}
               />
               <button onClick={handleCreateWebclip} disabled={!webclipUrl.trim() || webclipLoading} className="px-4 py-2.5 text-sm bg-slate-900 text-white rounded-xl hover:bg-slate-800 disabled:opacity-50 transition shrink-0">
                 {webclipLoading ? <Loader2 size={14} className="animate-spin" /> : '抓取'}
               </button>
             </div>
-            {webclipResult && (
+            {webclipLoading && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-blue-600">
+                <Loader2 size={12} className="animate-spin" />
+                正在渲染并抓取网页...
+              </div>
+            )}
+            {webclipResult && !webclipLoading && (
               <div className={`mt-3 flex items-center gap-2 text-sm ${webclipResult.ok ? 'text-emerald-600' : 'text-red-500'}`}>
                 {webclipResult.ok ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
                 {webclipResult.ok ? '已创建草稿' : webclipResult.error}

@@ -13,6 +13,7 @@ import {
   ListFilter,
   Plus,
   Search,
+  RefreshCw,
   Sparkles,
   Upload,
   X,
@@ -61,6 +62,11 @@ const HeaderBar = ({
   projectName,
   domain,
   onNavigateToResult,
+  // F1: 附属壳（外部导入项目）专属操作
+  isAttachedProject,
+  isAttachedBroken,
+  onRefreshAttached,
+  onRelocateAttached,
 }) => {
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef(null);
@@ -166,26 +172,36 @@ const HeaderBar = ({
   return (
     <header className="bg-white border-b border-[#e2e4eb] sticky top-0 z-10">
       {/* Row 1: Title + breadcrumbs */}
+      {/* W4: 进入工作区后只显示面包屑；title/subtitle 均为空时隐藏左侧标题块与分隔线，
+          仅保留返回按钮与面包屑，把空间让给路径表达。 */}
       <div className="px-4 sm:px-6 pt-4 pb-2 flex items-center gap-3 min-w-0">
-        <div className="flex items-center gap-3 pr-3 border-r border-slate-200 mr-3 shrink-0">
-          {showBackHome && (
-            <button
-              type="button"
-              onClick={onBackHome}
-              className="inline-flex items-center justify-center h-9 w-9 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors shrink-0"
-              title="返回我的资料"
-            >
-              <ChevronLeft size={18} />
-            </button>
-          )}
-          <div className="flex flex-col justify-center min-w-0">
-            <h1 className="text-base font-semibold text-slate-900 leading-tight truncate">{title}</h1>
-            <p className="text-[11px] text-slate-500 truncate">{subtitle}</p>
+        {(showBackHome || title || subtitle) && (
+          <div className={`flex items-center gap-3 shrink-0 ${(title || subtitle) ? 'pr-3 border-r border-slate-200 mr-3' : 'mr-1'}`}>
+            {showBackHome && (
+              <button
+                type="button"
+                onClick={onBackHome}
+                className="inline-flex items-center justify-center h-9 w-9 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors shrink-0"
+                title="返回我的资料"
+              >
+                <ChevronLeft size={18} />
+              </button>
+            )}
+            {(title || subtitle) && (
+              <div className="flex flex-col justify-center min-w-0">
+                {title && (
+                  <h1 className="text-base font-semibold text-slate-900 leading-tight truncate">{title}</h1>
+                )}
+                {subtitle && (
+                  <p className="text-[11px] text-slate-500 truncate">{subtitle}</p>
+                )}
+              </div>
+            )}
           </div>
-        </div>
+        )}
 
         {Array.isArray(breadcrumbs) && breadcrumbs.length > 0 && (
-          <nav className="flex items-center text-sm text-slate-600 whitespace-nowrap overflow-x-auto no-scrollbar min-w-0">
+          <nav className="flex items-center text-[13px] text-slate-600 whitespace-nowrap overflow-x-auto no-scrollbar min-w-0">
             <Home className="w-4 h-4 mr-2 text-slate-400 shrink-0" />
             {breadcrumbs.map((crumb, index) => (
               <div key={crumb.id} className="flex items-center shrink-0">
@@ -194,7 +210,7 @@ const HeaderBar = ({
                   type="button"
                   onClick={() => onNavigateBreadcrumb?.(crumb)}
                   disabled={crumb.active}
-                  className={`${crumb.active ? 'font-semibold text-slate-900' : 'text-slate-600 hover:text-[#3e4b9c]'} transition-colors truncate max-w-[120px]`}
+                  className={`${crumb.active ? 'font-semibold text-slate-900 text-[14px]' : 'text-slate-600 hover:text-[#3e4b9c]'} transition-colors truncate max-w-[160px]`}
                   title={crumb.label}
                 >
                   {crumb.label}
@@ -394,11 +410,11 @@ const HeaderBar = ({
           <>
             <button
               type="button"
-              disabled
-              className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-slate-100 text-slate-400 border border-slate-200 text-xs cursor-not-allowed whitespace-nowrap shrink-0"
-              title="正在开发中"
+              onClick={() => onImportLocalFolder?.()}
+              className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors text-xs whitespace-nowrap shrink-0"
+              title="将外部文件夹以「附属」形式导入：不复制文件，应用内仅创建链接 + 系统目录（meta/temp/snippets）"
             >
-              导入本地
+              导入外部文件夹
             </button>
             {showCreateProject && (
               <div className="flex items-center gap-1.5 shrink-0">
@@ -474,6 +490,26 @@ const HeaderBar = ({
             >
               <Sparkles size={13} /> {aiUploadRunning ? 'AI分类中…' : 'AI分类'}
             </button>
+            {isAttachedProject && (
+              <button
+                type="button"
+                onClick={() => onRefreshAttached?.()}
+                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors text-xs whitespace-nowrap shrink-0"
+                title="重新扫描外部文件夹的目录结构（不会复制文件）"
+              >
+                <RefreshCw size={13} /> 刷新结构
+              </button>
+            )}
+            {isAttachedProject && isAttachedBroken && (
+              <button
+                type="button"
+                onClick={() => onRelocateAttached?.()}
+                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors text-xs font-medium whitespace-nowrap shrink-0"
+                title="外部路径已失效，重新选择新路径"
+              >
+                <Folder size={13} /> 重新定位
+              </button>
+            )}
           </>
         )}
       </div>

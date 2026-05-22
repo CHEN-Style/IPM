@@ -1,13 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { renameWorkspace } from '../../../Agent/storage/pathRemapper.js';
+
 export function registerProjectsIpc({
   ipcMain,
+  dialog,
   shell,
   readState,
   writeState,
   getProjectsRoot,
   sanitizeProjectName,
+  sanitizeFileName,
+  ensureUniqueDirPath,
   normalizeProjectStatus,
   isTombstoneProjectName,
   isEmptyDirSync,
@@ -18,12 +23,34 @@ export function registerProjectsIpc({
   enqueueDeleteDir,
   ensureProjectStructure,
   syncStructureJson,
+  syncStructureFromExternal,
+  isAttachedProject,
+  readExternalLink,
+  writeExternalLink,
   getProjectDirOrThrow,
   sleepSync,
   trashOrRm,
   closeProjectDb,
+  // W3b: rename 联动依赖
+  getStudyDb,
+  getSupervisorDb,
 }) {
   if (!ipcMain) throw new Error('registerProjectsIpc: ipcMain is required');
+
+  // F1: 读取附属壳 metadata，给 list 返回结果附加 attached/externalRootPath/broken 字段。
+  const buildAttachedMeta = (projectDir) => {
+    if (typeof isAttachedProject !== 'function' || !isAttachedProject(projectDir)) {
+      return { attached: false };
+    }
+    const link = (typeof readExternalLink === 'function' ? readExternalLink(projectDir) : null) || {};
+    return {
+      attached: true,
+      externalRootPath: link.rootPath || '',
+      broken: Boolean(link.broken),
+      brokenReason: link.brokenReason || '',
+      lastScanAt: link.lastScanAt || '',
+    };
+  };
 
   ipcMain.handle('projects/list', async () => {
     const root = getProjectsRoot();
@@ -48,6 +75,16 @@ export function registerProjectsIpc({
       }
       const fullPath = path.join(root, name);
       // Clean up ghost project dirs that may remain as empty stubs after deletion (Windows edge cases).
+      // F1: 附属壳的"业务文件夹"在外部，壳内只有 meta/temp/snippets，因此不参与 isEmptyDirSync 清理。
+      if (typeof isAttachedProject === 'function' && isAttachedProject(fullPath)) {
+        out.push({
+          name,
+          path: fullPath,
+          status: normalizeProjectStatus(statusMap[name] || 'active'),
+          ...buildAttachedMeta(fullPath),
+        });
+        continue;
+      }
       if (isEmptyDirSync(fullPath)) {
         try {
           safeRmSync(fullPath);
@@ -65,6 +102,7 @@ export function registerProjectsIpc({
         name,
         path: fullPath,
         status: normalizeProjectStatus(statusMap[name] || 'active'),
+        attached: false,
       });
     }
     out.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
@@ -151,7 +189,10 @@ export function registerProjectsIpc({
         throw new Error(`发现残留项目目录但无法清理：${name}。请稍后重试、重启应用，或手动删除该文件夹。`);
       }
     }
-    const proj = ensureProjectStructure(name);
+    // W1: 接收 renderer 传入的模板参数（'default' / 'blank'），向下传递至
+    // ensureProjectStructure；缺省回退 'default' 保持向后兼容。
+    const template = payload?.template === 'blank' ? 'blank' : 'default';
+    const proj = ensureProjectStructure(name, 'projects', { template });
     // best-effort: seed structure.json immediately on creation
     try {
       syncStructureJson(proj.path, name);
@@ -180,6 +221,46 @@ export function registerProjectsIpc({
     state.currentProject = name;
     writeState(state);
     return { ok: true, currentProject: name };
+  });
+
+  // W3b: 项目重命名
+  ipcMain.handle('projects/rename', async (_evt, payload) => {
+    const oldName = sanitizeProjectName(payload?.oldName);
+    const newName = sanitizeProjectName(payload?.newName);
+    if (!oldName) throw new Error('原项目名不能为空');
+    if (!newName) throw new Error('新项目名不能为空');
+    if (oldName === newName) return { ok: true, projectName: oldName, noOp: true };
+
+    const root = getProjectsRoot();
+    const oldDir = path.join(root, oldName);
+    const newDir = path.join(root, newName);
+    if (!fs.existsSync(oldDir)) throw new Error(`项目不存在：${oldName}`);
+    if (fs.existsSync(newDir)) throw new Error(`新名称已存在：${newName}`);
+
+    const res = renameWorkspace({
+      oldName,
+      newName,
+      domain: 'projects',
+      oldDir,
+      newDir,
+      readState,
+      writeState,
+      closeProjectDb,
+      getStudyDb,
+      getSupervisorDb,
+    });
+
+    if (!res.ok && !res.summary?.diskRenamed) {
+      // 主操作（磁盘 rename）都失败了 → 整体失败
+      throw new Error(res.errors?.join('; ') || '重命名失败');
+    }
+
+    return {
+      ok: res.ok,
+      projectName: newName,
+      summary: res.summary,
+      errors: res.errors,
+    };
   });
 
   ipcMain.handle('projects/delete', async (_evt, payload) => {
@@ -367,6 +448,152 @@ export function registerProjectsIpc({
     }
     writeState(state);
     return { ok: true };
+  });
+
+  // ===== F1: Attached import (external folder) =====
+  //
+  // 在 projects/ 根下创建附属壳目录，写 meta/external-link.json 指向外部根，
+  // 调用 syncStructureFromExternal 首次扫描。不复制外部文件。
+  ipcMain.handle('projects/importAttached', async (_evt, payload) => {
+    if (!dialog) throw new Error('dialog 不可用');
+    let pickedPath = String(payload?.path || '').trim();
+    if (!pickedPath) {
+      const res = await dialog.showOpenDialog({
+        title: '选择要导入的外部文件夹（不会被复制）',
+        properties: ['openDirectory'],
+      });
+      if (res.canceled || !res.filePaths?.length) {
+        return { ok: true, canceled: true };
+      }
+      pickedPath = String(res.filePaths[0] || '').trim();
+    }
+    if (!pickedPath) return { ok: true, canceled: true };
+    const externalRoot = path.resolve(pickedPath);
+    let st;
+    try { st = fs.statSync(externalRoot); }
+    catch (e) { throw new Error(`所选路径不可访问：${e?.message || e}`); }
+    if (!st.isDirectory()) throw new Error('所选路径不是文件夹');
+
+    const root = getProjectsRoot();
+    fs.mkdirSync(root, { recursive: true });
+
+    // 防止把数据存储区内部的文件夹错误地"附属导入"
+    const rootResolved = path.resolve(root);
+    if (path.resolve(externalRoot) === rootResolved
+      || path.resolve(externalRoot).startsWith(rootResolved + path.sep)) {
+      throw new Error('不能将数据存储区内部的目录作为外部文件夹导入');
+    }
+
+    // 候选壳名 = 外部目录最后一级；非法字符替换；与现有项目同名时自动加后缀
+    const baseName = sanitizeFileName(path.basename(externalRoot)) || 'imported';
+    const { name: shellName, fullPath: shellDir } = ensureUniqueDirPath(root, baseName);
+
+    // 创建壳（使用 blank 模板：仅系统目录）
+    ensureProjectStructure(shellName, 'projects', { template: 'blank' });
+
+    // 写 external-link.json
+    writeExternalLink(shellDir, {
+      rootPath: externalRoot,
+      importedAt: new Date().toISOString(),
+      lastScanAt: '',
+      lastScanStatus: '',
+      broken: false,
+      brokenReason: '',
+    });
+
+    // 首次扫描：构造 structure.json（外部根条目）
+    let scanError = null;
+    try {
+      syncStructureFromExternal(shellDir, shellName);
+    } catch (e) {
+      scanError = e?.message || String(e);
+    }
+
+    // 设为 active 并切换 currentProject
+    const state = readState();
+    state.projectStatuses = state.projectStatuses && typeof state.projectStatuses === 'object' ? state.projectStatuses : {};
+    state.projectStatuses[shellName] = normalizeProjectStatus(state.projectStatuses[shellName] || 'active');
+    state.currentProject = shellName;
+    writeState(state);
+
+    return {
+      ok: true,
+      name: shellName,
+      path: shellDir,
+      externalRootPath: externalRoot,
+      scanError,
+    };
+  });
+
+  // 重新定位（外部根路径变更）
+  ipcMain.handle('projects/relocateAttached', async (_evt, payload) => {
+    if (!dialog) throw new Error('dialog 不可用');
+    const name = sanitizeProjectName(payload?.name);
+    if (!name) throw new Error('项目名不能为空');
+    const projectDir = path.join(getProjectsRoot(), name);
+    if (!fs.existsSync(projectDir)) throw new Error(`项目不存在：${name}`);
+    if (typeof isAttachedProject !== 'function' || !isAttachedProject(projectDir)) {
+      throw new Error('该项目不是外部导入项目（附属壳）');
+    }
+
+    let newPath = String(payload?.newPath || '').trim();
+    if (!newPath) {
+      const res = await dialog.showOpenDialog({
+        title: '选择新的外部根路径',
+        properties: ['openDirectory'],
+      });
+      if (res.canceled || !res.filePaths?.length) return { ok: true, canceled: true };
+      newPath = String(res.filePaths[0] || '').trim();
+    }
+    if (!newPath) return { ok: true, canceled: true };
+    const newAbs = path.resolve(newPath);
+    let st;
+    try { st = fs.statSync(newAbs); }
+    catch (e) { throw new Error(`新路径不可访问：${e?.message || e}`); }
+    if (!st.isDirectory()) throw new Error('新路径不是文件夹');
+
+    const link = readExternalLink(projectDir) || {};
+    writeExternalLink(projectDir, {
+      ...link,
+      rootPath: newAbs,
+      lastScanAt: '',
+      broken: false,
+      brokenReason: '',
+    });
+    let scanError = null;
+    try {
+      syncStructureFromExternal(projectDir, name);
+    } catch (e) {
+      scanError = e?.message || String(e);
+    }
+    return { ok: true, name, externalRootPath: newAbs, scanError };
+  });
+
+  // 手动刷新外部目录扫描
+  ipcMain.handle('projects/refreshAttached', async (_evt, payload) => {
+    const name = sanitizeProjectName(payload?.name);
+    if (!name) throw new Error('项目名不能为空');
+    const projectDir = path.join(getProjectsRoot(), name);
+    if (!fs.existsSync(projectDir)) throw new Error(`项目不存在：${name}`);
+    if (typeof isAttachedProject !== 'function' || !isAttachedProject(projectDir)) {
+      throw new Error('该项目不是外部导入项目（附属壳）');
+    }
+    let scanError = null;
+    try {
+      syncStructureFromExternal(projectDir, name);
+    } catch (e) {
+      scanError = e?.message || String(e);
+    }
+    const link = readExternalLink(projectDir) || {};
+    return {
+      ok: true,
+      name,
+      externalRootPath: link.rootPath || '',
+      broken: Boolean(link.broken),
+      brokenReason: link.brokenReason || '',
+      lastScanAt: link.lastScanAt || '',
+      scanError,
+    };
   });
 }
 

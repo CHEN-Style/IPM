@@ -15,6 +15,13 @@ const useContextMenu = ({
   deleteEntry,
   removeLocalFolder,
   onCreateKnowledge,
+  // W3b: 项目/案件根级重命名（学习域不传则不显示菜单项）
+  renameProject,
+  // F1: 附属壳专属操作（外部导入项目）。projects 提供识别 attached 标记的元数据，
+  // refreshAttached/relocateAttached 是显式的右键操作回调。
+  projects,
+  refreshAttached,
+  relocateAttached,
 }) => {
   const [menu, setMenu] = useState(null); // {x,y, items:[{label,onClick, danger?}]}
 
@@ -53,11 +60,26 @@ const useContextMenu = ({
     (e, projectName) => {
       e.preventDefault();
       e.stopPropagation();
-      openMenu(e.clientX, e.clientY, [
-        { label: `删除${entityLabel}：${projectName}`, danger: true, onClick: () => deleteProject?.(projectName) },
-      ]);
+      const items = [];
+      const meta = (projects || []).find((p) => p && p.name === projectName) || null;
+      const isAttached = Boolean(meta?.attached);
+      if (typeof renameProject === 'function') {
+        items.push({ label: `重命名${entityLabel}：${projectName}`, onClick: () => renameProject(projectName) });
+      }
+      if (isAttached && typeof refreshAttached === 'function') {
+        items.push({ label: `刷新外部结构：${projectName}`, onClick: () => refreshAttached(projectName) });
+      }
+      if (isAttached && typeof relocateAttached === 'function') {
+        items.push({ label: `重新定位外部根：${projectName}`, onClick: () => relocateAttached(projectName) });
+      }
+      items.push({
+        label: isAttached ? `取消导入：${projectName}` : `删除${entityLabel}：${projectName}`,
+        danger: true,
+        onClick: () => deleteProject?.(projectName),
+      });
+      openMenu(e.clientX, e.clientY, items);
     },
-    [deleteProject, entityLabel, openMenu],
+    [deleteProject, entityLabel, openMenu, projects, refreshAttached, relocateAttached, renameProject],
   );
 
   const handleRowContextMenuLocalFolder = useCallback(

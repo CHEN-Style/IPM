@@ -6,6 +6,7 @@ export function registerMetaIpc({
   isSystemFolderRelPath,
   ensureProjectStructure,
   syncStructureJson,
+  isAttachedProject,
   safeReadJson,
   getProjectStructurePath,
   atomicWriteFileSync,
@@ -13,6 +14,10 @@ export function registerMetaIpc({
   getProjectLogPath,
 }) {
   if (!ipcMain) throw new Error('registerMetaIpc: ipcMain is required');
+
+  // F1: 附属壳禁止在 meta IPC 内触发全量 sync（频率过高 + 由 explorer/启动钩子负责）
+  const attached = (projectDir) =>
+    typeof isAttachedProject === 'function' && isAttachedProject(projectDir);
 
   // ===== Meta: folder info (from meta/structure.json) =====
   ipcMain.handle('meta/getFolderInfo', async (_evt, payload) => {
@@ -22,7 +27,10 @@ export function registerMetaIpc({
     // Ensure structure exists and is reasonably up to date (best-effort)
     try {
       ensureProjectStructure(projectName, payload?.domain);
-      syncStructureJson(projectDir, projectName);
+      if (!attached(projectDir)) {
+        syncStructureJson(projectDir, projectName);
+      }
+      // 附属壳：不在此处触发外部扫描，仅读取最新 structure（由 explorer/启动钩子维护）
     } catch {
       // ignore
     }
@@ -51,10 +59,15 @@ export function registerMetaIpc({
     // Ensure structure exists & contains folder entries
     ensureProjectStructure(projectName, payload?.domain);
     let doc = null;
-    try {
-      doc = syncStructureJson(projectDir, projectName);
-    } catch {
+    if (attached(projectDir)) {
+      // F1: 附属壳直接 read-modify-write，不触发任何全量 sync
       doc = safeReadJson(getProjectStructurePath(projectDir), null);
+    } else {
+      try {
+        doc = syncStructureJson(projectDir, projectName);
+      } catch {
+        doc = safeReadJson(getProjectStructurePath(projectDir), null);
+      }
     }
     if (!doc || typeof doc !== 'object') throw new Error('structure.json 不可用');
     doc.folders = doc.folders && typeof doc.folders === 'object' ? doc.folders : {};

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Layers } from 'lucide-react';
 import Sidebar from './components/Sidebar.jsx';
 import DetailPanel from './components/DetailPanel.jsx';
 import FloatingMode from './components/floating/FloatingMode.jsx';
@@ -250,11 +251,30 @@ const App = () => {
             setSidebarCollapsed(true);
           }}
         >
-          {/* Top drag strip — also prevents content from overlapping window-control overlay */}
+          {/* Top drag strip — also prevents content from overlapping window-control overlay.
+              G1.1c: 在右侧（系统 caption controls 之前）放一个「切换到悬浮窗」按钮，
+              使中台 → 悬浮的入口与悬浮窗左上角的「回中台」对称可见。 */}
           <div
-            className="h-[36px] shrink-0 w-full"
+            className="h-[36px] shrink-0 w-full flex items-center justify-end pr-[140px]"
             style={{ WebkitAppRegion: 'drag', background: '#f8f9fb' }}
-          />
+          >
+            <button
+              type="button"
+              onClick={() => {
+                if (window?.ipm?.ui?.openFloating) {
+                  window.ipm.ui.openFloating().catch(() => setUiMode('floating'));
+                  return;
+                }
+                setUiMode('floating');
+              }}
+              title="切换到悬浮窗 (Ctrl+Shift+Space)"
+              style={{ WebkitAppRegion: 'no-drag' }}
+              className="h-7 w-7 rounded-md hover:bg-slate-200/60 flex items-center justify-center text-slate-500 hover:text-slate-700 transition-colors"
+              data-track="titlebar-open-floating"
+            >
+              <Layers size={14} />
+            </button>
+          </div>
           <div className="flex-1 min-h-0 relative">
             <div
               className={`absolute inset-0 bg-white transition-opacity duration-200 ease-in-out pointer-events-none z-10 ${

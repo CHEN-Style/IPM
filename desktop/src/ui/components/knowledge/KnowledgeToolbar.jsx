@@ -23,6 +23,8 @@ export default function KnowledgeToolbar({
   onTogglePinned,
   viewMode,
   onViewModeChange,
+  // F1: 附属壳禁用「关联」视图（外部目录路径不稳定，关联易失效）。
+  isAttached = false,
 }) {
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -40,16 +42,19 @@ export default function KnowledgeToolbar({
           <LayoutGrid size={13} />
           管理
         </button>
-        <button
-          type="button"
-          onClick={() => onViewModeChange?.('linker')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-            viewMode === 'linker' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <Link2 size={13} />
-          关联
-        </button>
+        {/* F1: 附属壳隐藏「关联」入口（仅支持收集，不支持文件关联） */}
+        {!isAttached && (
+          <button
+            type="button"
+            onClick={() => onViewModeChange?.('linker')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              viewMode === 'linker' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Link2 size={13} />
+            关联
+          </button>
+        )}
       </div>
 
       {/* Divider */}

@@ -9,7 +9,7 @@ import { FileTree } from '../snippetlinker/FileTree.jsx';
 import { AssociationNodeList } from '../snippetlinker/AssociationNodeList.jsx';
 import { ConnectorLines } from '../snippetlinker/ConnectorLines.jsx';
 
-export default function KnowledgePage({ projectName, domain, onBack }) {
+export default function KnowledgePage({ projectName, domain, onBack, isAttached = false, externalRootPath = '' }) {
   const domainOpts = domain ? { domain } : {};
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -17,7 +17,16 @@ export default function KnowledgePage({ projectName, domain, onBack }) {
   const [stats, setStats] = useState(null);
 
   // Top-level view: 'manage' or 'linker'
+  // F1: 附属壳强制锁定在 'manage'，无 'linker' 视图。
   const [viewMode, setViewMode] = useState('manage');
+  const handleViewModeChange = useCallback((next) => {
+    if (isAttached && next === 'linker') return;
+    setViewMode(next);
+  }, [isAttached]);
+  // F1: isAttached 切换时，若在 linker 模式则强制回到 manage（避免黑屏）
+  useEffect(() => {
+    if (isAttached && viewMode === 'linker') setViewMode('manage');
+  }, [isAttached, viewMode]);
 
   // Filters (shared between modes)
   const [activeType, setActiveType] = useState('');
@@ -187,12 +196,19 @@ export default function KnowledgePage({ projectName, domain, onBack }) {
     try {
       const res = await api.createWebclip(projectName, url, domainOpts);
       if (res?.ok) {
-        setWebclipResult({ success: true, title: res.item?.title || url, fetchError: res.fetchError });
+        setWebclipResult({
+          success: true,
+          title: res.item?.title || url,
+          fetchError: res.fetchError,
+          renderMode: res.renderMode,
+          screenshotPath: res.screenshotPath,
+          fallbackReason: res.fallbackReason,
+        });
         setTimeout(() => {
           setCreateWebclipOpen(false);
           setWebclipUrl('');
           setWebclipResult(null);
-        }, 1500);
+        }, 1800);
       } else {
         setWebclipResult({ success: false, error: res?.error || '抓取失败' });
       }
@@ -350,8 +366,23 @@ export default function KnowledgePage({ projectName, domain, onBack }) {
         showPinned={showPinned}
         onTogglePinned={() => setShowPinned(!showPinned)}
         viewMode={viewMode}
-        onViewModeChange={setViewMode}
+        onViewModeChange={handleViewModeChange}
+        isAttached={isAttached}
       />
+
+      {/* F1: 附属壳的提示横幅 */}
+      {isAttached && !isLinkerMode && (
+        <div className="px-6 py-2 bg-amber-50 border-b border-amber-200 flex items-start gap-2">
+          <AlertCircle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-[12px] text-amber-900">
+            <strong>外部导入项目仅支持知识碎片收集</strong>
+            <span className="text-amber-700">
+              {' '}— 不支持把碎片关联到外部文件 / 文件夹（外部路径可能在应用外被修改，关联会静默失效）。
+              所有碎片都保存在应用数据存储区的 <code className="px-1 bg-amber-100 rounded text-[11px]">snippets/</code> 目录。
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* ======= Content: manage vs linker ======= */}
       {isLinkerMode ? (
@@ -600,12 +631,12 @@ export default function KnowledgePage({ projectName, domain, onBack }) {
                 onKeyDown={(e) => { if (e.key === 'Enter' && !webclipLoading) handleCreateWebclip(); }}
               />
             </div>
-            <p className="text-xs text-slate-400 mb-3">系统将自动抓取网页正文并使用 AI 生成摘要，同时可在详情页中手动上传截图作为补充</p>
+            <p className="text-xs text-slate-400 mb-3">系统将启动隐藏浏览器渲染网页，提取正文转 Markdown，并生成全页截图与 AI 摘要</p>
 
             {webclipLoading && (
               <div className="flex items-center gap-2 px-3 py-2.5 bg-blue-50 border border-blue-100 rounded-lg mb-3">
                 <Loader2 size={14} className="animate-spin text-blue-600" />
-                <span className="text-xs text-blue-700">正在抓取网页内容并生成摘要，请稍候...</span>
+                <span className="text-xs text-blue-700">正在渲染并抓取网页（含 JS、滚动加载、截图），可能需要 5–30 秒...</span>
               </div>
             )}
 
@@ -616,9 +647,24 @@ export default function KnowledgePage({ projectName, domain, onBack }) {
                 {webclipResult.success ? (
                   <>
                     <CheckCircle2 size={14} className="text-emerald-600 mt-0.5 shrink-0" />
-                    <div>
-                      <div className="text-xs text-emerald-700 font-medium">剪藏成功：{webclipResult.title}</div>
-                      {webclipResult.fetchError && <div className="text-[10px] text-amber-600 mt-0.5">部分内容提取受限：{webclipResult.fetchError}</div>}
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs text-emerald-700 font-medium truncate">剪藏成功：{webclipResult.title}</div>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        {webclipResult.renderMode === 'rendered' ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200">浏览器渲染</span>
+                        ) : webclipResult.renderMode === 'http_fallback' ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200">HTTP 降级</span>
+                        ) : null}
+                        {webclipResult.screenshotPath && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 border border-blue-200">已截图</span>
+                        )}
+                      </div>
+                      {webclipResult.fallbackReason && (
+                        <div className="text-[10px] text-amber-600 mt-0.5">渲染失败已自动降级：{webclipResult.fallbackReason}</div>
+                      )}
+                      {webclipResult.fetchError && !webclipResult.fallbackReason && (
+                        <div className="text-[10px] text-amber-600 mt-0.5">部分内容提取受限：{webclipResult.fetchError}</div>
+                      )}
                     </div>
                   </>
                 ) : (

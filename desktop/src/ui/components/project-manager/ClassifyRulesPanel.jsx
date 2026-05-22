@@ -193,7 +193,7 @@ function RuleForm({ folders, initial, onSave, onCancel }) {
   );
 }
 
-const ClassifyRulesPanel = ({ projectName, domain, open, onClose, embedded = false, addTriggerRef }) => {
+const ClassifyRulesPanel = ({ projectName, domain, open, onClose, embedded = false, addTriggerRef, isAttached = false }) => {
   const [rules, setRules] = useState([]);
   const [folders, setFolders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -231,18 +231,25 @@ const ClassifyRulesPanel = ({ projectName, domain, open, onClose, embedded = fal
 
   useEffect(() => {
     if (addTriggerRef) {
-      addTriggerRef.current = () => { setEditingRule(null); setShowForm(true); };
+      // F1: 附属壳禁止打开表单
+      addTriggerRef.current = () => {
+        if (isAttached) return;
+        setEditingRule(null);
+        setShowForm(true);
+      };
     }
     return () => { if (addTriggerRef) addTriggerRef.current = null; };
-  }, [addTriggerRef]);
+  }, [addTriggerRef, isAttached]);
 
   const handleAdd = async (data) => {
+    if (isAttached) return;
     try {
       await window.ipm?.classifyRules?.add?.(projectName, data, { domain });
       setShowForm(false);
       loadData();
     } catch (e) {
       console.error('Failed to add rule', e);
+      window.alert(e?.message || String(e));
     }
   };
 
@@ -288,6 +295,34 @@ const ClassifyRulesPanel = ({ projectName, domain, open, onClose, embedded = fal
 
   if (!active) return null;
 
+  // F1: 附属壳禁用硬规则，渲染只读空态。
+  if (isAttached) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex-1 overflow-y-auto">
+          <div className="px-5 py-12 text-center max-w-[420px] mx-auto">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-amber-50 border border-amber-200 mb-3">
+              <ShieldCheck size={22} className="text-amber-500" />
+            </div>
+            <div className="text-sm font-semibold text-slate-700 mb-1">外部导入项目不支持硬规则</div>
+            <div className="text-[12px] text-slate-500 leading-relaxed">
+              附属壳（外部导入项目）的目录结构可能在应用外被修改，
+              导致基于路径的硬规则容易静默失效。
+              <br />
+              <br />
+              当前项目的 AI 分类完全依赖：
+              <ul className="text-left mt-2 space-y-1 text-[12px] text-slate-600">
+                <li>· LLM Agent 推理</li>
+                <li>· 文件夹描述（在文件管理页编辑）</li>
+                <li>· 历史分类反馈（"原始事件" 标签可查）</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const content = (
     <>
       <div className="flex-1 overflow-y-auto">
@@ -296,8 +331,21 @@ const ClassifyRulesPanel = ({ projectName, domain, open, onClose, embedded = fal
         ) : rules.length === 0 && !showForm ? (
           <div className="px-5 py-10 text-center">
             <Zap size={28} className="mx-auto text-slate-300 mb-2" />
-            <div className="text-sm text-slate-500">暂无自定义规则</div>
-            <div className="text-[11px] text-slate-400 mt-1">添加规则后，符合条件的文件将自动快速分类</div>
+            <div className="text-sm text-slate-500 mb-1">还没有分类规则</div>
+            <div className="text-[11px] text-slate-400 leading-relaxed max-w-[360px] mx-auto">
+              硬规则是最快的分类通道 — 命中后跳过 AI 直接归档。<br />
+              点击下方「添加规则」创建第一条，例如：文件名含「发票」→ 归入「收到资料」。
+            </div>
+            {!embedded && (
+              <button
+                type="button"
+                onClick={() => { setEditingRule(null); setShowForm(true); }}
+                className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 text-xs rounded-lg bg-[#3e4b9c] text-white hover:bg-[#4e5bab] font-medium"
+              >
+                <Plus size={13} />
+                添加第一条规则
+              </button>
+            )}
           </div>
         ) : (
           <div>

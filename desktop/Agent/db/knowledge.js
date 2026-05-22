@@ -67,6 +67,10 @@ export function listItems(db, filters = {}) {
   if (typeof filters.archived === 'number' || typeof filters.archived === 'boolean') {
     conditions.push('archived = @archived');
     params.archived = filters.archived ? 1 : 0;
+  } else if (filters.includeArchived !== true) {
+    // W3a: 默认过滤掉已归档（被孤儿清理标记）的条目。
+    // 调用方需要查看归档项时传 includeArchived=true 或显式 archived=true。
+    conditions.push('archived = 0');
   }
   if (filters.search) {
     conditions.push("(content_text LIKE @search OR title LIKE @search OR tags LIKE @search)");

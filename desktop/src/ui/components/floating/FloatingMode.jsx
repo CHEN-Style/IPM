@@ -175,10 +175,11 @@ const FloatingMode = ({ onBackToMain }) => {
   useEffect(() => {
     const close = () => setMenu((m) => (m.open ? { ...m, open: false } : m));
     const onKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        close();
-        setToolPanel('');
-      }
+      if (e.key !== 'Escape') return;
+      // G1.0 Esc 三档升档：先关右键菜单 → 关子面板 → 回中台
+      if (menu.open) { close(); return; }
+      if (toolPanel) { setToolPanel(''); return; }
+      onBackToMain?.();
     };
     window.addEventListener('click', close);
     window.addEventListener('blur', close);
@@ -188,7 +189,7 @@ const FloatingMode = ({ onBackToMain }) => {
       window.removeEventListener('blur', close);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, []);
+  }, [menu.open, toolPanel, onBackToMain]);
 
   // Keep the floating BrowserWindow content size equal to the widget size,
   // so there is no extra transparent region that blocks clicks outside the widget.
@@ -229,15 +230,38 @@ const FloatingMode = ({ onBackToMain }) => {
           className="inline-block align-top"
           style={{ width: 'fit-content' }}
         >
+          {/* G1.2c 顶部 8px 可见拖拽把手。frameless transparent 窗的拖动入口
+              此前只能靠右键菜单或者拽 rail，没有视觉暗示。这里给一条
+              hover 高亮 + 小横条样式，明确告诉用户可拖动。 */}
+          <div
+            className="h-2 w-full bg-slate-800/40 hover:bg-slate-700/60 transition-colors flex items-center justify-center cursor-move rounded-t-2xl"
+            style={{ WebkitAppRegion: 'drag' }}
+            title="拖动以移动悬浮窗"
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <div className="w-8 h-0.5 rounded-full bg-slate-400/50" />
+          </div>
           <div className="flex items-stretch">
             {/* 左侧工具栏 + 可展开面板（注意：面板使用 absolute，避免在收起时“高度撑开”导致窗口出现透明遮挡区） */}
             <div
-              className="relative flex-shrink-0 overflow-hidden bg-slate-900/70 border border-slate-800/60 border-r-0 rounded-l-2xl shadow-2xl backdrop-blur w-12"
+              className="relative flex-shrink-0 overflow-hidden bg-slate-900/70 border border-slate-800/60 border-r-0 rounded-bl-2xl shadow-2xl backdrop-blur w-12"
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
             >
               {/* Rail（固定在右侧；面板从 rail 左侧向左滑出，向右收回） */}
               <div className="absolute right-0 top-0 bottom-0 w-12 flex flex-col items-center py-2 gap-2">
+                {/* G1.0 顶部：回中台按钮（取代原本仅存在于右键菜单的入口） */}
+                <button
+                  type="button"
+                  className="w-9 h-9 rounded-xl border bg-slate-950/20 border-slate-800/70 text-slate-300 hover:bg-slate-800/40 transition-all flex items-center justify-center mb-1"
+                  title="回到中台 (Esc / Ctrl+Shift+Space)"
+                  onClick={(e) => { e.stopPropagation(); onBackToMain?.(); }}
+                  data-track="float-back-to-main"
+                >
+                  <ArrowLeft size={16} />
+                </button>
+                <div className="w-6 h-px bg-slate-800/60 mb-1" />
+
                 {/* Domain Switcher (top) */}
                 <div className="w-full flex flex-col items-center pb-2 mb-2 border-b border-slate-800/60">
                   <button
@@ -291,7 +315,7 @@ const FloatingMode = ({ onBackToMain }) => {
             </div>
 
             {/* 主体悬浮组件 */}
-            <div className="rounded-r-2xl overflow-hidden">
+            <div className="rounded-br-2xl overflow-hidden">
               <TrayWidget
                 windowMode
                 projects={projects}

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { X, FileText, Image, Globe, StickyNote, Check, Loader2, ExternalLink } from 'lucide-react';
+import { X, FileText, Image, Globe, StickyNote, Check, Loader2, ExternalLink, Sparkles } from 'lucide-react';
 
 const TYPES = [
   { key: 'snippet', label: '文本碎片', icon: FileText, color: '#D97706', enabled: true },
@@ -9,7 +9,7 @@ const TYPES = [
 ];
 
 export default function CreateKnowledgeModal({ target, onClose, onNavigateKnowledge }) {
-  const { entry, projectName, domain } = target;
+  const { entry, projectName, domain, isAttached } = target;
   const [activeType, setActiveType] = useState('snippet');
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -19,6 +19,8 @@ export default function CreateKnowledgeModal({ target, onClose, onNavigateKnowle
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const fileInputRef = useRef(null);
+  // F3: OCR 选项 — 'skip' | 'ch' | 'en'。仅对 screenshot 类型生效。
+  const [ocrChoice, setOcrChoice] = useState('skip');
 
   const linkTarget = entry?.relPath || entry?.name || null;
   const linkKind = entry?.kind === 'dir' ? 'folder' : 'file';
@@ -47,11 +49,19 @@ export default function CreateKnowledgeModal({ target, onClose, onNavigateKnowle
       } else if (activeType === 'screenshot') {
         if (!imageFile) { setSubmitting(false); return; }
         const buffer = await imageFile.arrayBuffer();
+        // F3: 把图片 buffer 也带上 + OCR 选项。
+        const pngBuffer = new Uint8Array(buffer);
+        const runOcr = ocrChoice === 'ch' || ocrChoice === 'en';
         const res = await window.ipm.knowledge.create(projectName, {
-          type: 'screenshot', title: title || imageFile.name || '截图',
+          type: 'screenshot',
+          title: title || imageFile.name || '截图',
+          pngBuffer,
+          runOcr,
+          lang: ocrChoice === 'en' ? 'en' : 'ch',
+          runLlmSummary: false,
         }, domainOpts);
         itemId = res?.item?.id;
-        if (itemId) {
+        if (itemId && !isAttached) {
           const filePath = window.ipm.files?.getPathForFile?.(imageFile);
           if (filePath) {
             await window.ipm.knowledge.addLink(projectName, itemId, filePath, 'file', domainOpts);
@@ -63,7 +73,8 @@ export default function CreateKnowledgeModal({ target, onClose, onNavigateKnowle
         itemId = res?.item?.id;
       }
 
-      if (itemId && linkTarget) {
+      // F1: 附属壳（外部导入项目）禁止 addLink — 仅支持收集，不支持文件关联。
+      if (itemId && linkTarget && !isAttached) {
         await window.ipm.knowledge.addLink(projectName, itemId, linkTarget, linkKind, domainOpts);
       }
       setSuccess(true);
@@ -72,7 +83,7 @@ export default function CreateKnowledgeModal({ target, onClose, onNavigateKnowle
     } finally {
       setSubmitting(false);
     }
-  }, [submitting, activeType, title, content, url, imageFile, projectName, domain, linkTarget, linkKind]);
+  }, [submitting, activeType, title, content, url, imageFile, projectName, domain, linkTarget, linkKind, isAttached, ocrChoice]);
 
   const canSubmit = activeType === 'snippet' ? (title || content)
     : activeType === 'screenshot' ? !!imageFile
@@ -232,6 +243,49 @@ export default function CreateKnowledgeModal({ target, onClose, onNavigateKnowle
                 )}
               </div>
               <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImageSelect} />
+
+              {/* F3: OCR 识别选项 */}
+              {imageFile && (
+                <div style={{ marginTop: 14, padding: '12px 14px', background: '#F9FAFB', borderRadius: 10, border: '1px solid #F3F4F6' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                    <Sparkles size={13} color="#3e4b9c" />
+                    <span style={{ fontSize: 12, fontWeight: 500, color: '#374151' }}>是否识别图片中的文字？</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {[
+                      { key: 'skip', label: '跳过', tip: '不识别，仅保存图片' },
+                      { key: 'ch', label: '识别(中文)', tip: 'PaddleOCR 中文模型（兼容英文与数字）' },
+                      { key: 'en', label: '识别(English)', tip: 'PaddleOCR 英文优化模型' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        title={opt.tip}
+                        onClick={() => setOcrChoice(opt.key)}
+                        style={{
+                          flex: 1,
+                          padding: '6px 8px',
+                          borderRadius: 6,
+                          border: ocrChoice === opt.key ? '1.5px solid #3e4b9c' : '1.5px solid #E5E7EB',
+                          background: ocrChoice === opt.key ? 'rgba(62,75,156,0.06)' : 'white',
+                          color: ocrChoice === opt.key ? '#3e4b9c' : '#6B7280',
+                          fontSize: 11,
+                          cursor: 'pointer',
+                          fontWeight: ocrChoice === opt.key ? 500 : 400,
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  {ocrChoice !== 'skip' && (
+                    <p style={{ fontSize: 10.5, color: '#9CA3AF', marginTop: 8, lineHeight: 1.5 }}>
+                      创建后将在后台识别（约 1–5 秒），识别完成后会自动生成一条独立的文字碎片，便于复用与编辑。
+                    </p>
+                  )}
+                </div>
+              )}
             </>
           )}
 
@@ -249,7 +303,7 @@ export default function CreateKnowledgeModal({ target, onClose, onNavigateKnowle
                   }}
                 />
               </div>
-              <p style={{ fontSize: 11, color: '#9CA3AF' }}>粘贴 URL 后将自动抓取网页内容和摘要</p>
+              <p style={{ fontSize: 11, color: '#9CA3AF' }}>系统会启动隐藏浏览器渲染网页，提取正文转 Markdown 并生成全页截图（支持 SPA / JS 渲染，需 5–30 秒）</p>
             </>
           )}
         </div>
@@ -260,7 +314,9 @@ export default function CreateKnowledgeModal({ target, onClose, onNavigateKnowle
           borderTop: '1px solid #F3F4F6',
         }}>
           <div style={{ fontSize: 11, color: '#9CA3AF' }}>
-            {linkTarget ? (
+            {isAttached && linkTarget ? (
+              <span title="外部导入项目仅支持收集，不支持文件关联">外部导入项目 · 仅收集，不关联文件</span>
+            ) : linkTarget ? (
               <span>将自动关联至：<strong style={{ color: '#6B7280' }}>{entry?.name || linkTarget}</strong></span>
             ) : (
               <span>属于项目：{projectName}</span>

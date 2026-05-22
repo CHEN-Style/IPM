@@ -61,6 +61,16 @@ contextBridge.exposeInMainWorld('ipm', {
   screenshots: {
     saveClipboardImage: (projectName, token, opts = {}) => ipcRenderer.invoke('screenshots/saveClipboardImage', { projectName, token, ...opts }),
   },
+  // F3 OCR: 内置 PaddleOCR PP-OCRv5 mobile（中/英）
+  //   - recognize(imagePath, { lang })       → 用绝对路径读取图片识别
+  //   - recognizeBuffer(buffer, { lang })    → 直接传 PNG/JPEG 二进制
+  //   - status()                              → 查询模型加载状态、当前语言、模型目录
+  // 返回结构：{ ok, result: { text, lines, confidence, lang } } 或 { ok:false, error }
+  ocr: {
+    recognize: (imagePath, opts = {}) => ipcRenderer.invoke('ocr/recognize', { imagePath, ...opts }),
+    recognizeBuffer: (buffer, opts = {}) => ipcRenderer.invoke('ocr/recognizeBuffer', { buffer, ...opts }),
+    status: () => ipcRenderer.invoke('ocr/status'),
+  },
   knowledge: {
     list: (projectName, filters = {}, opts = {}) => ipcRenderer.invoke('knowledge/list', { projectName, ...filters, ...opts }),
     get: (projectName, id, opts = {}) => ipcRenderer.invoke('knowledge/get', { projectName, id, ...opts }),
@@ -79,6 +89,10 @@ contextBridge.exposeInMainWorld('ipm', {
     stats: (projectName, opts = {}) => ipcRenderer.invoke('knowledge/stats', { projectName, ...opts }),
     createWebclip: (projectName, url, opts = {}) => ipcRenderer.invoke('knowledge/createWebclip', { projectName, url, ...opts }),
     addWebclipImage: (projectName, itemId, pngBuffer, opts = {}) => ipcRenderer.invoke('knowledge/addWebclipImage', { projectName, itemId, pngBuffer, ...opts }),
+    removeWebclipImage: (projectName, itemId, imagePath, opts = {}) => ipcRenderer.invoke('knowledge/removeWebclipImage', { projectName, itemId, imagePath, ...opts }),
+    // F3: 手动触发 OCR — 返回 { ok, recognized, text, confidence, lang }；
+    // 会同步写回原碎片 + 产出独立 snippet 知识碎片。
+    runOcr: (projectName, itemId, opts = {}) => ipcRenderer.invoke('knowledge/runOcr', { projectName, itemId, ...opts }),
     listGlobal: (filters = {}) => ipcRenderer.invoke('knowledge/listGlobal', filters),
     statsGlobal: () => ipcRenderer.invoke('knowledge/statsGlobal'),
     createDraft: (item) => ipcRenderer.invoke('knowledge/createDraft', item),
@@ -99,19 +113,33 @@ contextBridge.exposeInMainWorld('ipm', {
   },
   projects: {
     list: () => ipcRenderer.invoke('projects/list'),
-    create: (name) => ipcRenderer.invoke('projects/create', { name }),
+    // W1: create(name) 兼容旧调用；create(name, { template }) 支持模板选择。
+    // 模板取值：'default'（含四类业务夹）/ 'blank'（仅系统目录）。
+    create: (name, opts) => ipcRenderer.invoke('projects/create', { name, template: opts?.template }),
     getCurrent: () => ipcRenderer.invoke('projects/getCurrent'),
     setCurrent: (name) => ipcRenderer.invoke('projects/setCurrent', { name }),
     setStatus: (name, status) => ipcRenderer.invoke('projects/setStatus', { name, status }),
     delete: (name) => ipcRenderer.invoke('projects/delete', { name }),
+    // W3b: 项目重命名（联动 state / structure / DB 引用）
+    rename: (oldName, newName) => ipcRenderer.invoke('projects/rename', { oldName, newName }),
+    // F1: 外部文件夹「附属导入」。importAttached() 弹出系统文件夹选择对话框；
+    // relocateAttached(name) 重新定位失效的外部根；refreshAttached(name) 手动重新扫描。
+    importAttached: (path) => ipcRenderer.invoke('projects/importAttached', { path }),
+    relocateAttached: (name, newPath) => ipcRenderer.invoke('projects/relocateAttached', { name, newPath }),
+    refreshAttached: (name) => ipcRenderer.invoke('projects/refreshAttached', { name }),
   },
   cases: {
     list: () => ipcRenderer.invoke('cases/list'),
-    create: (name) => ipcRenderer.invoke('cases/create', { name }),
+    create: (name, opts) => ipcRenderer.invoke('cases/create', { name, template: opts?.template }),
     getCurrent: () => ipcRenderer.invoke('cases/getCurrent'),
     setCurrent: (name) => ipcRenderer.invoke('cases/setCurrent', { name }),
     setStatus: (name, status) => ipcRenderer.invoke('cases/setStatus', { name, status }),
     delete: (name) => ipcRenderer.invoke('cases/delete', { name }),
+    rename: (oldName, newName) => ipcRenderer.invoke('cases/rename', { oldName, newName }),
+    // F1: 同 projects.*Attached
+    importAttached: (path) => ipcRenderer.invoke('cases/importAttached', { path }),
+    relocateAttached: (name, newPath) => ipcRenderer.invoke('cases/relocateAttached', { name, newPath }),
+    refreshAttached: (name) => ipcRenderer.invoke('cases/refreshAttached', { name }),
   },
   localFolders: {
     list: () => ipcRenderer.invoke('localFolders/list'),
@@ -225,13 +253,61 @@ contextBridge.exposeInMainWorld('ipm', {
     getDataPath: () => ipcRenderer.invoke('analytics/getDataPath'),
   },
   knowclaw: {
-    send: (message) => ipcRenderer.invoke('knowclaw:send', { message }),
+    // U8b-3: `images` is an optional second argument carrying an array
+    // of `{ mimeType, data }` objects (data = base64 string without
+    // the `data:...;base64,` prefix). Main-process validates and
+    // forwards it to `AgentSession.prompt(text, { images })`. Older
+    // call sites that only pass `message` keep working unchanged
+    // because `images` defaults to undefined and the IPC handler
+    // sanitises non-arrays down to `[]`.
+    send: (message, images) => ipcRenderer.invoke('knowclaw:send', { message, images }),
     abort: () => ipcRenderer.invoke('knowclaw:abort'),
+    // U4: steer / followUp / clearQueue. `steer` injects an interrupt
+    // at the next tool-call boundary; `followUp` queues the message
+    // and lets pi drain it when the current task settles; `clearQueue`
+    // drops everything still waiting in either lane.
+    // U8b-3: steer/followUp accept the same optional `images` arg.
+    steer: (message, images) => ipcRenderer.invoke('knowclaw:steer', { message, images }),
+    followUp: (message, images) => ipcRenderer.invoke('knowclaw:followUp', { message, images }),
+    clearQueue: () => ipcRenderer.invoke('knowclaw:clearQueue'),
+    // U5: manual context compaction. `customInstructions` is an
+    // optional plain string that pi appends to its summarization
+    // prompt; the V2 UI currently passes undefined (auto behaviour).
+    compact: (customInstructions) =>
+      ipcRenderer.invoke('knowclaw:compact', { customInstructions }),
+    // U6: persistent sub-agent kill-switch. When disabled, the next
+    // session is created without the `delegate_task` customTool so
+    // the model can't even see it. Toggling does NOT mutate the
+    // active session — change takes effect on the next new/open/fork.
+    getSubAgentEnabled: () => ipcRenderer.invoke('knowclaw:getSubAgentEnabled'),
+    setSubAgentEnabled: (enabled) =>
+      ipcRenderer.invoke('knowclaw:setSubAgentEnabled', { enabled: Boolean(enabled) }),
     newSession: () => ipcRenderer.invoke('knowclaw:newSession'),
     continueRecent: () => ipcRenderer.invoke('knowclaw:continueRecent'),
     listModels: () => ipcRenderer.invoke('knowclaw:listModels'),
     setModel: (providerId, modelId) => ipcRenderer.invoke('knowclaw:setModel', { providerId, modelId }),
+    setThinkingLevel: (level) => ipcRenderer.invoke('knowclaw:setThinkingLevel', { level }),
+    // U1: dynamic workspace controls. `setCwd(null)` returns to global
+    // mode (cwd = userfile root); any non-null value must be an
+    // absolute directory path that exists on disk.
+    setCwd: (cwd) => ipcRenderer.invoke('knowclaw:setCwd', { cwd }),
+    getCwd: () => ipcRenderer.invoke('knowclaw:getCwd'),
+    listWorkspaces: () => ipcRenderer.invoke('knowclaw:listWorkspaces'),
+    chooseDirectory: () => ipcRenderer.invoke('knowclaw:chooseDirectory'),
+    createWorkspace: (label) => ipcRenderer.invoke('knowclaw:createWorkspace', { label }),
+    // Open a workspace folder in the OS file manager. Pass `null` /
+    // omit `path` to open the *active* workspace.
+    openInExplorer: (folderPath) =>
+      ipcRenderer.invoke('knowclaw:openInExplorer', { path: folderPath || null }),
+    // U1 hotfix-2: persistent pin / hide of arbitrary workspace
+    // paths so the dropdown can act as the user's curated list
+    // rather than a derived view of the filesystem.
+    pinWorkspace: (folderPath) =>
+      ipcRenderer.invoke('knowclaw:pinWorkspace', { path: folderPath }),
+    hideWorkspace: (folderPath) =>
+      ipcRenderer.invoke('knowclaw:hideWorkspace', { path: folderPath }),
     getStatus: () => ipcRenderer.invoke('knowclaw:getStatus'),
+    rescanBash: () => ipcRenderer.invoke('knowclaw:rescanBash'),
     listSessions: () => ipcRenderer.invoke('knowclaw:listSessions'),
     openSession: (sessionFile) => ipcRenderer.invoke('knowclaw:openSession', { sessionFile }),
     deleteSession: (sessionFile) => ipcRenderer.invoke('knowclaw:deleteSession', { sessionFile }),
@@ -242,5 +318,18 @@ contextBridge.exposeInMainWorld('ipm', {
       ipcRenderer.on('knowclaw:event', handler);
       return () => ipcRenderer.removeListener('knowclaw:event', handler);
     },
+    // U3: install-confirmation roundtrip. Main process gates every
+    // `pip install` / `npm install` (and friends) issued by the
+    // model — it pushes a `knowclaw:confirm-install` event with a
+    // `{ requestId, manager, packages, command, cwd }` payload, then
+    // awaits the renderer's reply via `replyConfirmInstall`.
+    onConfirmInstall: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('knowclaw:confirm-install', handler);
+      return () => ipcRenderer.removeListener('knowclaw:confirm-install', handler);
+    },
+    replyConfirmInstall: (requestId, allow) =>
+      ipcRenderer.invoke('knowclaw:confirm-install-reply', { requestId, allow: Boolean(allow) }),
   },
 });

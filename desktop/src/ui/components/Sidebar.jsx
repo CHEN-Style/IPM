@@ -244,6 +244,10 @@ const Sidebar = ({
                     <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: `${ACCENT}26`, color: ACCENT }}>当前</span>
                   )}
                 </button>
+                {/* G1.1b: 提示老用户入口已迁移到底部，避免「老地方找不到」。 */}
+                <div className="px-3 pb-2 text-[10px]" style={{ color: '#525252' }}>
+                  已迁移至侧边栏底部 ↓
+                </div>
                 <button
                   type="button"
                   onClick={() => { setWorkspaceMenuOpen(false); onUiModeChange?.('main'); }}
@@ -407,8 +411,35 @@ const Sidebar = ({
         </div>
       </div>
 
-      {/* ── Bottom: pin + user ── */}
+      {/* ── Bottom: floating mode + pin + user ── */}
       <div className="px-3 pb-4 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+        {/* G1.1b: 独立的「悬浮模式」入口，折叠态/展开态均可见可点。
+            旧入口在工作区下拉菜单里，发现性差；这里把它前移到底部，作为
+            常驻按钮，与 Pin 按钮形成「次要操作」分组。 */}
+        <button
+          type="button"
+          onClick={() => {
+            if (window?.ipm?.ui?.openFloating) {
+              window.ipm.ui.openFloating().catch(() => onUiModeChange?.('floating'));
+              return;
+            }
+            onUiModeChange?.('floating');
+          }}
+          className={`w-full flex items-center gap-2 rounded-md transition-colors mb-2 ${isCollapsed ? 'justify-center px-2 py-2' : 'px-3 py-2'}`}
+          style={{
+            background: '#1a1a1a',
+            border: '1px solid #2a2a2a',
+            color: '#a3a3a3',
+          }}
+          title="切换到悬浮窗 (Ctrl+Shift+Space)"
+          data-track="sidebar-open-floating-bottom"
+        >
+          <Layers size={13} />
+          {!isCollapsed && (
+            <span className="text-xs font-medium">悬浮模式</span>
+          )}
+        </button>
+
         {/* Pin toggle */}
         <button
           type="button"

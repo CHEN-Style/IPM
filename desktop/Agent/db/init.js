@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
 
-const CURRENT_VERSION = 8;
+const CURRENT_VERSION = 9;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS suggestions (
@@ -285,6 +285,12 @@ export function initDb(db) {
       );
       CREATE INDEX IF NOT EXISTS idx_btp_timeline ON board_timeline_points(timeline_id);
     `);
+  }
+
+  if (version < 9) {
+    // W3a: 软清理孤儿知识碎片需要 archived_at 时间戳。
+    // archived 列在 v3 (MIGRATION_V3) 已建，此处仅补时间戳列。
+    safeAlter(db, "ALTER TABLE knowledge_items ADD COLUMN archived_at TEXT DEFAULT NULL");
   }
 
   if (version < CURRENT_VERSION) {

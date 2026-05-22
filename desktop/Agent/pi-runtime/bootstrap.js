@@ -26,6 +26,7 @@
 //
 // All failure paths return a structured error object — never throw.
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -47,6 +48,9 @@ import {
 import { describeSessionManager, makeSessionManager } from './sessionFactory.js';
 import { buildProjectTools } from './tools/projectTools.js';
 import { buildWebTools } from './tools/webTools.js';
+import { buildEnvTools } from './tools/envTools.js';
+import { buildDelegateTool } from './tools/delegateTool.js';
+import { buildTaskTool } from './tools/taskTool.js';
 import { buildKnowClawPrompt, describeKnowClawPrompt } from './promptBuilder.js';
 
 const TAG = '[KnowClaw]';
@@ -57,6 +61,23 @@ const TAG = '[KnowClaw]';
 // `<name>/SKILL.md` under here.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BUILTIN_SKILLS_DIR = path.join(__dirname, 'skills');
+
+// U2a: expose the built-in skills directory to skill scripts via an env var
+// so that SKILL.md instructions can reference shared helpers under
+// `_shared/` with an absolute, portable path. Without this, every Skill
+// would need to duplicate office/pdf helpers locally (or guess paths
+// relative to the user's cwd, which doesn't work because pi runs scripts
+// with cwd = the user workspace, not the skill directory).
+//
+// Concrete example from a SKILL.md:
+//   bash: python "$KNOWCLAW_SKILLS_DIR/_shared/office/validate.py" report.docx
+//
+// Set once on module load (idempotent across sessions). Never overwrite if
+// the env var was already supplied by the caller — useful for tests that
+// want to point at a fixture skills tree.
+if (!process.env.KNOWCLAW_SKILLS_DIR) {
+  process.env.KNOWCLAW_SKILLS_DIR = BUILTIN_SKILLS_DIR;
+}
 
 /**
  * Resolve the directory holding user-authored skills (Phase 8 follow-up).
@@ -77,6 +98,68 @@ function getUserSkillsRoot() {
 function log(...args) {
   // eslint-disable-next-line no-console
   console.log(TAG, ...args);
+}
+
+// ---------------------------------------------------------------------------
+// Bundled-bash plumbing
+//
+// IPM's main process (see `src/main/ipc/knowclaw.js → resolveBashShell()`)
+// figures out which `bash.exe` to use — preferring system Git for Windows,
+// falling back to the MinGit bundle shipped under `vendor/MinGit/` /
+// `resources/MinGit/`. It then exposes the absolute path via the
+// `KNOWCLAW_BASH_PATH` env var on this process.
+//
+// pi's SDK reads its `shellPath` from `<agentDir>/settings.json` (see
+// `SettingsManager.getShellPath()`); there is no in-process API to set it
+// before `createAgentSession()` builds its own SettingsManager. So we
+// write the field into settings.json ourselves right before each session
+// is created. We touch only the `shellPath` key, preserve any other
+// global settings the user (or future code) may have added, and tolerate
+// a missing / malformed file (treated as "start fresh").
+//
+// Idempotent: skipped when the env var is unset (Linux/macOS path) or
+// when the file already has the same value.
+function applyResolvedBashPath() {
+  const resolved = process.env.KNOWCLAW_BASH_PATH;
+  if (!resolved) return; // Nothing to do — pi will fall back to its own probe.
+
+  let agentDir;
+  try {
+    agentDir = getAgentDir();
+  } catch (err) {
+    log('applyResolvedBashPath: getAgentDir() failed:', err?.message || err);
+    return;
+  }
+  if (!agentDir) return;
+
+  const settingsPath = path.join(agentDir, 'settings.json');
+  let current = {};
+  try {
+    if (fs.existsSync(settingsPath)) {
+      const raw = fs.readFileSync(settingsPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        current = parsed;
+      }
+    }
+  } catch (err) {
+    // Malformed JSON: don't blow up — overwrite with a clean object that
+    // still carries our shellPath. Worst case the user loses unrelated
+    // settings.json edits, which we log loudly so anyone debugging can
+    // see exactly what happened.
+    log('applyResolvedBashPath: existing settings.json unreadable, will overwrite:', err?.message || err);
+    current = {};
+  }
+
+  if (current.shellPath === resolved) return; // Already up to date.
+  current.shellPath = resolved;
+  try {
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(settingsPath, JSON.stringify(current, null, 2), 'utf8');
+    log('applyResolvedBashPath: wrote shellPath →', resolved);
+  } catch (err) {
+    log('applyResolvedBashPath: write failed (non-fatal):', err?.message || err);
+  }
 }
 
 function summarizeEvent(event) {
@@ -148,6 +231,39 @@ function makeEventLogger(prefix = '[KnowClaw-PoC]') {
  * @param {string} [opts.sessionFile]  Required when mode === 'open'.
  * @param {object} [opts.toolDeps]     IPM business helpers for customTools.
  * @param {object} [opts.prefs]        IPM user preferences (e.g. userName) for prompt personalization.
+ * @param {'off' | 'minimal' | 'low' | 'medium' | 'high'} [opts.thinkingLevel='medium']
+ *                                     Extended thinking depth. pi SDK will clamp to the
+ *                                     model's supported levels (off for non-reasoning models).
+ * @param {boolean} [opts.noContextFiles=true]
+ *                                     U1: when `false`, pi's `DefaultResourceLoader` will
+ *                                     scan `cwd` (and its ancestor chain) for `AGENTS.md` /
+ *                                     `CLAUDE.md` project-context files and append them to
+ *                                     the system prompt. KnowClaw IPC sets this to `false`
+ *                                     for project-mode workspaces and keeps the default
+ *                                     `true` for "global" mode (cwd = userfile root).
+ * @param {Function} [opts.beforeToolCall]
+ *                                     U3: async hook `({ toolCall, args, assistantMessage,
+ *                                     context }, signal) => undefined | { block: true,
+ *                                     reason }`. Invoked by the pi agent-loop *before*
+ *                                     every tool execution. Returning `{ block: true }`
+ *                                     short-circuits the call and surfaces `reason` to
+ *                                     the model as an error result. KnowClaw uses this
+ *                                     to gate `pip install` / `npm install` commands
+ *                                     and hard-block `sudo apt install` style system
+ *                                     installers. pi's `AgentSession` constructor
+ *                                     installs its own `beforeToolCall` that delegates
+ *                                     to the extension runtime — we chain ours in front
+ *                                     of it so both run.
+ * @param {boolean} [opts.subAgentEnabled=true]
+ *                                     U6: when truthy (the default), register the
+ *                                     `delegate_task` customTool so the main agent can
+ *                                     spawn isolated sub-agent sessions. When `false`,
+ *                                     `delegate_task` is NOT registered (the model
+ *                                     literally cannot see/use it), giving the user a
+ *                                     hard kill-switch for sub-agent delegation. The
+ *                                     change takes effect on the *next* session
+ *                                     creation — existing sessions keep their tool
+ *                                     set frozen until they're disposed.
  * @returns {Promise<CreateSessionResult>}
  */
 export async function createSession(opts = {}) {
@@ -157,6 +273,11 @@ export async function createSession(opts = {}) {
   const sessionFile = opts.sessionFile || undefined;
   const toolDeps = opts.toolDeps && typeof opts.toolDeps === 'object' ? opts.toolDeps : null;
   const prefs = opts.prefs && typeof opts.prefs === 'object' ? opts.prefs : {};
+  const thinkingLevel = opts.thinkingLevel || 'medium';
+  // U6: sub-agent kill-switch. Default true (delegate_task registered);
+  // pass `false` to skip registration entirely so the model can't even
+  // see the tool.
+  const subAgentEnabled = opts.subAgentEnabled !== false;
 
   // --- 1. Read IPM config ---
   const ipmConfig = getIpmLlmConfig();
@@ -254,6 +375,77 @@ export async function createSession(opts = {}) {
     log('buildWebTools failed (continuing without web tools):', err?.message || err);
   }
 
+  // --- 8b.1 Build env-probe tools (U3) ---
+  // `check_environment` lets the model verify python/node/pip/npm/bash
+  // availability and look up specific packages BEFORE issuing
+  // `pip install` / `npm install`, which would otherwise trip the
+  // beforeToolCall install guard and prompt the user unnecessarily.
+  // Registered alongside the web tools so it's always available.
+  try {
+    const envTools = buildEnvTools();
+    customTools = customTools.concat(envTools);
+    log(`customTools: ${envTools.length} env tools registered (total ${customTools.length})`);
+  } catch (err) {
+    log('buildEnvTools failed (continuing without env tools):', err?.message || err);
+  }
+
+  // --- 8b.2 Build delegate_task tool (U6, conditional) ---
+  // Registers a customTool that lets the main agent spawn an isolated
+  // sub-agent (fresh AgentSession, in-memory SessionManager, restricted
+  // tool allowlist, no AGENTS.md scan) and synchronously collect a
+  // structured summary. The dependencies handed in here capture the
+  // *parent* session's identity (cwd, thinking, auth, model) so the
+  // sub-agent reuses the same provider/credentials without
+  // re-registering anything.
+  //
+  // Skipped entirely when `opts.subAgentEnabled === false` — the
+  // model literally won't see the tool, which is the user-facing
+  // "off switch" from the header SubAgentToggle. Failures here are
+  // non-fatal: we log and continue so the main session still works
+  // (worst case: no sub-agent delegation, identical to the off path).
+  if (subAgentEnabled) {
+    try {
+      const delegateTools = buildDelegateTool({
+        authStorage,
+        modelRegistry,
+        model,
+        parentCwd: cwd,
+        thinkingLevel,
+        parentBeforeToolCall: typeof opts.beforeToolCall === 'function' ? opts.beforeToolCall : null,
+        builtinSkillsDir: BUILTIN_SKILLS_DIR,
+        userSkillsRoot: getUserSkillsRoot(),
+        log,
+      });
+      customTools = customTools.concat(delegateTools);
+      log(`customTools: ${delegateTools.length} delegate tools registered (total ${customTools.length})`);
+    } catch (err) {
+      log('buildDelegateTool failed (continuing without sub-agent):', err?.message || err);
+    }
+  } else {
+    log('customTools: sub-agent delegation disabled by user — delegate_task NOT registered');
+  }
+
+  // --- 8b.3 Build task_manager tool (U7) ---
+  // Registers a customTool that lets the model maintain a session-scoped
+  // task checklist (Claude Code TodoWrite style). Each call atomically
+  // replaces the list and appends a snapshot to the session JSONL as a
+  // pi `CustomEntry` — that entry survives reload but does NOT enter
+  // LLM context (the model already knows the list via its own tool_call
+  // args, so re-injecting would waste tokens).
+  //
+  // We must register AFTER `makeSessionManager` (step 7) so we can
+  // inject the live sessionManager into the tool; the position here
+  // (post-delegate) is intentional so child sub-agents — which don't
+  // see `customTools` from the parent — can't recursively call
+  // task_manager either (D5).
+  try {
+    const taskTools = buildTaskTool({ sessionManager, log });
+    customTools = customTools.concat(taskTools);
+    log(`customTools: ${taskTools.length} task tools registered (total ${customTools.length})`);
+  } catch (err) {
+    log('buildTaskTool failed (continuing without task tracking):', err?.message || err);
+  }
+
   // --- 8c. Build ResourceLoader with KnowClaw system prompt (Phase 7) ---
   // The DefaultResourceLoader is normally constructed inside
   // createAgentSession. We construct it here so we can pass our custom
@@ -274,11 +466,24 @@ export async function createSession(opts = {}) {
       additionalSkillPaths.push(userSkillsRoot);
     }
 
+    // U1: when KnowClaw runs in "global" mode (cwd === userfile root)
+    // we keep `noContextFiles: true` so pi doesn't climb the IPM data
+    // tree looking for `AGENTS.md`/`CLAUDE.md`. When the IPC layer
+    // binds the session to a real workspace it passes
+    // `noContextFiles: false` so the workspace's own context files
+    // get scanned and prepended to the system prompt.
+    //
+    // Default remains `true` (the historical behaviour) so any future
+    // caller that forgets to pass the flag stays safe.
+    const noContextFiles = opts.noContextFiles !== undefined
+      ? Boolean(opts.noContextFiles)
+      : true;
+
     resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir: getAgentDir(),
       systemPrompt,
-      noContextFiles: true,
+      noContextFiles,
       additionalSkillPaths,
     });
     await resourceLoader.reload();
@@ -307,16 +512,24 @@ export async function createSession(opts = {}) {
 
   // --- 9. Create AgentSession ---
   log('creating session', { cwd });
+
+  // Make sure pi's SettingsManager picks up the bash path IPM resolved
+  // (see comment block on `applyResolvedBashPath`). Must run BEFORE
+  // `createAgentSession` because the SDK reads `settings.json` during
+  // its own SettingsManager construction.
+  applyResolvedBashPath();
+
   let session;
   let modelFallbackMessage;
   try {
+    log('thinkingLevel requested:', thinkingLevel);
     const result = await createAgentSession({
       cwd,
       sessionManager,
       authStorage,
       modelRegistry,
       model,
-      thinkingLevel: 'off',
+      thinkingLevel,
       customTools,
       resourceLoader,
     });
@@ -325,6 +538,40 @@ export async function createSession(opts = {}) {
   } catch (err) {
     log('createAgentSession failed:', err?.message || err);
     return { sessionId: null, resumed: false, sessionFile: smInfo.sessionFile, error: String(err?.message || err) };
+  }
+
+  // --- 9a. Chain the U3 install-guard hook onto the agent ---
+  //
+  // pi's `createAgentSession` doesn't expose `beforeToolCall` in its
+  // options, but the underlying `Agent` instance does carry the field
+  // (it's read by `agent-loop.js` before every tool execution). The
+  // `AgentSession` constructor installs its own hook that delegates
+  // to the extension runtime; we wrap that with ours so:
+  //
+  //   1. our install-guard runs first and can short-circuit dangerous
+  //      bash commands (sudo / apt / brew / ...) or require user
+  //      confirmation for pip/npm/pnpm installs;
+  //   2. if we *don't* block, we still call through to the original
+  //      hook so any future pi extension that registers a `tool_call`
+  //      handler keeps working.
+  //
+  // We monkey-patch *after* createAgentSession returns because the SDK
+  // does not let us pass this through cleanly. Future pi versions that
+  // add a public option here should let us delete this dance.
+  if (session && typeof opts.beforeToolCall === 'function') {
+    try {
+      const agent = session.agent;
+      const inner = agent.beforeToolCall;
+      agent.beforeToolCall = async (event, signal) => {
+        const mine = await opts.beforeToolCall(event, signal);
+        if (mine && mine.block) return mine;
+        if (typeof inner === 'function') return inner.call(agent, event, signal);
+        return undefined;
+      };
+      log('beforeToolCall: install-guard hook chained onto agent');
+    } catch (err) {
+      log('failed to install beforeToolCall hook (continuing without guard):', err?.message || err);
+    }
   }
 
   if (modelFallbackMessage) {

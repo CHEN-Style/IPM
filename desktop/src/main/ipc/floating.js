@@ -77,6 +77,7 @@ export function registerFloatingIpc({
     const { name: projectName, projectDir, domain } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
     const relPath = String(payload?.relPath ?? '');
     if (!relPath) throw new Error('目标路径不能为空');
+    // floating/deleteRelPath 只允许删 temp/ 下的文件，temp/ 始终在壳内 → resolveInside 即可。
     const target = resolveInside(projectDir, relPath);
     if (!fs.existsSync(target)) return { ok: true, projectName, deleted: false };
     // Only allow undo deletion inside temp/

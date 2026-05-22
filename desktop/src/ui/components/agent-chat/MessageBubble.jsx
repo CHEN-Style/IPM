@@ -1,9 +1,11 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   ChevronDown, ChevronRight, Wrench, Loader2,
-  Check, X, Undo2, Sparkles,
+  Check, X, Undo2, Sparkles, Zap, MessageSquare,
 } from 'lucide-react';
 import { marked } from 'marked';
+
+import TaskCard from '../knowclaw-v2/TaskCard.jsx';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -73,6 +75,46 @@ function ThinkingIndicator() {
   );
 }
 
+/* ── Thinking block (U0: extended-thinking stream) ── */
+
+function ThinkingBlock({ thinking, isStreaming }) {
+  // While the model is still emitting thinking, force the block open so
+  // the user can watch the reasoning live. Once the turn ends we let the
+  // user collapse it back via the toggle (default collapsed).
+  const [userExpanded, setUserExpanded] = useState(false);
+  if (!thinking) return null;
+  const expanded = isStreaming || userExpanded;
+  const label = isStreaming ? '思考中...' : `思考过程 (${thinking.length} 字)`;
+
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        onClick={() => !isStreaming && setUserExpanded((v) => !v)}
+        disabled={isStreaming}
+        className={`flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 transition-colors ${
+          isStreaming ? 'cursor-default' : 'cursor-pointer'
+        }`}
+        title={isStreaming ? '正在思考' : (expanded ? '收起思考过程' : '展开思考过程')}
+      >
+        {isStreaming ? (
+          <Loader2 size={12} className="animate-spin" />
+        ) : expanded ? (
+          <ChevronDown size={12} />
+        ) : (
+          <ChevronRight size={12} />
+        )}
+        <span className="italic">{label}</span>
+      </button>
+      {expanded && (
+        <div className="mt-1.5 pl-3 border-l-2 border-slate-200 text-xs text-slate-400 leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto font-mono">
+          {thinking}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Tool status config ── */
 
 const STATUS_CONFIG = {
@@ -85,10 +127,25 @@ const STATUS_CONFIG = {
 
 /* ── Tool call card ── */
 
+// U3: tail the last N lines of a long stdout snapshot so the inline
+// "live output" stripe stays compact. The full snapshot is still
+// available behind the "展开全部" toggle.
+function tailLines(text, n) {
+  if (!text) return '';
+  const lines = String(text).split(/\r?\n/);
+  if (lines.length <= n) return lines.join('\n');
+  return lines.slice(-n).join('\n');
+}
+
 const ToolCallCard = ({ tool, projectName, domain }) => {
   const [expanded, setExpanded] = useState(false);
   const [undoState, setUndoState] = useState('idle');
   const undoTimer = useRef(null);
+  // U3: when the live stream of stdout/stderr is long, default to a
+  // collapsed (tail-only) view and let the user expand to read the
+  // full buffer. Independent from the "result" expand state above
+  // because the live stream disappears the moment the tool finishes.
+  const [streamExpanded, setStreamExpanded] = useState(false);
 
   useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
@@ -97,6 +154,8 @@ const ToolCallCard = ({ tool, projectName, domain }) => {
   const isBusy = tool.status === 'running' || tool.status === 'interrupted' || tool.status === 'confirmed';
   const canExpand = !isBusy && tool.result;
   const showUndo = tool.undoActionId && tool.status === 'done' && undoState !== 'done';
+  const streamingStdout = isBusy ? (tool.streamingStdout || '') : '';
+  const streamLineCount = streamingStdout ? streamingStdout.split(/\r?\n/).length : 0;
 
   const handleUndo = async (e) => {
     e.stopPropagation();
@@ -151,6 +210,35 @@ const ToolCallCard = ({ tool, projectName, domain }) => {
         </div>
       )}
 
+      {/* U3: live stdout/stderr while bash (and similar long-running
+          tools) execute. Shown only while the tool is still busy —
+          the moment `tool_execution_end` arrives the streaming
+          snapshot is cleared in favour of `tool.result`. */}
+      {streamingStdout && (
+        <div className="border-t border-gray-100">
+          <pre
+            className="text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words overflow-y-auto"
+            style={{
+              background: '#0f172a',
+              color: '#e2e8f0',
+              padding: '8px 12px',
+              maxHeight: streamExpanded ? '20rem' : '8rem',
+            }}
+          >
+            {streamExpanded ? streamingStdout : tailLines(streamingStdout, 8)}
+          </pre>
+          {streamLineCount > 8 && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setStreamExpanded((v) => !v); }}
+              className="w-full px-3 py-1 text-[10px] text-slate-400 hover:text-slate-200 bg-slate-900/90 hover:bg-slate-900 transition-colors border-t border-slate-800"
+            >
+              {streamExpanded ? `收起 · ${streamLineCount} 行` : `展开全部 · ${streamLineCount} 行`}
+            </button>
+          )}
+        </div>
+      )}
+
       {showUndo && (
         <div className="px-3.5 py-2 border-t border-gray-100 bg-white flex justify-end">
           <button
@@ -176,9 +264,82 @@ const ToolCallCard = ({ tool, projectName, domain }) => {
   );
 };
 
+/* ── U8b-8: user image attachments + lightbox ── */
+
+function attachmentDataUrl(att) {
+  if (!att?.data || !att?.mimeType) return '';
+  const data = String(att.data);
+  if (data.startsWith('data:')) return data;
+  return `data:${att.mimeType};base64,${data}`;
+}
+
+function UserAttachments({ attachments }) {
+  const [lightboxSrc, setLightboxSrc] = useState(null);
+  if (!attachments?.length) return null;
+
+  return (
+    <>
+      <div className="flex flex-wrap gap-1.5 mb-2 justify-end">
+        {attachments.map((att, i) => {
+          const src = attachmentDataUrl(att);
+          if (!src) return null;
+          return (
+            <button
+              key={`${att.mimeType}-${i}`}
+              type="button"
+              onClick={() => setLightboxSrc(src)}
+              className="block w-16 h-16 rounded-lg overflow-hidden border border-gray-200 hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
+              title="点击查看大图"
+            >
+              <img src={src} alt="" className="w-full h-full object-cover" />
+            </button>
+          );
+        })}
+      </div>
+      {lightboxSrc && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-6"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setLightboxSrc(null)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setLightboxSrc(null); }}
+        >
+          <button
+            type="button"
+            className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
+            onClick={() => setLightboxSrc(null)}
+            title="关闭"
+          >
+            <X size={20} />
+          </button>
+          <img
+            src={lightboxSrc}
+            alt=""
+            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
 /* ── Message bubble ── */
 
 const MessageBubble = ({ message, projectName, domain }) => {
+  // U7: highest-priority branch — `kind:'tasks'` system bubbles are
+  // rendered as a checklist card, not as a normal text/system bubble.
+  // We bail out BEFORE any other branch (including the system-text
+  // pill below) so an empty `message.content` doesn't render a stray
+  // grey pill alongside the card.
+  if (message.kind === 'tasks') {
+    return (
+      <div className="mb-4">
+        <TaskCard tasks={message.tasks} ts={message.ts} />
+      </div>
+    );
+  }
+
   if (message.role === 'system') {
     return (
       <div className="flex justify-center my-4">
@@ -193,12 +354,43 @@ const MessageBubble = ({ message, projectName, domain }) => {
   const renderedHtml = useMemo(() => renderMarkdown(message.content), [message.content]);
 
   if (isUser) {
+    // U4: when the user injected this message via the steer/followUp
+    // queue (KnowClawV2 only — legacy chats never set `message.kind`),
+    // hang a small badge above the bubble so the transcript clearly
+    // marks "this was an interrupt" vs "this was queued" vs "this
+    // was a fresh turn". The badge is purely informational; the
+    // bubble itself keeps the same styling so existing screenshots
+    // / visual regression baselines stay stable.
+    const kind = message.kind;
+    const showBadge = kind === 'steer' || kind === 'followUp';
     return (
       <div className="flex justify-end mb-6">
-        <div className="max-w-[75%]">
-          <div className="px-4 py-3 rounded-2xl rounded-br-sm bg-gray-100 text-gray-800 text-sm leading-relaxed whitespace-pre-wrap">
-            {message.content}
-          </div>
+        <div className="max-w-[75%] flex flex-col items-end">
+          {showBadge && (
+            <div
+              className={`mb-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${
+                kind === 'steer'
+                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                  : 'bg-slate-50 text-slate-600 border-slate-200'
+              }`}
+              title={
+                kind === 'steer'
+                  ? '打断 - 在下一个工具间隙立即送达 agent'
+                  : '追问 - agent 处理完当前任务后再处理'
+              }
+            >
+              {kind === 'steer' ? <Zap size={10} /> : <MessageSquare size={10} />}
+              <span>{kind === 'steer' ? '打断' : '追问'}</span>
+            </div>
+          )}
+          {message.attachments?.length > 0 && (
+            <UserAttachments attachments={message.attachments} />
+          )}
+          {message.content ? (
+            <div className="px-4 py-3 rounded-2xl rounded-br-sm bg-gray-100 text-gray-800 text-sm leading-relaxed whitespace-pre-wrap">
+              {message.content}
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -211,6 +403,15 @@ const MessageBubble = ({ message, projectName, domain }) => {
           <Sparkles size={14} className="text-gray-500" strokeWidth={1.5} />
         </div>
         <div className="flex-1 min-w-0">
+          {/* U0: thinking stream sits above the final answer so the
+              user can watch reasoning unfold before content arrives. */}
+          {message.thinking && (
+            <ThinkingBlock
+              thinking={message.thinking}
+              isStreaming={Boolean(message.streaming && !message.content)}
+            />
+          )}
+
           {message.content ? (
             <>
               <div
@@ -221,7 +422,10 @@ const MessageBubble = ({ message, projectName, domain }) => {
                 <span className="inline-block w-1.5 h-4 bg-gray-400 animate-pulse rounded-sm ml-0.5 align-text-bottom" />
               )}
             </>
-          ) : message.streaming ? (
+          ) : message.streaming && !message.thinking ? (
+            // Only show the generic "thinking..." spinner when we have
+            // neither real thinking_delta nor text yet — otherwise the
+            // ThinkingBlock above already conveys progress.
             <ThinkingIndicator />
           ) : null}
 

@@ -1,3 +1,14 @@
+// F1 (DEPRECATED): 此模块在 F1 阶段被「附属导入」(`projects/importAttached` /
+// `cases/importAttached`) 完全取代。前端已不再展示本模块管理的「本地文件夹」分组，
+// `useLocalFolders` Hook 中的导入入口现已转走 importAttached。
+//
+// 本文件保留是为了兼容仍持有 state.localFolders 数组的旧用户：
+//   - localFolders/list 仍可返回历史数据，方便用户检视；
+//   - localFolders/remove 仍可清理过时记录；
+//   - localFolders/import 暂保留但前端不再触发，避免老的快捷键 / 第三方触发崩溃。
+//
+// 计划在确认所有用户都已迁移后删除。新代码不应依赖这里的 IPC。
+
 import fs from 'node:fs';
 import path from 'node:path';
 

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, shell, clipboard, protocol, net } from 'electron';
+import { app, BrowserWindow, Menu, ipcMain, dialog, shell, clipboard, protocol, net, globalShortcut, Tray } from 'electron';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -13,6 +13,7 @@ import { registerPrefsIpc } from './main/ipc/prefs.js';
 import { registerMetaIpc } from './main/ipc/meta.js';
 import { registerAiStorageIpc } from './main/ipc/aiStorage.js';
 import { registerExplorerIpc } from './main/ipc/explorer.js';
+import { remapInternalPath as pathRemapInternal, cleanupDeletedPath as pathCleanupDeleted } from '../Agent/storage/pathRemapper.js';
 import { registerProjectsIpc } from './main/ipc/projects.js';
 import { registerCasesIpc } from './main/ipc/cases.js';
 import { registerSnippetsIpc } from './main/ipc/snippets.js';
@@ -21,12 +22,14 @@ import { registerFloatingIpc } from './main/ipc/floating.js';
 import { registerUiIpc } from './main/ipc/ui.js';
 import { registerClassifyRulesIpc } from './main/ipc/classifyRules.js';
 import { registerClassifyEventsIpc } from './main/ipc/classifyEvents.js';
-import { seedDefaultRules } from '../Agent/storage/classifyRules.js';
+// W2: seedDefaultRules 不再在新建时调用，但保留模块以备未来「导入模板规则」。
+// import { seedDefaultRules } from '../Agent/storage/classifyRules.js';
 import { registerKnowClawIpc } from './main/ipc/knowclaw.js';
 import { registerPreferencesIpc } from './main/ipc/preferences.js';
 import { registerKnowledgeIpc } from './main/ipc/knowledge.js';
 import { registerAnalyticsIpc, uploadPendingAnalytics } from './main/ipc/analytics.js';
 import { registerSearchIpc } from './main/ipc/search.js';
+import { registerOcrIpc } from './main/ipc/ocr.js';
 import { ClassifyTracker } from './main/classifyTracker.js';
 import { getProjectDb, closeProjectDb, closeAllDbs } from '../Agent/db/index.js';
 import { getSupervisorDb, closeSupervisorDb } from '../Agent/db/supervisorDb.js';
@@ -186,6 +189,93 @@ const getSnippetScreenshotsDir = (projectDir) => path.join(getSnippetsDir(projec
 const getClipboardRecordPath = (projectDir) => path.join(getSnippetsMetaDir(projectDir), 'clipboard-record.json');
 const getScreenshotRecordPath = (projectDir) => path.join(getSnippetsMetaDir(projectDir), 'screenshots-record.json');
 
+// ===== F1 · Attached project (external folder) helpers =====
+//
+// 附属壳 = 数据存储区下的项目壳，业务文件在外部目录。结构：
+//   projects/{shellName}/meta/external-link.json  → { rootPath, broken, ... }
+//   projects/{shellName}/meta|temp|snippets       → 系统目录（壳内）
+// 所有"内容文件"（业务路径）通过 resolveContentPath 解析到外部根。
+const getExternalLinkPath = (projectDir) =>
+  path.join(getProjectMetaDir(projectDir), 'external-link.json');
+
+const isAttachedProject = (projectDir) => {
+  if (!projectDir) return false;
+  try {
+    return fs.existsSync(getExternalLinkPath(projectDir));
+  } catch {
+    return false;
+  }
+};
+
+const readExternalLink = (projectDir) => {
+  const p = getExternalLinkPath(projectDir);
+  if (!fs.existsSync(p)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf-8'));
+  } catch {
+    return null;
+  }
+};
+
+const writeExternalLink = (projectDir, doc) => {
+  const p = getExternalLinkPath(projectDir);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const payload = {
+    schemaVersion: 1,
+    rootPath: '',
+    importedAt: new Date().toISOString(),
+    lastScanAt: '',
+    lastScanStatus: '',
+    broken: false,
+    brokenReason: '',
+    ...(doc || {}),
+  };
+  fs.writeFileSync(p, JSON.stringify(payload, null, 2), 'utf-8');
+  return payload;
+};
+
+const getExternalRootPath = (projectDir) => {
+  const link = readExternalLink(projectDir);
+  if (!link || !link.rootPath) return null;
+  return String(link.rootPath);
+};
+
+// 系统路径（temp/snippets/meta）始终走壳内；业务路径走外部根。
+const isAttachedSystemRel = (relPath) => {
+  const rp = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!rp) return true; // root itself is logically the shell root for metadata
+  if (rp === 'temp' || rp.startsWith('temp/')) return true;
+  if (rp === 'snippets' || rp.startsWith('snippets/')) return true;
+  if (rp === 'meta' || rp.startsWith('meta/')) return true;
+  return false;
+};
+
+// F1 核心：双根路径解析。
+// - 附属壳的"业务路径" → 外部根
+// - 附属壳的"系统路径"（temp/snippets/meta）→ 壳内
+// - 原生项目 → 全部壳内（行为不变）
+// 当 relPath 为空（即"项目根"）时，附属壳返回外部根（用于 explorer/list 根视图）。
+const resolveContentPath = (projectDir, relPath) => {
+  const rp = String(relPath || '');
+  if (!isAttachedProject(projectDir)) {
+    return resolveInside(projectDir, rp);
+  }
+  // attached
+  const norm = rp.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
+  if (norm === '') {
+    // root → external root
+    const ext = getExternalRootPath(projectDir);
+    if (!ext) throw new Error('附属壳的外部根路径未配置');
+    return path.resolve(ext);
+  }
+  if (isAttachedSystemRel(norm)) {
+    return resolveInside(projectDir, norm);
+  }
+  const ext = getExternalRootPath(projectDir);
+  if (!ext) throw new Error('附属壳的外部根路径未配置');
+  return resolveInside(ext, norm);
+};
+
 const isSystemFolderRelPath = (relPath) => {
   const rp = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
   if (!rp) return true; // root record is also "system"
@@ -220,8 +310,8 @@ const isProtectedRelPath = (relPath) => {
 
 const isProtectedFolderNameRelPath = (relPath) => {
   const rp = normalizeRelPathPosix(relPath);
-  // These folders cannot be renamed/moved/deleted as folders (but their contents may be handled separately).
-  if (WORK_BIZ_FOLDERS.includes(rp)) return true;
+  // W1: 业务文件夹（收到资料/过程文档/调研研究/交付成果）不再受名称级保护，
+  // 用户可自由删除/重命名/移动。仅系统目录保留保护。
   if (rp === 'snippets') return true;
   if (rp === 'meta') return true;
   if (rp === 'temp') return true;
@@ -338,27 +428,44 @@ const triggerAutoClassifyToAiStorage = async ({ domain, projectName, projectDir,
   }
 };
 
-const ensureProjectStructure = (projectName, domain = 'projects') => {
+const ensureProjectStructure = (projectName, domain = 'projects', opts = {}) => {
   const d = normalizeWorkspaceDomain(domain);
   const effectiveName = projectName || (d === 'study' ? STUDY_WORKSPACE_NAME : projectName);
   const projectDir = path.join(getWorkspaceRoot(d), projectName || '');
 
-  // vNext default structure:
-  // - Projects/Cases business: 收到资料 / 过程文档 / 调研研究 / 交付成果
-  // - Study business: 模板/案例/PPT/专业文章/调研报告/读书笔记/奇思妙想/素材库 (+ 模板子类)
-  // - System: snippets / temp / meta
-  const bizFolders = d === 'study' ? STUDY_BIZ_FOLDERS : WORK_BIZ_FOLDERS;
-  for (const f of bizFolders) {
-    fs.mkdirSync(path.join(projectDir, f), { recursive: true });
-  }
-  if (d === 'study') {
-    for (const sub of STUDY_TEMPLATE_FOLDERS) {
-      fs.mkdirSync(path.join(projectDir, '模板', sub), { recursive: true });
-    }
-  }
+  // W1: 模板参数控制首次创建时是否落地业务文件夹。
+  // - 'default'：保留原有四类（项目/案件）或学习域固定结构（学习域不受 D2 影响）。
+  // - 'blank' ：仅创建系统目录，业务夹完全由用户自定义。
+  const template = opts.template === 'blank' ? 'blank' : 'default';
+
+  // 系统目录始终保证存在（已删 = 损坏，需补齐）
   fs.mkdirSync(getSnippetsDir(projectDir), { recursive: true });
   fs.mkdirSync(getProjectMetaDir(projectDir), { recursive: true });
   fs.mkdirSync(path.join(projectDir, 'temp'), { recursive: true });
+
+  // W1: 业务文件夹仅在「首次初始化」时按模板创建，老项目反复调用本函数不会
+  // 再次重建用户已删除的业务夹（RW-W1-2 缓解）。`structure.json` 是否存在是
+  // 区分「首次创建 / 已存在工作区」最可靠的信号。
+  const structurePath = getProjectStructurePath(projectDir);
+  const isFirstInit = !fs.existsSync(structurePath);
+
+  if (isFirstInit) {
+    if (d === 'study') {
+      // 学习域固定结构保持原状（W1 D2：学习域本阶段不放开）
+      for (const f of STUDY_BIZ_FOLDERS) {
+        fs.mkdirSync(path.join(projectDir, f), { recursive: true });
+      }
+      for (const sub of STUDY_TEMPLATE_FOLDERS) {
+        fs.mkdirSync(path.join(projectDir, '模板', sub), { recursive: true });
+      }
+    } else if (template !== 'blank') {
+      // 项目/案件 default 模板：落地四类业务夹
+      for (const f of WORK_BIZ_FOLDERS) {
+        fs.mkdirSync(path.join(projectDir, f), { recursive: true });
+      }
+    }
+    // template === 'blank' 时：项目/案件不创建任何业务夹
+  }
 
   // Project logs (append-only) — kept for backward compat
   const logPath = getProjectLogPath(projectDir);
@@ -391,39 +498,75 @@ const ensureProjectStructure = (projectName, domain = 'projects') => {
   }
 
   // Project folder structure mirror (folders only; descriptions persisted)
-  const structurePath = getProjectStructurePath(projectDir);
-  if (!fs.existsSync(structurePath)) {
+  if (isFirstInit) {
     try {
       const now = new Date().toISOString();
-      const desc = d === 'study' ? getStudyFolderDefaultDescriptions() : getBizFolderDefaultDescriptions();
-      const seedFolders =
-        d === 'study' ? [...STUDY_BIZ_FOLDERS, ...STUDY_TEMPLATE_FOLDERS.map((x) => `模板/${x}`)] : WORK_BIZ_FOLDERS;
-      const seeded = {
-        schemaVersion: 1,
-        projectName: effectiveName,
-        createdAt: now,
-        updatedAt: now,
-        folders: Object.fromEntries(
-          seedFolders.map((rp) => [
-            rp,
-            {
-              relPath: rp,
-              name: rp.split('/').slice(-1)[0],
-              description: desc[rp] || '',
-              system: false,
-              createdAt: now,
-              updatedAt: now,
-            },
-          ]),
-        ),
-      };
-      syncStructureJson(projectDir, effectiveName, seeded);
+      if (d === 'study') {
+        const desc = getStudyFolderDefaultDescriptions();
+        const seedFolders = [...STUDY_BIZ_FOLDERS, ...STUDY_TEMPLATE_FOLDERS.map((x) => `模板/${x}`)];
+        const seeded = {
+          schemaVersion: 1,
+          projectName: effectiveName,
+          createdAt: now,
+          updatedAt: now,
+          folders: Object.fromEntries(
+            seedFolders.map((rp) => [
+              rp,
+              {
+                relPath: rp,
+                name: rp.split('/').slice(-1)[0],
+                description: desc[rp] || '',
+                system: false,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ]),
+          ),
+        };
+        syncStructureJson(projectDir, effectiveName, seeded);
+      } else if (template === 'blank') {
+        // W1: 空白模板写入空 folders 壳，后续由用户新建文件夹时通过
+        // explorer.js syncStructureJson 自动追加 entry。
+        const seeded = {
+          schemaVersion: 1,
+          projectName: effectiveName,
+          createdAt: now,
+          updatedAt: now,
+          folders: {},
+        };
+        syncStructureJson(projectDir, effectiveName, seeded);
+      } else {
+        const desc = getBizFolderDefaultDescriptions();
+        const seedFolders = WORK_BIZ_FOLDERS;
+        const seeded = {
+          schemaVersion: 1,
+          projectName: effectiveName,
+          createdAt: now,
+          updatedAt: now,
+          folders: Object.fromEntries(
+            seedFolders.map((rp) => [
+              rp,
+              {
+                relPath: rp,
+                name: rp.split('/').slice(-1)[0],
+                description: desc[rp] || '',
+                system: false,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ]),
+          ),
+        };
+        syncStructureJson(projectDir, effectiveName, seeded);
+      }
     } catch {
       // best-effort
     }
   }
 
-  try { seedDefaultRules(projectDir, d); } catch { /* best-effort */ }
+  // W2: 不再在新建工作区时自动写入种子硬规则（seedDefaultRules）。
+  // 用户在「分类规则」面板中从零自定义。已有项目的旧规则文件不受影响。
+  // seedDefaultRules 函数保留（可用于未来「导入模板规则」功能）。
 
   return {
     name: effectiveName,
@@ -707,12 +850,10 @@ const looksLikeValidProjectDirSync = (projectDir) => {
     if (!fs.existsSync(projectDir)) return false;
     const st = fs.statSync(projectDir);
     if (!st.isDirectory()) return false;
-    // A valid project created by this app always has at least one of these.
+    // W1: 业务文件夹现在可由用户全部删除（空白模板亦无业务夹），
+    // 因此不能再用 WORK_BIZ_FOLDERS 作为「有效项目」判据；
+    // 改用系统目录（必定存在）。
     const mustHaveAny = [
-      path.join(projectDir, WORK_BIZ_FOLDERS[0]),
-      path.join(projectDir, WORK_BIZ_FOLDERS[1]),
-      path.join(projectDir, WORK_BIZ_FOLDERS[2]),
-      path.join(projectDir, WORK_BIZ_FOLDERS[3]),
       path.join(projectDir, 'snippets'),
       path.join(projectDir, 'meta'),
       path.join(projectDir, 'temp'),
@@ -767,7 +908,48 @@ const listAllDirsRelPosix = (projectDir) => {
   return Array.from(out);
 };
 
+// F1: 通用目录扫描（仅文件夹，POSIX 相对路径），用于扫描外部根。
+// - 不应用 shouldExcludeFromStructureRelPath（外部根没有 IPM 系统文件夹）
+// - 跳过隐藏目录（. 开头）
+// - 深度限制 maxDepth=20，节点上限 50000，防止意外死循环 / 巨型挂载点
+const listExternalDirsRelPosix = (rootDir, opts = {}) => {
+  const maxDepth = Number.isFinite(opts.maxDepth) ? opts.maxDepth : 20;
+  const maxEntries = Number.isFinite(opts.maxEntries) ? opts.maxEntries : 50000;
+  const baseAbs = path.resolve(rootDir);
+  const out = new Set(['']); // root
+  const stack = [{ abs: baseAbs, rel: '', depth: 0 }];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (cur.depth >= maxDepth) continue;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(cur.abs, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const name = e.name;
+      if (!name || name === '.' || name === '..') continue;
+      if (name.startsWith('.')) continue; // hidden / dotfiles
+      const abs = path.join(cur.abs, name);
+      const rel = cur.rel ? `${cur.rel}/${name}` : name;
+      out.add(rel);
+      if (out.size > maxEntries) {
+        return Array.from(out);
+      }
+      stack.push({ abs, rel, depth: cur.depth + 1 });
+    }
+  }
+  return Array.from(out);
+};
+
 const syncStructureJson = (projectDir, projectName, seedDoc = null) => {
+  // F1: 附属壳禁用原版 sync — 它会扫描壳目录磁盘并清除外部镜像条目。
+  // 自动改走 syncStructureFromExternal，调用者无需特殊判断。
+  if (isAttachedProject(projectDir)) {
+    return syncStructureFromExternal(projectDir, projectName, seedDoc);
+  }
   const now = new Date().toISOString();
   const structurePath = getProjectStructurePath(projectDir);
   const prev = seedDoc || safeReadJson(structurePath, null) || null;
@@ -793,6 +975,84 @@ const syncStructureJson = (projectDir, projectName, seedDoc = null) => {
   const doc = {
     schemaVersion: 1,
     projectName,
+    createdAt: prev && typeof prev.createdAt === 'string' ? prev.createdAt : now,
+    updatedAt: now,
+    folders,
+  };
+  atomicWriteFileSync(structurePath, JSON.stringify(doc, null, 2), 'utf-8');
+  return doc;
+};
+
+// F1: 扫描外部根并合并到壳内 structure.json。
+// - 磁盘存在但 structure 无记录 → 新增条目（空 description）
+// - structure 有记录但磁盘不存在 → 不写入（stale 自然清除，description 丢失可接受）
+// - 两者匹配 → 保留 prev 的 description / createdAt
+// 同时写回 external-link.json 的 lastScanAt / lastScanStatus / broken 字段。
+const syncStructureFromExternal = (projectDir, projectName, seedDoc = null) => {
+  const now = new Date().toISOString();
+  const structurePath = getProjectStructurePath(projectDir);
+  const prev = seedDoc || safeReadJson(structurePath, null) || null;
+  const prevFolders = prev && prev.folders && typeof prev.folders === 'object' ? prev.folders : {};
+
+  const link = readExternalLink(projectDir);
+  const externalRoot = link?.rootPath ? path.resolve(link.rootPath) : '';
+
+  // 检查外部根是否仍然可访问；不可访问时标 broken，保留 prev.folders 不动。
+  let externalOk = false;
+  let brokenReason = '';
+  if (!externalRoot) {
+    brokenReason = '外部链接未配置 rootPath';
+  } else {
+    try {
+      if (!fs.existsSync(externalRoot)) {
+        brokenReason = `外部目录不存在：${externalRoot}`;
+      } else {
+        const st = fs.statSync(externalRoot);
+        if (!st.isDirectory()) brokenReason = `外部路径不是目录：${externalRoot}`;
+        else externalOk = true;
+      }
+    } catch (e) {
+      brokenReason = `外部目录访问失败：${e?.message || e}`;
+    }
+  }
+
+  // 写回 external-link.json 状态
+  if (link) {
+    writeExternalLink(projectDir, {
+      ...link,
+      lastScanAt: now,
+      lastScanStatus: externalOk ? 'ok' : 'broken',
+      broken: !externalOk,
+      brokenReason: externalOk ? '' : brokenReason,
+    });
+  }
+
+  let folders = {};
+  if (externalOk) {
+    const relDirs = listExternalDirsRelPosix(externalRoot);
+    for (const rel of relDirs) {
+      const prevMeta = prevFolders[rel] && typeof prevFolders[rel] === 'object' ? prevFolders[rel] : {};
+      const name = rel ? rel.split('/').slice(-1)[0] : projectName;
+      folders[rel] = {
+        ...prevMeta,
+        relPath: rel,
+        name,
+        description: typeof prevMeta.description === 'string' ? prevMeta.description : '',
+        // 外部目录条目均非系统目录（root 例外，但 root 不参与候选）
+        system: rel === '' ? true : false,
+        createdAt: typeof prevMeta.createdAt === 'string' ? prevMeta.createdAt : now,
+        updatedAt: now,
+      };
+    }
+  } else {
+    // broken 时保留 prev.folders（避免破坏既有 description；用户重新定位后会再次扫描）
+    folders = { ...prevFolders };
+  }
+
+  const doc = {
+    schemaVersion: 1,
+    projectName,
+    attached: true,
     createdAt: prev && typeof prev.createdAt === 'string' ? prev.createdAt : now,
     updatedAt: now,
     folders,
@@ -1064,6 +1324,8 @@ let mainWindow = null;
 let floatingWindow = null;
 const mainWindowRef = { current: null };
 const floatingWindowRef = { current: null };
+// G1.2a 系统托盘实例。在 app.whenReady 内创建，will-quit 时 destroy。
+let tray = null;
 let clipboardWatchTimer = null;
 let lastClipboardText = '';
 let lastClipboardImageHash = '';
@@ -1172,6 +1434,310 @@ const loadRenderer = (win, uiMode = 'main') => {
   }
 };
 
+// ============================================================================
+// Splash window (shown immediately on launch while main window initializes).
+//
+// Why this exists:
+//   We disabled ASAR (see `forge.config.js`) so that Node's native ESM
+//   loader can resolve `Agent/pi-runtime/` and its dependencies on
+//   physical disk. The trade-off is ~3–8 extra seconds of cold-start
+//   while ~24k small files get stat'd / opened by Vite's main bundle,
+//   the renderer HTML/JS/CSS load, and React mounts.
+//
+//   During that window the OS only shows a taskbar entry, which
+//   looks like "nothing happened". The splash gives users an
+//   immediate visual confirmation that the app is starting, with a
+//   progress line we update from key main-process milestones
+//   (IPC ready / runtime warmed / opening window).
+//
+// Implementation notes:
+//   * The HTML/CSS/JS is inlined as a `data:` URL, so the splash is
+//     fully self-contained — it does NOT touch the renderer bundle,
+//     React, or any Vite-managed asset. That keeps splash startup
+//     latency well under 50ms even on a cold machine.
+//   * Sizing/position: small fixed window centred on the primary
+//     display so it doesn't fight the user's monitor layout.
+//   * `transparent: true` + `frame: false` + `resizable: false`
+//     give a clean "loading card" feel.
+//   * Always-on-top while alive, never in the taskbar (the main
+//     window's taskbar entry covers that role).
+//   * `closeSplashWindow()` is idempotent and tolerates an already-
+//     destroyed window so the timeout-fallback and the normal
+//     ready-to-show path can both call it safely.
+
+let splashWindow = null;
+let splashShownAt = 0;            // wall-clock ms when splash actually became visible
+let splashCloseDeferred = false;  // true if closeSplashWindow() was called before min-visible elapsed
+const SPLASH_MIN_VISIBLE_MS = 600;  // floor so users always perceive the splash
+
+// Best-effort splash logger. Uses console.log so it lands in stdout when the
+// packaged app is launched with `--enable-logging` and in the renderer
+// devtools / terminal during `npm start`.
+const splashLog = (...args) => {
+  try { console.log('[splash]', ...args); } catch { /* ignore */ }
+};
+
+const SPLASH_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+      "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    user-select: none; -webkit-user-select: none;
+    overflow: hidden;
+  }
+  .card {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 16px;
+    background: linear-gradient(135deg, #ffffff 0%, #f3f5fb 100%);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(60, 70, 110, 0.18),
+                0 2px 6px rgba(60, 70, 110, 0.08);
+  }
+  .logo {
+    width: 56px; height: 56px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #3e4b9c 0%, #5667c4 100%);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 22px;
+    letter-spacing: 0.5px;
+    box-shadow: 0 4px 12px rgba(62, 75, 156, 0.25);
+  }
+  .title {
+    font-size: 17px; font-weight: 600; color: #2f3545;
+    letter-spacing: 0.4px;
+  }
+  .subtitle {
+    font-size: 12px; color: #6e7389; font-weight: 400;
+    letter-spacing: 0.2px;
+  }
+  .progress {
+    margin-top: 4px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: #8b90a3;
+  }
+  .spinner {
+    width: 12px; height: 12px;
+    border: 2px solid rgba(62, 75, 156, 0.18);
+    border-top-color: #3e4b9c;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  .progress-text {
+    transition: opacity 0.18s ease;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">IPM</div>
+    <div class="title">智能项目管理器</div>
+    <div class="subtitle">Intelligent Project Manager</div>
+    <div class="progress">
+      <div class="spinner"></div>
+      <div id="progress-text" class="progress-text">正在启动...</div>
+    </div>
+  </div>
+  <script>
+    // Listen for progress messages from the main process. We can't use
+    // contextBridge here (no preload) so we use the legacy
+    // \`ipcRenderer\` exposed by Electron when \`nodeIntegration: true\`.
+    // This is safe because the splash window only loads our trusted
+    // inline HTML — no third-party content can run in here.
+    try {
+      const { ipcRenderer } = require('electron');
+      ipcRenderer.on('splash:progress', (_evt, text) => {
+        const el = document.getElementById('progress-text');
+        if (el && typeof text === 'string') {
+          el.style.opacity = '0';
+          setTimeout(() => { el.textContent = text; el.style.opacity = '1'; }, 100);
+        }
+      });
+    } catch (_err) {
+      // ipcRenderer unavailable — splash still renders, just without updates.
+    }
+  </script>
+</body>
+</html>`;
+
+const createSplashWindow = () => {
+  if (splashWindow && !splashWindow.isDestroyed()) return splashWindow;
+
+  const t0 = Date.now();
+  splashShownAt = 0;
+  splashCloseDeferred = false;
+
+  splashWindow = new BrowserWindow({
+    width: 340,
+    height: 220,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    // SYNCHRONOUS SHOW (was: show:false + once('ready-to-show')).
+    //
+    // Why: in the packaged build, `loadFile(index.html)` for the main
+    // window starts almost immediately and its `ready-to-show`
+    // fires within ~150ms. The splash's own `ready-to-show`
+    // (after data: URL parse + first paint of transparent window)
+    // could land *after* that, at which point our main-window
+    // ready-to-show handler had already called `closeSplashWindow()`
+    // and torn the splash down before it ever made it on-screen.
+    //
+    // By using `show: true` the OS shows the window as soon as
+    // its native frame is created. Combined with `transparent: true`
+    // + `backgroundColor: '#00000000'` the worst case is a brief
+    // fully-transparent rect for ~1 frame before our inline HTML
+    // paints — invisible to the user in practice on Windows.
+    show: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      // The splash needs `ipcRenderer` access for progress updates and
+      // does NOT load any user-supplied or third-party content — only
+      // the inline data: URL above. So enabling nodeIntegration here
+      // is safe and avoids the cost of compiling/loading a preload.
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+
+  splashLog('window created in', Date.now() - t0, 'ms');
+
+  splashWindow.loadURL(
+    'data:text/html;charset=utf-8,' + encodeURIComponent(SPLASH_HTML),
+  );
+
+  // Track when the splash actually has pixels on screen, so
+  // `closeSplashWindow()` can enforce the minimum visible time.
+  splashWindow.once('ready-to-show', () => {
+    splashShownAt = Date.now();
+    splashLog('ready-to-show after', splashShownAt - t0, 'ms');
+    if (splashCloseDeferred) {
+      // Main window already finished loading before splash had paint.
+      // Honour the min-visible floor, then tear down.
+      splashLog('close was deferred — honouring min-visible floor');
+      closeSplashWindow();
+    }
+  });
+
+  splashWindow.webContents.once('did-fail-load', (_evt, code, desc) => {
+    splashLog('did-fail-load', code, desc);
+  });
+
+  splashWindow.on('closed', () => {
+    splashLog('closed');
+    splashWindow = null;
+  });
+
+  return splashWindow;
+};
+
+/**
+ * Update the splash window's progress line. Safe to call before the
+ * splash has finished its initial paint (Electron buffers IPC sends
+ * until the renderer is ready) and after it has been closed (no-op).
+ */
+const updateSplashProgress = (text) => {
+  if (!splashWindow || splashWindow.isDestroyed()) return;
+  try {
+    splashWindow.webContents.send('splash:progress', String(text || ''));
+  } catch {
+    // Renderer might be torn down between the check and the send;
+    // either way we'd rather drop one progress tick than crash main.
+  }
+};
+
+// Pending onAfterClose callbacks coalesced across multiple closeSplashWindow
+// invocations. The fast-launch path can call closeSplashWindow from both the
+// main-window ready-to-show handler AND the 25s safety timeout; both want to
+// be notified the instant the splash truly disappears, so we just collect them.
+let splashCloseCallbacks = [];
+
+const closeSplashWindow = (onAfterClose) => {
+  if (typeof onAfterClose === 'function') splashCloseCallbacks.push(onAfterClose);
+  if (!splashWindow) {
+    // Already closed (or never opened). Run any newly-registered callback
+    // on the next tick so callers can rely on it being asynchronous.
+    if (splashCloseCallbacks.length) {
+      const pending = splashCloseCallbacks;
+      splashCloseCallbacks = [];
+      setImmediate(() => pending.forEach((fn) => { try { fn(); } catch { /* ignore */ } }));
+    }
+    return;
+  }
+
+  // Min-visible-time guard.
+  //
+  // Without this, a "fast packaged launch" path can call
+  // `closeSplashWindow()` from `mainWindow.ready-to-show` *before*
+  // the splash has had a chance to paint a single frame. The user
+  // sees: nothing → main window. We instead delay the actual
+  // teardown until at least `SPLASH_MIN_VISIBLE_MS` has elapsed
+  // since the splash became visible, so the user always perceives
+  // a deliberate hand-off rather than a flash.
+  //
+  // Two cases:
+  //   (a) splashShownAt > 0  → splash is already on-screen; if it's
+  //       been visible long enough, close immediately; otherwise
+  //       schedule a close at the floor.
+  //   (b) splashShownAt === 0 → splash has not finished its first
+  //       paint yet. Mark the close as deferred; the `ready-to-show`
+  //       handler will re-invoke `closeSplashWindow()` once the
+  //       splash is visible, falling into case (a). Belt-and-braces:
+  //       we also schedule an unconditional teardown at the
+  //       SPLASH_MIN_VISIBLE_MS deadline in case `ready-to-show`
+  //       never fires for some reason.
+  const win = splashWindow;
+  // Idempotency guard: don't schedule the real close more than once.
+  if (win.__closeScheduled) {
+    splashLog('close request coalesced (already scheduled)');
+    return;
+  }
+  win.__closeScheduled = true;
+
+  const doClose = () => {
+    splashWindow = null;
+    try {
+      if (win && !win.isDestroyed()) win.close();
+    } catch { /* ignore */ }
+    const pending = splashCloseCallbacks;
+    splashCloseCallbacks = [];
+    pending.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
+  };
+
+  if (splashShownAt > 0) {
+    const elapsed = Date.now() - splashShownAt;
+    const wait = Math.max(0, SPLASH_MIN_VISIBLE_MS - elapsed);
+    splashLog('close requested; visible for', elapsed, 'ms; waiting', wait, 'ms');
+    if (wait === 0) {
+      doClose();
+    } else {
+      setTimeout(doClose, wait);
+    }
+  } else {
+    splashLog('close requested BEFORE first paint — deferring until ready-to-show');
+    splashCloseDeferred = true;
+    // Belt-and-braces: never wait longer than the min-visible deadline,
+    // even if ready-to-show never fires. Cap absolute wait at
+    // SPLASH_MIN_VISIBLE_MS so a broken splash never blocks main window.
+    setTimeout(doClose, SPLASH_MIN_VISIBLE_MS);
+  }
+};
+
 const createMainWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -1183,6 +1749,14 @@ const createMainWindow = () => {
       symbolColor: '#414659',
       height: 36,
     },
+    // Splash hand-off: keep the main window hidden while it's still
+    // loading the renderer bundle so the user only ever sees one of
+    // (splash) or (fully-painted main window) — never a half-rendered
+    // flash of white. `paintWhenInitiallyHidden` ensures the
+    // renderer keeps painting offscreen so `ready-to-show` actually
+    // fires (without it, hidden windows can be paused by Chromium).
+    show: false,
+    paintWhenInitiallyHidden: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1197,6 +1771,37 @@ const createMainWindow = () => {
     mainWindow.webContents.openDevTools();
   }
 
+  // Once the renderer has painted its first frame, hand off from
+  // splash → main. We deliberately defer `mainWindow.show()` until
+  // the splash has actually closed, so the user never sees both
+  // windows on screen at the same time (which would happen on a
+  // fast packaged launch where main is ready in <200ms but the
+  // splash hasn't yet hit its SPLASH_MIN_VISIBLE_MS floor).
+  //
+  // `closeSplashWindow` invokes the callback synchronously if the
+  // splash is already torn down (or absent), and asynchronously the
+  // moment the real close completes otherwise — giving us a clean
+  // single frame transition.
+  mainWindow.once('ready-to-show', () => {
+    closeSplashWindow(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+  });
+
+  // Hard safety: if `ready-to-show` somehow never fires (e.g. the
+  // renderer crashed before painting), force the main window visible
+  // and tear down the splash after 25s so the user isn't stranded
+  // staring at "正在启动...".
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      try { mainWindow.show(); } catch { /* ignore */ }
+    }
+    closeSplashWindow();
+  }, 25_000);
+
   mainWindow.on('closed', () => {
     mainWindow = null;
     mainWindowRef.current = null;
@@ -1205,7 +1810,13 @@ const createMainWindow = () => {
 };
 
 const createFloatingWindow = () => {
-  if (floatingWindow) return floatingWindow;
+  // G1.1a: 实例存活则直接复用 show + focus，避免重建带来的「正在加载目标...」闪烁
+  // 与内部状态清零。watcher 依赖 show/hide 事件，复用路径同样会触发 startClipboardWatcher。
+  if (floatingWindow && !floatingWindow.isDestroyed()) {
+    if (!floatingWindow.isVisible()) floatingWindow.show();
+    floatingWindow.focus();
+    return floatingWindow;
+  }
 
   floatingWindow = new BrowserWindow({
     width: 420,
@@ -1236,16 +1847,111 @@ const createFloatingWindow = () => {
     }
   });
 
+  // G1.1a: 剪贴板 watcher 改为跟随窗口可见性。这样 hide 期间不会空转，
+  // show 期间自动恢复；start/stop 都已经做了去重，重复触发也安全。
+  floatingWindow.on('show', () => {
+    startClipboardWatcher();
+  });
+  floatingWindow.on('hide', () => {
+    stopClipboardWatcher();
+  });
+
   floatingWindow.on('closed', () => {
     floatingWindow = null;
     floatingWindowRef.current = null;
     stopClipboardWatcher();
-    if (mainWindow) mainWindow.show();
+    // 兜底：用户从系统级 X 直接关掉悬浮（而非通过 backToMain）时，确保中台仍可见。
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show();
+    }
   });
 
+  // 首次创建时窗口默认可见，'show' 事件可能晚于此处触发，因此显式 startClipboardWatcher
+  // 兜底一次（startClipboardWatcher 内部去重，无副作用）。
   startClipboardWatcher();
   floatingWindowRef.current = floatingWindow;
   return floatingWindow;
+};
+
+// G1.0/G1.1 全局切换：Ctrl+Shift+Space / 托盘单击 / 标题栏按钮共享此函数。
+// 逻辑：若悬浮窗存在且可见 → 切到中台（隐藏悬浮）；否则 → 切到悬浮（隐藏中台）。
+const toggleFloatingAndMain = () => {
+  const fwAlive = floatingWindow && !floatingWindow.isDestroyed();
+  const mwAlive = mainWindow && !mainWindow.isDestroyed();
+  if (fwAlive && floatingWindow.isVisible()) {
+    if (mwAlive) {
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
+      createMainWindow();
+    }
+    // G1.1a: 隐藏而非销毁，保留内部状态。
+    floatingWindow.hide();
+  } else {
+    if (!mwAlive) createMainWindow();
+    const fw = createFloatingWindow();
+    fw.show();
+    fw.focus();
+    if (mwAlive) mainWindow.hide();
+  }
+};
+
+// G1.2a 系统托盘。提供「打开中台 / 打开悬浮窗 / 退出」右键菜单和
+// 单击 = 切换的快捷操作，作为快捷键 / 按钮的兜底入口。
+const createTray = () => {
+  if (tray) return tray;
+  try {
+    const iconPath = path.join(app.getAppPath(), 'assets', 'icon.ico');
+    tray = new Tray(iconPath);
+    tray.setToolTip('IPM');
+    const buildMenu = () => Menu.buildFromTemplate([
+      {
+        label: '打开中台',
+        click: () => {
+          if (!mainWindow || mainWindow.isDestroyed()) {
+            createMainWindow();
+          } else {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+          if (floatingWindow && !floatingWindow.isDestroyed()) {
+            floatingWindow.hide();
+          }
+        },
+      },
+      {
+        label: '打开悬浮窗',
+        click: () => {
+          const fw = createFloatingWindow();
+          fw.show();
+          fw.focus();
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.hide();
+          }
+        },
+      },
+      { type: 'separator' },
+      {
+        label: '退出 IPM',
+        click: () => {
+          app.isQuitting = true;
+          app.quit();
+        },
+      },
+    ]);
+    tray.setContextMenu(buildMenu());
+    tray.on('click', () => {
+      try { toggleFloatingAndMain(); } catch (err) {
+        console.warn('[IPM] tray click toggle failed:', err?.message || err);
+      }
+    });
+  } catch (err) {
+    // 部分 Linux 桌面环境（GNOME 等）需要扩展才能显示托盘；失败时静默跳过，
+    // 不影响其他入口工作。
+    console.warn('[IPM] tray init failed:', err?.message || err);
+    tray = null;
+  }
+  return tray;
 };
 
 protocol.registerSchemesAsPrivileged([
@@ -1256,6 +1962,20 @@ protocol.registerSchemesAsPrivileged([
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  // Splash FIRST. Everything below this line is "real init" work; we
+  // want the user to see *something* on screen within ~200ms of
+  // launch even though the IPC handler registration + renderer
+  // boot together can take 4–10s on a cold start. The splash window
+  // tears itself down once `mainWindow.ready-to-show` fires (see
+  // `createMainWindow`).
+  try {
+    createSplashWindow();
+  } catch (err) {
+    // Splash failure must never block the real launch path.
+    console.warn('[IPM] splash window failed (continuing):', err?.message || err);
+  }
+  updateSplashProgress('正在准备运行环境...');
+
   process.env.IPM_USER_DATA = app.getPath('userData');
   process.env.IPM_STATE_PATH = getStatePath();
   process.env.KNOWCLAW_SESSION_ROOT = path.join(app.getPath('userData'), 'knowclaw-sessions');
@@ -1354,6 +2074,8 @@ app.whenReady().then(() => {
     // ignore
   }
 
+  updateSplashProgress('正在注册系统服务...');
+
   // ===== Local folders (Imported local directories) =====
   // Keep this feature modular to avoid bloating main.js.
   registerLocalFoldersIpc({ ipcMain, dialog, getStatePath });
@@ -1423,6 +2145,7 @@ app.whenReady().then(() => {
     isSystemFolderRelPath,
     ensureProjectStructure,
     syncStructureJson,
+    isAttachedProject,
     safeReadJson,
     getProjectStructurePath,
     atomicWriteFileSync,
@@ -1438,13 +2161,15 @@ app.whenReady().then(() => {
     ensureSourceIsTempOrThrow,
     ensureTargetFolderIsAllowedOrThrow,
     resolveInside,
+    resolveContentPath,
+    isAttachedProject,
     sanitizeFileName,
     ensureUniqueDestPath,
   });
 
-  registerClassifyRulesIpc({ ipcMain, getWorkspaceDirOrThrow });
+  registerClassifyRulesIpc({ ipcMain, getWorkspaceDirOrThrow, isAttachedProject });
   registerClassifyEventsIpc({ ipcMain, getWorkspaceDirOrThrow });
-  registerPreferencesIpc({ ipcMain, getWorkspaceDirOrThrow });
+  registerPreferencesIpc({ ipcMain, getWorkspaceDirOrThrow, isAttachedProject });
   registerKnowClawIpc({
     ipcMain,
     getUserFileRoot,
@@ -1454,6 +2179,7 @@ app.whenReady().then(() => {
       studyRoot: getStudyRoot(),
     }),
     readState,
+    writeState,
     getWorkspaceDirOrThrow,
   });
 
@@ -1479,6 +2205,9 @@ app.whenReady().then(() => {
     STUDY_WORKSPACE_NAME,
     getWorkspaceDirOrThrow,
     resolveInside,
+    resolveContentPath,
+    isAttachedProject,
+    getExternalRootPath,
     asPosixRel,
     isProtectedRelPath,
     isProtectedFolderNameRelPath,
@@ -1490,6 +2219,7 @@ app.whenReady().then(() => {
     confirmAutoSuffix,
     ensureProjectStructure,
     syncStructureJson,
+    syncStructureFromExternal,
     safeReadJson,
     getProjectStructurePath,
     remapStructureDocRelPaths,
@@ -1501,15 +2231,31 @@ app.whenReady().then(() => {
     getScreenshotRecordPath,
     listAiSuggestions,
     setAiSuggestionStatus,
+    // W3a: 路径联动统一入口
+    remapInternalPath: pathRemapInternal,
+    cleanupDeletedPath: pathCleanupDeleted,
   });
+
+  // W3b: rename 联动需要的跨库 helpers
+  const getStudyDbForRename = () => {
+    const studyDir = getStudyRoot();
+    try { ensureProjectStructure('', 'study'); } catch { /* ignore */ }
+    return { db: getProjectDb(studyDir), projectDir: studyDir };
+  };
+  const getSupervisorDbForRename = () => {
+    try { return getSupervisorDb(getAppRoot()); } catch { return null; }
+  };
 
   registerProjectsIpc({
     ipcMain,
+    dialog,
     shell,
     readState,
     writeState,
     getProjectsRoot,
     sanitizeProjectName,
+    sanitizeFileName,
+    ensureUniqueDirPath,
     normalizeProjectStatus,
     isTombstoneProjectName,
     isEmptyDirSync,
@@ -1520,19 +2266,28 @@ app.whenReady().then(() => {
     enqueueDeleteDir,
     ensureProjectStructure,
     syncStructureJson,
+    syncStructureFromExternal,
+    isAttachedProject,
+    readExternalLink,
+    writeExternalLink,
     getProjectDirOrThrow,
     sleepSync,
     trashOrRm,
     closeProjectDb,
+    getStudyDb: getStudyDbForRename,
+    getSupervisorDb: getSupervisorDbForRename,
   });
 
   registerCasesIpc({
     ipcMain,
+    dialog,
     shell,
     readState,
     writeState,
     getCasesRoot,
     sanitizeProjectName,
+    sanitizeFileName,
+    ensureUniqueDirPath,
     normalizeProjectStatus,
     isTombstoneProjectName,
     isEmptyDirSync,
@@ -1543,10 +2298,16 @@ app.whenReady().then(() => {
     enqueueDeleteDir,
     ensureProjectStructure,
     syncStructureJson,
+    syncStructureFromExternal,
+    isAttachedProject,
+    readExternalLink,
+    writeExternalLink,
     getWorkspaceDirOrThrow,
     sleepSync,
     trashOrRm,
     closeProjectDb,
+    getStudyDb: getStudyDbForRename,
+    getSupervisorDb: getSupervisorDbForRename,
   });
 
   registerSnippetsIpc({
@@ -1606,6 +2367,7 @@ app.whenReady().then(() => {
     sanitizeFileName,
     normalizeRelPathPosix,
     resolveInside,
+    isAttachedProject,
     trashOrRm,
     emitKnowledgeChanged,
     getProjectsRoot,
@@ -1638,8 +2400,24 @@ app.whenReady().then(() => {
     floatingWindowRef,
   });
 
+  // G1.0 全局快捷键：Ctrl+Shift+Space 双向切换悬浮 / 中台
+  try {
+    const ok = globalShortcut.register('CommandOrControl+Shift+Space', () => {
+      try { toggleFloatingAndMain(); } catch (err) {
+        console.warn('[IPM] toggle on shortcut failed:', err?.message || err);
+      }
+    });
+    if (!ok) console.warn('[IPM] failed to register Ctrl+Shift+Space (key may be in use)');
+  } catch (err) {
+    console.warn('[IPM] globalShortcut.register error:', err?.message || err);
+  }
+
+  // G1.2a 系统托盘
+  createTray();
+
   registerAnalyticsIpc({ ipcMain, getAppRoot });
   registerSearchIpc({ ipcMain, getProjectsRoot, getCasesRoot, getStudyRoot });
+  registerOcrIpc({ ipcMain });
 
   uploadPendingAnalytics(getAppRoot()).catch(() => {});
 
@@ -1659,7 +2437,83 @@ app.whenReady().then(() => {
   // Initialize Supervisor DB early
   try { getSupervisorDb(getAppRoot()); } catch { /* ignore */ }
 
+  // F1: 启动时遍历所有附属壳，执行健康检查 + 增量扫描。
+  // - 外部根存在 → syncStructureFromExternal 增量更新 structure.json（保留已有 description）
+  // - 外部根不存在 → 标记 broken（UI 红色警告 + 提供重新定位入口）
+  // 失败不阻塞主窗口启动；异常吞掉记录到 console。
+  try {
+    const scanRootsForAttached = [
+      { root: getProjectsRoot() },
+      { root: getCasesRoot() },
+    ];
+    let scanned = 0;
+    let broken = 0;
+    for (const { root } of scanRootsForAttached) {
+      if (!fs.existsSync(root)) continue;
+      let entries;
+      try { entries = fs.readdirSync(root, { withFileTypes: true }); }
+      catch { continue; }
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        const name = e.name;
+        if (isTombstoneProjectName(name)) continue;
+        const projectDir = path.join(root, name);
+        if (!isAttachedProject(projectDir)) continue;
+        scanned += 1;
+        try {
+          const doc = syncStructureFromExternal(projectDir, name);
+          if (doc?.attached) {
+            const link = readExternalLink(projectDir);
+            if (link?.broken) broken += 1;
+          }
+        } catch (err) {
+          console.warn(`[IPM][F1] startup scan failed for ${name}:`, err?.message || err);
+        }
+      }
+    }
+    if (scanned > 0) {
+      agentLog('INFO', `F1 启动扫描：检查 ${scanned} 个附属壳，其中 ${broken} 个外部路径失效`);
+    }
+  } catch (err) {
+    console.warn('[IPM][F1] startup health-check failed (non-fatal):', err?.message || err);
+  }
+
+  updateSplashProgress('正在打开主窗口...');
   createMainWindow();
+
+  // Background warm-up: load the pi-coding-agent runtime in the
+  // background so the first KnowClaw page open doesn't pay the
+  // "模型加载中..." latency. The renderer-side IPC handler in
+  // `src/main/ipc/knowclaw.js` caches the resolved module on first
+  // hit, so calling `ensurePiRuntime()` once here makes any later
+  // `knowclaw:listModels` / `knowclaw:getStatus` call return
+  // instantly.
+  //
+  // We delay this until *after* `createMainWindow()` so that the
+  // main window's renderer process gets first crack at the file
+  // system (its bundle + initial IPC fetches are on the critical
+  // path to "ready-to-show"). `setTimeout(...,800)` is a small
+  // empirical headroom that lets the renderer finish its initial
+  // module graph load before we contend for disk on the same
+  // process. Any failure here is silent — KnowClaw will simply
+  // do its own lazy load on first visit, identical to today.
+  setTimeout(() => {
+    updateSplashProgress('正在预热 KnowClaw 运行时...');
+    try {
+      let piRuntimePath = path.resolve(__dirname, '..', '..', 'Agent', 'pi-runtime', 'index.js');
+      if (piRuntimePath.includes('app.asar' + path.sep) || piRuntimePath.includes('app.asar/')) {
+        piRuntimePath = piRuntimePath.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1');
+      }
+      const url = pathToFileURL(piRuntimePath).href;
+      import(/* @vite-ignore */ url)
+        .then(() => { /* cached, ready for first KnowClaw visit */ })
+        .catch((err) => {
+          console.warn('[KnowClaw] background runtime warm-up failed (non-fatal):', err?.message || err);
+        });
+    } catch (err) {
+      console.warn('[KnowClaw] background warm-up scheduling failed:', err?.message || err);
+    }
+  }, 800);
 
   // ===== KnowClaw v2 (pi-coding-agent) Phase-0 PoC =====
   // Opt-in only: set KNOWCLAW_PI_POC=1 to trigger one in-memory session
@@ -1679,7 +2533,10 @@ app.whenReady().then(() => {
       try {
         // __dirname at runtime is <desktop>/.vite/build/ ; pi-runtime lives at
         // <desktop>/Agent/pi-runtime/ — i.e. two levels up.
-        const piRuntimePath = path.resolve(__dirname, '..', '..', 'Agent', 'pi-runtime', 'index.js');
+        let piRuntimePath = path.resolve(__dirname, '..', '..', 'Agent', 'pi-runtime', 'index.js');
+        if (piRuntimePath.includes('app.asar' + path.sep) || piRuntimePath.includes('app.asar/')) {
+          piRuntimePath = piRuntimePath.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1');
+        }
         const piRuntimeUrl = pathToFileURL(piRuntimePath).href;
         const mod = await import(/* @vite-ignore */ piRuntimeUrl);
         const { createKnowClawSession } = mod;
@@ -1714,6 +2571,23 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+// G1.0 反注册全局快捷键，避免应用退出后仍残留拦截系统按键。
+// G1.2a 同步清理托盘图标。
+app.on('will-quit', () => {
+  try { globalShortcut.unregisterAll(); } catch { /* ignore */ }
+  try { tray?.destroy(); tray = null; } catch { /* ignore */ }
+  // F3 OCR: release ONNX sessions to free ~200-400MB before quit.
+  // ocrService.shutdown() is a no-op if OCR was never initialized, so safe
+  // to call unconditionally. The actual onnxruntime-node native module is
+  // only loaded inside recognize(); shutdown() just resets the singleton.
+  try {
+    // Loaded lazily via require/dynamic-import alternative — avoid cycle.
+    import('../Agent/services/ocrService.js')
+      .then((mod) => mod.shutdown && mod.shutdown())
+      .catch(() => { /* ignore */ });
+  } catch { /* ignore */ }
 });
 
 // In this file you can include the rest of your app's specific main process

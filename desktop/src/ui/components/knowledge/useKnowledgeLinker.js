@@ -165,7 +165,11 @@ export default function useKnowledgeLinker({ projectName, domain, items, onItems
     const kApi = window.ipm?.knowledge?.addLink;
     if (typeof kApi === 'function') {
       idsToLink.forEach((id) => {
-        kApi(projectName, id, targetNodeId, kind, domainOpts).catch(() => {});
+        kApi(projectName, id, targetNodeId, kind, domainOpts).catch((err) => {
+          // F1: 附属壳后端会拒绝 addLink；把错误暴露出来，避免静默失败误导用户。
+          const msg = err?.message || String(err) || '关联失败';
+          addToast(msg, 'error');
+        });
       });
     }
   }, [fileNodeMap, selectedIds, items, projectName, domainOpts, addToast, handleUndo]);

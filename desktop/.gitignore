@@ -92,3 +92,18 @@ typings/
 out/
 
 /userfile
+
+# Bundled MinGit binaries — too large for git. Developers either run
+# `npm run setup:mingit` (downloads the official release into
+# `vendor/MinGit/`) or skip it for a build that relies solely on
+# system-installed Git for Windows.
+/vendor/MinGit/
+!/vendor/MinGit/.gitkeep
+!/vendor/README.md
+
+# F3 OCR: PaddleOCR models (~30MB) — populated by `npm run setup:ocr`,
+# pulled from the upstream ppu-paddle-ocr-models repo and bundled into
+# `<resources>/models/ocr/` at packaging time. Not committed to git
+# because of size + license redistribution concerns.
+/models/ocr/
+!/models/.gitkeep

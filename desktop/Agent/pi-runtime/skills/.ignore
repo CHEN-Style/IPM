@@ -1,0 +1,6 @@
+# U2a: tell pi's loadSkillsFromDir scanner to skip the shared helpers
+# subtree entirely. `_shared/` holds OOXML toolchain code used by docx /
+# xlsx / pptx via $KNOWCLAW_SKILLS_DIR, not skills in their own right.
+# Without this rule pi would still recurse through ~50 XSD files and
+# helpers/validators/ looking for SKILL.md — wasted I/O on every startup.
+_shared/

@@ -1,13 +1,14 @@
 import React from 'react';
-import { FolderOpen, Settings2, BookOpen } from 'lucide-react';
+import { FolderOpen, Settings2, BookOpen, AlertTriangle, Link as LinkIcon } from 'lucide-react';
 
 const RootTable = ({
   errorText,
-  localFolders,
+  // F1: 旧版「本地文件夹」分组已被「附属导入」取代；保留参数仅作向后兼容（实际不渲染）。
+  localFolders, // eslint-disable-line no-unused-vars
   projects,
   entityLabel,
-  onEnterLocalFolder,
-  onContextMenuLocalFolder,
+  onEnterLocalFolder, // eslint-disable-line no-unused-vars
+  onContextMenuLocalFolder, // eslint-disable-line no-unused-vars
   onEnterProject,
   onContextMenuProject,
   rowStyleByStatus,
@@ -45,65 +46,64 @@ const RootTable = ({
           </tr>
         </thead>
         <tbody>
-          {(localFolders || []).map((f) => {
-            const exists = Boolean(f?.exists);
-            const name = String(f?.name || '本地文件夹');
-            const p = String(f?.path || '');
-            const rowCls = exists
-              ? 'hover:bg-slate-50/50'
-              : 'bg-rose-50/70 hover:bg-rose-50 border border-rose-200/60';
+          {projects.map((p, pIdx) => {
+            const isAttached = Boolean(p?.attached);
+            const isBroken = Boolean(p?.broken);
+            const externalPath = String(p?.externalRootPath || '');
+            const rowCls = isAttached && isBroken
+              ? 'bg-rose-50/70 hover:bg-rose-50 border border-rose-200/60'
+              : (rowStyleByStatus?.(p.status) || '');
+            const displayPath = isAttached ? (externalPath || p.path) : p.path;
             return (
-              <tr
-                key={`__local__${p}`}
-                onClick={() => { if (!exists) return; onEnterLocalFolder?.(p); }}
-                onContextMenu={(e) => onContextMenuLocalFolder?.(e, f)}
-                className={`group transition-all duration-200 ${exists ? 'cursor-pointer' : 'cursor-not-allowed'} ${rowCls}`}
-                title={exists ? '点击进入该本地文件夹' : '该路径已失效，右键可取消关联'}
-              >
-                <td className="py-3.5 pl-4 rounded-l border-y border-transparent">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className={`p-2 rounded shrink-0 ${exists ? 'bg-slate-100 group-hover:bg-white' : 'bg-rose-100'} transition-colors`}>
-                      <FolderOpen size={16} className={exists ? 'text-slate-600' : 'text-rose-600'} />
-                    </div>
-                    <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                      <span className={`text-sm font-medium truncate ${exists ? 'text-slate-800' : 'text-rose-700'}`}>{name}</span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-900/5 text-slate-600 border border-slate-200 shrink-0">本地</span>
-                      {!exists && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200 shrink-0">已失效</span>
-                      )}
-                    </div>
-                  </div>
-                </td>
-                <td className="py-3.5 border-y border-transparent root-table-path">
-                  <span className="text-xs text-slate-400 block truncate" title={p}>{p}</span>
-                </td>
-                <td className="py-3.5 border-y border-transparent">
-                  <span className="text-[10px] font-bold px-2 py-1 rounded bg-white border border-slate-200 text-slate-600 whitespace-nowrap">LOCAL</span>
-                </td>
-                <td className="py-3.5 text-right pr-4 rounded-r border-y border-transparent text-xs text-slate-300">-</td>
-              </tr>
-            );
-          })}
-          {projects.map((p, pIdx) => (
             <tr
               key={p.name}
               onClick={() => onEnterProject?.(p.name)}
               onContextMenu={(e) => onContextMenuProject?.(e, p.name)}
-              className={`group cursor-pointer transition-all duration-200 ${rowStyleByStatus?.(p.status) || ''}`}
+              className={`group cursor-pointer transition-all duration-200 ${rowCls}`}
               data-tour={pIdx === 0 ? 'project-card-first' : undefined}
+              title={isAttached
+                ? (isBroken
+                  ? `外部目录失效：${p.brokenReason || externalPath}`
+                  : `外部导入项目 · 链接到 ${externalPath}`)
+                : undefined}
             >
               <td className="py-3.5 pl-4 rounded-l border-y border-transparent">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="p-2 bg-slate-100 rounded group-hover:bg-white transition-colors shrink-0">
-                    <FolderOpen size={16} className="text-[#3e4b9c]" />
+                  <div className={`p-2 rounded shrink-0 transition-colors ${
+                    isAttached
+                      ? (isBroken ? 'bg-rose-100' : 'bg-amber-50 group-hover:bg-amber-100')
+                      : 'bg-slate-100 group-hover:bg-white'
+                  }`}>
+                    {isAttached
+                      ? (isBroken
+                        ? <AlertTriangle size={16} className="text-rose-600" />
+                        : <LinkIcon size={16} className="text-amber-600" />)
+                      : <FolderOpen size={16} className="text-[#3e4b9c]" />}
                   </div>
-                  <span className={`text-sm font-medium truncate ${String(p.status || '').toLowerCase() === 'archived' ? 'text-slate-500' : 'text-slate-800'}`}>
-                    {p.name}
-                  </span>
+                  <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                    <span className={`text-sm font-medium truncate ${
+                      isAttached && isBroken ? 'text-rose-700' : (String(p.status || '').toLowerCase() === 'archived' ? 'text-slate-500' : 'text-slate-800')
+                    }`}>
+                      {p.name}
+                    </span>
+                    {isAttached && (
+                      <span
+                        className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 shrink-0"
+                        title={`外部根：${externalPath}`}
+                      >
+                        外挂
+                      </span>
+                    )}
+                    {isAttached && isBroken && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200 shrink-0">
+                        路径失效
+                      </span>
+                    )}
+                  </div>
                 </div>
               </td>
               <td className="py-3.5 border-y border-transparent root-table-path">
-                <span className="text-xs text-slate-400 block truncate" title={p.path}>{p.path}</span>
+                <span className="text-xs text-slate-400 block truncate" title={displayPath}>{displayPath}</span>
               </td>
               <td className="py-3.5 border-y border-transparent">
                 <div
@@ -158,8 +158,9 @@ const RootTable = ({
                 </div>
               </td>
             </tr>
-          ))}
-          {!projects.length && !(localFolders || []).length && (
+            );
+          })}
+          {!projects.length && (
             <tr>
               <td colSpan={4} className="py-10 text-center text-sm text-slate-400">
                 暂无{entityLabel}，点击右上角「新建{entityLabel}」

@@ -14,6 +14,10 @@ export function registerExplorerIpc({
   STUDY_WORKSPACE_NAME,
   getWorkspaceDirOrThrow,
   resolveInside,
+  // F1: 双根路径解析（系统路径 → 壳内；业务路径 → 外部根；原生项目 → 全部壳内）
+  resolveContentPath,
+  isAttachedProject,
+  getExternalRootPath,
   asPosixRel,
   // permissions / protection
   isProtectedRelPath,
@@ -28,6 +32,8 @@ export function registerExplorerIpc({
   // structure / migrations
   ensureProjectStructure,
   syncStructureJson,
+  // F1: 附属壳走外部扫描
+  syncStructureFromExternal,
   safeReadJson,
   getProjectStructurePath,
   remapStructureDocRelPaths,
@@ -41,8 +47,64 @@ export function registerExplorerIpc({
   // ai storage sync (temp delete)
   listAiSuggestions,
   setAiSuggestionStatus,
+  // W3a: 路径联动统一入口
+  remapInternalPath,
+  cleanupDeletedPath,
 }) {
   if (!ipcMain) throw new Error('registerExplorerIpc: ipcMain is required');
+
+  // F1: 把"内容路径"统一经由 resolveContentPath 解析；附属壳的业务路径会指向外部根。
+  // 缺省回退到 resolveInside（向后兼容）。
+  const resolveContent = (projectDir, relPath) => {
+    if (typeof resolveContentPath === 'function') return resolveContentPath(projectDir, relPath);
+    return resolveInside(projectDir, relPath);
+  };
+  const isAttached = (projectDir) =>
+    typeof isAttachedProject === 'function' && isAttachedProject(projectDir);
+
+  // F1: 选择正确的 structure 同步函数 — 附属壳走外部扫描，原生项目走原版。
+  const syncStructureFor = (projectDir, projectName, seedDoc) => {
+    if (isAttached(projectDir)) {
+      if (typeof syncStructureFromExternal === 'function') {
+        return syncStructureFromExternal(projectDir, projectName, seedDoc);
+      }
+      // 安全回退：不调用原版（会摧毁外部镜像）
+      return null;
+    }
+    return syncStructureJson(projectDir, projectName, seedDoc);
+  };
+
+  // ── W3a: 在 rename/move 完成后调用统一 remapper ──
+  // 把所有相关的 record 路径注入，由 remapper 内部决定是否触达。
+  const runRemap = (projectDir, projectName, fromRel, toRel, isDir) => {
+    if (typeof remapInternalPath !== 'function') return;
+    try {
+      const res = remapInternalPath(projectDir, projectName, fromRel, toRel, {
+        isDir,
+        clipboardRecordPath: typeof getClipboardRecordPath === 'function'
+          ? getClipboardRecordPath(projectDir) : undefined,
+        screenshotRecordPath: typeof getScreenshotRecordPath === 'function'
+          ? getScreenshotRecordPath(projectDir) : undefined,
+      });
+      if (res && Array.isArray(res.errors) && res.errors.length > 0) {
+        console.warn('[explorer] remapInternalPath partial failure:', res.errors);
+      }
+    } catch (e) {
+      console.warn('[explorer] remapInternalPath threw:', e?.message || e);
+    }
+  };
+
+  const runCleanup = (projectDir, projectName, deletedRel, isDir) => {
+    if (typeof cleanupDeletedPath !== 'function') return;
+    try {
+      const res = cleanupDeletedPath(projectDir, projectName, deletedRel, { isDir });
+      if (res && Array.isArray(res.errors) && res.errors.length > 0) {
+        console.warn('[explorer] cleanupDeletedPath partial failure:', res.errors);
+      }
+    } catch (e) {
+      console.warn('[explorer] cleanupDeletedPath threw:', e?.message || e);
+    }
+  };
 
   ipcMain.handle('explorer/list', async (_evt, payload) => {
     const projectName = sanitizeProjectName(payload?.projectName);
@@ -70,22 +132,55 @@ export function registerExplorerIpc({
       // ignore
     }
 
-    const dir = resolveInside(projectDir, relPath);
+    // F1: 双根解析。附属壳的"业务路径"指向外部根；
+    //     系统路径（temp/snippets/meta）以及空 relPath（项目根）下面的系统目录展示
+    //     仍需要呈现出来 —— 见下面"附属壳的根视图合并"。
+    const dir = resolveContent(projectDir, relPath);
     if (!fs.existsSync(dir)) throw new Error('目录不存在');
 
     const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const baseAbs = path.resolve(dir);
+    const attachedExternal = isAttached(projectDir) && (relPath === '' || (typeof getExternalRootPath === 'function' && getExternalRootPath(projectDir) && path.resolve(getExternalRootPath(projectDir)) === baseAbs));
     const mapped = entries.map((e) => {
       const fullPath = path.join(dir, e.name);
-      const st = fs.statSync(fullPath);
+      let st;
+      try { st = fs.statSync(fullPath); } catch { st = { size: 0, mtimeMs: 0, isDirectory: () => e.isDirectory(), isFile: () => e.isFile() }; }
       const kind = e.isDirectory() ? 'dir' : e.isFile() ? 'file' : 'other';
+      // 业务路径相对项目（即"外部根"对附属壳而言）的 POSIX 相对路径
+      const relSegments = [];
+      if (relPath) relSegments.push(relPath);
+      relSegments.push(e.name);
+      const relPosix = relSegments.filter(Boolean).join('/');
       return {
         name: e.name,
         kind,
-        relPath: path.relative(projectDir, fullPath).split(path.sep).join('/'),
+        relPath: relPosix,
         sizeBytes: kind === 'file' ? st.size : 0,
         mtimeMs: st.mtimeMs,
       };
     });
+
+    // F1: 附属壳的"根视图"需要把壳内的 temp/snippets/meta 系统目录合并显示，
+    //     这样用户看到的层级结构和原生项目一致（外部业务夹 + 三个系统夹）。
+    if (attachedExternal) {
+      const sysDirs = ['temp', 'snippets', 'meta'];
+      const seen = new Set(mapped.map((x) => x.name));
+      for (const sysName of sysDirs) {
+        if (seen.has(sysName)) continue; // 极端情况：外部根存在同名目录
+        const sysAbs = path.join(projectDir, sysName);
+        try {
+          if (!fs.existsSync(sysAbs)) continue;
+          const sysSt = fs.statSync(sysAbs);
+          mapped.push({
+            name: sysName,
+            kind: 'dir',
+            relPath: sysName,
+            sizeBytes: 0,
+            mtimeMs: sysSt.mtimeMs,
+          });
+        } catch { /* ignore */ }
+      }
+    }
 
     const dirRank = (entry) => {
       if (entry.kind !== 'dir') return 1000;
@@ -144,7 +239,7 @@ export function registerExplorerIpc({
     const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
     const relPath = String(payload?.relPath ?? '');
     if (!relPath) throw new Error('目标路径不能为空');
-    const target = resolveInside(projectDir, relPath);
+    const target = resolveContent(projectDir, relPath);
     if (!fs.existsSync(target)) throw new Error('目标不存在');
     const st = fs.statSync(target);
     if (!st.isFile()) throw new Error('仅支持打开文件（不支持打开文件夹）');
@@ -161,22 +256,22 @@ export function registerExplorerIpc({
     const folderName = sanitizeFileName(payload?.folderName);
     if (!folderName) throw new Error('文件夹名称不能为空');
 
-    const dir = resolveInside(projectDir, relPath);
+    const dir = resolveContent(projectDir, relPath);
     if (!fs.existsSync(dir)) throw new Error('目录不存在');
 
     const relPosix = normalizeRelPathPosix(path.join(relPath, folderName));
     if (isProtectedFolderNameRelPath(relPosix)) {
-      throw new Error('业务/系统固定目录禁止创建/覆盖');
+      throw new Error('系统固定目录禁止创建/覆盖');
     }
 
-    const desired = resolveInside(projectDir, path.join(relPath, folderName));
+    const desired = resolveContent(projectDir, path.join(relPath, folderName));
     if (fs.existsSync(desired)) {
       const ok = await confirmAutoSuffix();
       if (!ok) return { ok: false, projectName, conflict: true };
       const { fullPath, name } = ensureUniqueDirPath(dir, folderName);
       fs.mkdirSync(fullPath, { recursive: true });
       try {
-        syncStructureJson(projectDir, projectName);
+        syncStructureFor(projectDir, projectName);
       } catch {
         // ignore
       }
@@ -185,7 +280,7 @@ export function registerExplorerIpc({
 
     fs.mkdirSync(desired, { recursive: true });
     try {
-      syncStructureJson(projectDir, projectName);
+      syncStructureFor(projectDir, projectName);
     } catch {
       // ignore
     }
@@ -200,7 +295,7 @@ export function registerExplorerIpc({
     if (isProtectedFolderNameRelPath(relPosix)) {
       throw new Error('系统目录禁止删除（如需删除请直接删除整个项目）');
     }
-    const target = resolveInside(projectDir, entryRelPath);
+    const target = resolveContent(projectDir, entryRelPath);
     if (!fs.existsSync(target)) throw new Error('目标不存在');
     let wasDir = false;
     try {
@@ -217,6 +312,28 @@ export function registerExplorerIpc({
     if (isTempChild && wasDir) {
       throw new Error('temp 目录下不允许删除文件夹');
     }
+    // (target 已基于 resolveContent 解析；附属壳的业务路径会指向外部根)
+
+    // W1 (D3): 删除业务文件夹前检查是否有 pending 的 AI 归档建议指向该文件夹或其子路径。
+    // 直接删会让暂存区出现「目标已不存在」的孤儿建议，体验差；要求用户先处理或拒绝。
+    // 仅对目录生效，且跳过 temp 子文件（其建议指向的是源路径而非父文件夹）。
+    if (wasDir && !isTempChild) {
+      try {
+        const allPending = listAiSuggestions(projectDir, projectName, { status: 'pending' });
+        const blocked = allPending.find((s) => {
+          const folder = normalizeRelPathPosix(s?.suggestedFolderRelPath || '');
+          if (!folder) return false;
+          return folder === relPosix || folder.startsWith(relPosix + '/');
+        });
+        if (blocked) {
+          throw new Error(`文件夹「${path.basename(target)}」下有待处理的 AI 分类建议，请先在暂存区处理后再删除`);
+        }
+      } catch (e) {
+        // 抛出本检查产出的业务错误；DB 查询失败等其他异常不阻塞删除。
+        if (e && /待处理的 AI 分类建议/.test(String(e.message || ''))) throw e;
+      }
+    }
+
     await trashOrRm(target);
     if (!waitUntilGoneSync(target)) {
       throw new Error('删除尚未完成，请稍后重试');
@@ -264,17 +381,26 @@ export function registerExplorerIpc({
     }
 
     try {
-      syncStructureJson(projectDir, projectName);
+      syncStructureFor(projectDir, projectName);
     } catch {
       // ignore
     }
+
+    // W3a: 软清理孤儿引用（knowledge_items archived、knowledge_links DELETE、
+    //      suggestions 标记 source_deleted/target_deleted、source_records DELETE、
+    //      classify-rules/preferences 设为 enabled=false）
+    // temp/ 单文件已在上面单独处理 source_deleted；此处补齐其他场景。
+    if (!isTempChild || wasDir) {
+      runCleanup(projectDir, projectName, relPosix, wasDir);
+    }
+
     return { ok: true, projectName };
   });
 
   ipcMain.handle('explorer/upload', async (_evt, payload) => {
     const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
     const destRelPath = String(payload?.destRelPath ?? '');
-    const destDir = resolveInside(projectDir, destRelPath);
+    const destDir = resolveContent(projectDir, destRelPath);
     if (!fs.existsSync(destDir)) throw new Error('目标目录不存在');
 
     const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -310,7 +436,7 @@ export function registerExplorerIpc({
   ipcMain.handle('explorer/drop-upload', async (_evt, payload) => {
     const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
     const destRelPath = String(payload?.destRelPath ?? '');
-    const destDir = resolveInside(projectDir, destRelPath);
+    const destDir = resolveContent(projectDir, destRelPath);
     if (!fs.existsSync(destDir)) throw new Error('目标目录不存在');
 
     const filePaths = Array.isArray(payload?.filePaths) ? payload.filePaths : [];
@@ -352,13 +478,19 @@ export function registerExplorerIpc({
     if (isProtectedRelPath(entryRelPath)) {
       throw new Error('该目录为系统元数据目录，禁止重命名');
     }
-    const target = resolveInside(projectDir, entryRelPath);
+    const target = resolveContent(projectDir, entryRelPath);
     if (!fs.existsSync(target)) throw new Error('目标不存在');
 
     const st = fs.statSync(target);
     const parentDir = path.dirname(target);
     const newName = sanitizeFileName(newNameRaw);
     if (!newName) throw new Error('新名称不能为空');
+
+    // F1: 附属壳的"业务路径"是相对外部根的；relPath 仍以 POSIX 相对外部根表示。
+    // 计算相对路径时统一以 contentRoot 为基准（原生项目 = projectDir，附属壳 = 外部根）。
+    const contentRoot = isAttached(projectDir)
+      ? (typeof getExternalRootPath === 'function' ? getExternalRootPath(projectDir) : projectDir)
+      : projectDir;
 
     let desired = path.join(parentDir, newName);
     // Same name (no-op)
@@ -371,46 +503,54 @@ export function registerExplorerIpc({
       if (st.isDirectory()) {
         const { fullPath, name } = ensureUniqueDirPath(parentDir, newName);
         desired = fullPath;
+        const fromRel = asPosixRel(entryRelPath);
+        const toRel = asPosixRel(path.relative(contentRoot, desired));
         try {
           const prev = safeReadJson(getProjectStructurePath(projectDir), null);
-          const fromRel = asPosixRel(entryRelPath);
-          const toRel = asPosixRel(path.relative(projectDir, desired));
           const seeded = remapStructureDocRelPaths(prev, fromRel, toRel);
           fs.renameSync(target, desired);
-          syncStructureJson(projectDir, projectName, seeded);
+          syncStructureFor(projectDir, projectName, seeded);
         } catch {
           fs.renameSync(target, desired);
           try {
-            syncStructureJson(projectDir, projectName);
+            syncStructureFor(projectDir, projectName);
           } catch {
             // ignore
           }
         }
+        // W3a: 联动其他存储（classify-rules / preferences / records / project.db）
+        runRemap(projectDir, projectName, fromRel, toRel, true);
         return { ok: true, projectName, renamedTo: name };
       }
       const unique = ensureUniqueDestPath(parentDir, newName);
+      const fromRelFile = asPosixRel(entryRelPath);
+      const toRelFile = asPosixRel(path.relative(contentRoot, unique));
       fs.renameSync(target, unique);
+      // W3a: 单文件 rename 也联动（修复历史缺口）
+      runRemap(projectDir, projectName, fromRelFile, toRelFile, false);
       return { ok: true, projectName, renamedTo: path.basename(unique) };
     }
 
+    const fromRel = asPosixRel(entryRelPath);
+    const toRel = asPosixRel(path.relative(contentRoot, desired));
     if (st.isDirectory()) {
       try {
         const prev = safeReadJson(getProjectStructurePath(projectDir), null);
-        const fromRel = asPosixRel(entryRelPath);
-        const toRel = asPosixRel(path.relative(projectDir, desired));
         const seeded = remapStructureDocRelPaths(prev, fromRel, toRel);
         fs.renameSync(target, desired);
-        syncStructureJson(projectDir, projectName, seeded);
+        syncStructureFor(projectDir, projectName, seeded);
       } catch {
         fs.renameSync(target, desired);
         try {
-          syncStructureJson(projectDir, projectName);
+          syncStructureFor(projectDir, projectName);
         } catch {
           // ignore
         }
       }
+      runRemap(projectDir, projectName, fromRel, toRel, true);
     } else {
       fs.renameSync(target, desired);
+      runRemap(projectDir, projectName, fromRel, toRel, false);
     }
     return { ok: true, projectName, renamedTo: newName };
   });
@@ -427,10 +567,10 @@ export function registerExplorerIpc({
       throw new Error('该目录为系统元数据目录，禁止移动');
     }
 
-    const srcPath = resolveInside(projectDir, srcRelPath);
+    const srcPath = resolveContent(projectDir, srcRelPath);
     if (!fs.existsSync(srcPath)) throw new Error('源目标不存在');
 
-    const destDirPath = resolveInside(projectDir, destDirRelPath);
+    const destDirPath = resolveContent(projectDir, destDirRelPath);
     if (!fs.existsSync(destDirPath)) throw new Error('目标目录不存在');
     const destDirStat = fs.statSync(destDirPath);
     if (!destDirStat.isDirectory()) throw new Error('目标不是目录');
@@ -457,67 +597,78 @@ export function registerExplorerIpc({
       }
     }
 
+    // F1: 双根相对路径基准
+    const contentRoot = isAttached(projectDir)
+      ? (typeof getExternalRootPath === 'function' ? getExternalRootPath(projectDir) : projectDir)
+      : projectDir;
+
     if (fs.existsSync(desired)) {
       const ok = await confirmAutoSuffix();
       if (!ok) return { ok: false, projectName, conflict: true };
       if (st.isDirectory()) {
         const { fullPath, name } = ensureUniqueDirPath(destDirPath, baseName);
         desired = fullPath;
+        const fromRel = asPosixRel(srcRelPath);
+        const toRel = asPosixRel(path.relative(contentRoot, desired));
         try {
           const prev = safeReadJson(getProjectStructurePath(projectDir), null);
-          const fromRel = asPosixRel(srcRelPath);
-          const toRel = asPosixRel(path.relative(projectDir, desired));
           const seeded = remapStructureDocRelPaths(prev, fromRel, toRel);
           fs.renameSync(srcPath, desired);
-          syncStructureJson(projectDir, projectName, seeded);
+          syncStructureFor(projectDir, projectName, seeded);
         } catch {
           fs.renameSync(srcPath, desired);
           try {
-            syncStructureJson(projectDir, projectName);
+            syncStructureFor(projectDir, projectName);
           } catch {
             // ignore
           }
         }
+        runRemap(projectDir, projectName, fromRel, toRel, true);
         return {
           ok: true,
           projectName,
-          movedTo: asPosixRel(path.relative(projectDir, desired)),
+          movedTo: asPosixRel(path.relative(contentRoot, desired)),
           movedName: name,
         };
       }
       const unique = ensureUniqueDestPath(destDirPath, baseName);
+      const fromRelFile = asPosixRel(srcRelPath);
+      const toRelFile = asPosixRel(path.relative(contentRoot, unique));
       fs.renameSync(srcPath, unique);
+      runRemap(projectDir, projectName, fromRelFile, toRelFile, false);
       return {
         ok: true,
         projectName,
-        movedTo: asPosixRel(path.relative(projectDir, unique)),
+        movedTo: asPosixRel(path.relative(contentRoot, unique)),
         movedName: path.basename(unique),
       };
     }
 
+    const fromRel = asPosixRel(srcRelPath);
+    const toRel = asPosixRel(path.relative(contentRoot, desired));
     if (st.isDirectory()) {
       try {
         const prev = safeReadJson(getProjectStructurePath(projectDir), null);
-        const fromRel = asPosixRel(srcRelPath);
-        const toRel = asPosixRel(path.relative(projectDir, desired));
         const seeded = remapStructureDocRelPaths(prev, fromRel, toRel);
         fs.renameSync(srcPath, desired);
-        syncStructureJson(projectDir, projectName, seeded);
+        syncStructureFor(projectDir, projectName, seeded);
       } catch {
         fs.renameSync(srcPath, desired);
         try {
-          syncStructureJson(projectDir, projectName);
+          syncStructureFor(projectDir, projectName);
         } catch {
           // ignore
         }
       }
+      runRemap(projectDir, projectName, fromRel, toRel, true);
     } else {
       fs.renameSync(srcPath, desired);
+      runRemap(projectDir, projectName, fromRel, toRel, false);
     }
     return {
       ok: true,
       projectName,
-      movedTo: asPosixRel(path.relative(projectDir, desired)),
+      movedTo: asPosixRel(path.relative(contentRoot, desired)),
       movedName: baseName,
     };
   });

@@ -49,8 +49,15 @@ strength 取值规则：
 conditions 中只填用户明确提到的条件，没提到的留空数组 []。
 folder 必须从项目文件夹列表中选择最匹配的一个。如果用户描述的文件夹不在列表中，选择最接近的。`;
 
-export function registerPreferencesIpc({ ipcMain, getWorkspaceDirOrThrow }) {
+export function registerPreferencesIpc({ ipcMain, getWorkspaceDirOrThrow, isAttachedProject }) {
   if (!ipcMain) throw new Error('registerPreferencesIpc: ipcMain is required');
+
+  // F1: 附属壳禁用软偏好（同硬规则）。
+  const guardAttached = (projectDir) => {
+    if (typeof isAttachedProject === 'function' && isAttachedProject(projectDir)) {
+      throw new Error('外部导入项目不支持分类偏好（仅 LLM 推理 + 描述）');
+    }
+  };
 
   ipcMain.handle('preferences/list', async (_evt, payload) => {
     const { projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
@@ -60,6 +67,7 @@ export function registerPreferencesIpc({ ipcMain, getWorkspaceDirOrThrow }) {
 
   ipcMain.handle('preferences/add', async (_evt, payload) => {
     const { projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    guardAttached(projectDir);
     const pref = payload?.pref;
     if (!pref) throw new Error('pref 不能为空');
     const entry = addPreference(projectDir, pref);
@@ -68,6 +76,7 @@ export function registerPreferencesIpc({ ipcMain, getWorkspaceDirOrThrow }) {
 
   ipcMain.handle('preferences/update', async (_evt, payload) => {
     const { projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    guardAttached(projectDir);
     const prefId = payload?.prefId;
     const patch = payload?.patch;
     if (!prefId) throw new Error('prefId 不能为空');

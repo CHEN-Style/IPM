@@ -16,6 +16,8 @@ function acceptOrResolveStaleWhenSourceMissing({
   sourceRelPath,
   targetRel,
   resolveInside,
+  resolveContentForProject,
+  contentRootForProject,
   sanitizeFileName,
   setAiSuggestionStatus,
   getProjectDb,
@@ -27,14 +29,16 @@ function acceptOrResolveStaleWhenSourceMissing({
   const destRelJoined = `${targetRel}/${baseName}`.replace(/\\/g, '/');
   let destAbs;
   try {
-    destAbs = resolveInside(projectDir, destRelJoined);
+    // F1: 附属壳的 target 在外部根；resolveContentForProject 自动分流。
+    destAbs = resolveContentForProject(projectDir, destRelJoined);
   } catch {
     destAbs = null;
   }
   const now = new Date().toISOString();
 
   if (destAbs && fs.existsSync(destAbs) && fs.statSync(destAbs).isFile()) {
-    const movedToRelPath = String(path.relative(projectDir, destAbs)).split(path.sep).join('/');
+    const root = contentRootForProject(projectDir);
+    const movedToRelPath = String(path.relative(root, destAbs)).split(path.sep).join('/');
     const updated = setAiSuggestionStatus(projectDir, projectName, sourceRelPath, {
       status: 'accepted',
       acceptedAt: now,
@@ -127,10 +131,49 @@ export function registerAiStorageIpc({
   ensureSourceIsTempOrThrow,
   ensureTargetFolderIsAllowedOrThrow,
   resolveInside,
+  // F1: 双根路径解析 + 附属壳感知
+  resolveContentPath,
+  isAttachedProject,
   sanitizeFileName,
   ensureUniqueDestPath,
 }) {
   if (!ipcMain) throw new Error('registerAiStorageIpc: ipcMain is required');
+
+  // F1: 选择正确的"内容根"。原生项目 = projectDir；附属壳 = 外部根。
+  const contentRootForProject = (projectDir) => {
+    if (typeof isAttachedProject === 'function' && isAttachedProject(projectDir)) {
+      // 通过 resolveContentPath 解析空业务路径得到外部根（projectDir 本身在附属壳是 metadata 目录）
+      try {
+        return resolveContentPath(projectDir, '');
+      } catch {
+        return projectDir;
+      }
+    }
+    return projectDir;
+  };
+  const resolveContentForProject = (projectDir, rel) => {
+    if (typeof resolveContentPath === 'function') return resolveContentPath(projectDir, rel);
+    return resolveInside(projectDir, rel);
+  };
+
+  // F1: 跨盘安全的物理移动 — 优先 rename，跨设备时回退 copy + unlink。
+  const movePhysical = (srcAbs, destAbs) => {
+    try {
+      fs.renameSync(srcAbs, destAbs);
+      return;
+    } catch (e) {
+      // EXDEV = 跨盘移动；Windows 下也可能给 ENOTSUP / EPERM。
+      const code = e?.code || '';
+      if (code === 'EXDEV' || code === 'ENOTSUP' || code === 'EPERM' || code === 'EACCES') {
+        // 跨盘：copy + unlink
+        fs.copyFileSync(srcAbs, destAbs);
+        try { fs.unlinkSync(srcAbs); }
+        catch { /* 源文件未删也不致命，下次清理 */ }
+        return;
+      }
+      throw e;
+    }
+  };
 
   // ===== AI Storage (staging area): ghost files & accept/reject =====
   ipcMain.handle('aiStorage/list', async (_evt, payload) => {
@@ -198,7 +241,8 @@ export function registerAiStorageIpc({
     const srcRel = ensureSourceIsTempOrThrow(sourceRelPath);
     const targetRel = ensureTargetFolderIsAllowedOrThrow(projectDir, s.suggestedFolderRelPath);
 
-    const srcAbs = resolveInside(projectDir, srcRel);
+    // F1: temp/ 始终在壳内（系统路径）；resolveContentPath 也会落到壳内。
+    const srcAbs = resolveContentForProject(projectDir, srcRel);
     if (!fs.existsSync(srcAbs)) {
       const resolved = acceptOrResolveStaleWhenSourceMissing({
         projectDir,
@@ -207,6 +251,8 @@ export function registerAiStorageIpc({
         sourceRelPath,
         targetRel,
         resolveInside,
+        resolveContentForProject,
+        contentRootForProject,
         sanitizeFileName,
         setAiSuggestionStatus,
         getProjectDb,
@@ -233,15 +279,17 @@ export function registerAiStorageIpc({
     const st = fs.statSync(srcAbs);
     if (!st.isFile()) throw new Error('源路径不是文件');
 
-    const targetDirAbs = resolveInside(projectDir, targetRel);
+    // F1: target 是业务路径 — 附属壳指向外部根。
+    const targetDirAbs = resolveContentForProject(projectDir, targetRel);
     if (!fs.existsSync(targetDirAbs)) throw new Error('目标目录不存在');
     const targetSt = fs.statSync(targetDirAbs);
     if (!targetSt.isDirectory()) throw new Error('目标不是目录');
 
     const baseName = sanitizeFileName(path.basename(srcAbs)) || 'file';
     const destAbs = ensureUniqueDestPath(targetDirAbs, baseName);
-    fs.renameSync(srcAbs, destAbs);
-    const movedToRelPath = String(path.relative(projectDir, destAbs)).split(path.sep).join('/');
+    movePhysical(srcAbs, destAbs);
+    const contentRoot = contentRootForProject(projectDir);
+    const movedToRelPath = String(path.relative(contentRoot, destAbs)).split(path.sep).join('/');
 
     const now = new Date().toISOString();
     const updated = setAiSuggestionStatus(projectDir, projectName, sourceRelPath, {
@@ -303,7 +351,7 @@ export function registerAiStorageIpc({
         // Guards
         const srcRel = ensureSourceIsTempOrThrow(sourceRelPath);
         const targetRel = ensureTargetFolderIsAllowedOrThrow(projectDir, s.suggestedFolderRelPath);
-        const srcAbs = resolveInside(projectDir, srcRel);
+        const srcAbs = resolveContentForProject(projectDir, srcRel);
         if (!fs.existsSync(srcAbs)) {
           const resolved = acceptOrResolveStaleWhenSourceMissing({
             projectDir,
@@ -312,6 +360,8 @@ export function registerAiStorageIpc({
             sourceRelPath,
             targetRel,
             resolveInside,
+            resolveContentForProject,
+            contentRootForProject,
             sanitizeFileName,
             setAiSuggestionStatus,
             getProjectDb,
@@ -329,12 +379,13 @@ export function registerAiStorageIpc({
         }
         const st = fs.statSync(srcAbs);
         if (!st.isFile()) throw new Error('源不是文件');
-        const targetDirAbs = resolveInside(projectDir, targetRel);
+        const targetDirAbs = resolveContentForProject(projectDir, targetRel);
         if (!fs.existsSync(targetDirAbs) || !fs.statSync(targetDirAbs).isDirectory()) throw new Error('目标目录不存在');
         const baseName = sanitizeFileName(path.basename(srcAbs)) || 'file';
         const destAbs = ensureUniqueDestPath(targetDirAbs, baseName);
-        fs.renameSync(srcAbs, destAbs);
-        const movedToRelPath = String(path.relative(projectDir, destAbs)).split(path.sep).join('/');
+        movePhysical(srcAbs, destAbs);
+        const contentRoot = contentRootForProject(projectDir);
+        const movedToRelPath = String(path.relative(contentRoot, destAbs)).split(path.sep).join('/');
         const now = new Date().toISOString();
         setAiSuggestionStatus(projectDir, projectName, sourceRelPath, {
           status: 'accepted',

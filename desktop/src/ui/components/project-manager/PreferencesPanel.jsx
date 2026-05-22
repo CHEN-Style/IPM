@@ -285,7 +285,7 @@ function NLPreviewCard({ result, onConfirm, onEditThenAdd, onCancel }) {
   );
 }
 
-const PreferencesPanel = ({ projectName, domain, embedded = false, addTriggerRef }) => {
+const PreferencesPanel = ({ projectName, domain, embedded = false, addTriggerRef, isAttached = false }) => {
   const [prefs, setPrefs] = useState([]);
   const [folders, setFolders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -328,12 +328,18 @@ const PreferencesPanel = ({ projectName, domain, embedded = false, addTriggerRef
 
   useEffect(() => {
     if (addTriggerRef) {
-      addTriggerRef.current = () => { setEditingPref(null); setShowForm(true); };
+      // F1: 附属壳禁止打开表单
+      addTriggerRef.current = () => {
+        if (isAttached) return;
+        setEditingPref(null);
+        setShowForm(true);
+      };
     }
     return () => { if (addTriggerRef) addTriggerRef.current = null; };
-  }, [addTriggerRef]);
+  }, [addTriggerRef, isAttached]);
 
   const handleAdd = async (data) => {
+    if (isAttached) return;
     try {
       const source = editingPref?._prefill ? 'natural_language' : 'user_defined';
       await window.ipm?.preferences?.add?.(projectName, { ...data, source }, { domain });
@@ -342,6 +348,7 @@ const PreferencesPanel = ({ projectName, domain, embedded = false, addTriggerRef
       loadData();
     } catch (e) {
       console.error('Failed to add preference', e);
+      window.alert(e?.message || String(e));
     }
   };
 
@@ -442,6 +449,34 @@ const PreferencesPanel = ({ projectName, domain, embedded = false, addTriggerRef
   };
 
   if (!active) return null;
+
+  // F1: 附属壳禁用软偏好，渲染只读空态。
+  if (isAttached) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex-1 overflow-y-auto">
+          <div className="px-5 py-12 text-center max-w-[420px] mx-auto">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-amber-50 border border-amber-200 mb-3">
+              <Brain size={22} className="text-amber-500" />
+            </div>
+            <div className="text-sm font-semibold text-slate-700 mb-1">外部导入项目不支持软偏好</div>
+            <div className="text-[12px] text-slate-500 leading-relaxed">
+              附属壳的目录结构可能在应用外被修改，
+              基于路径的偏好倾向容易失去意义。
+              <br />
+              <br />
+              当前项目的 AI 分类完全依赖：
+              <ul className="text-left mt-2 space-y-1 text-[12px] text-slate-600">
+                <li>· LLM Agent 推理</li>
+                <li>· 文件夹描述（在文件管理页编辑）</li>
+                <li>· 历史分类反馈（"原始事件" 标签可查）</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">

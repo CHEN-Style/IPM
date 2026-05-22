@@ -1,0 +1,8 @@
+# U2a: this directory holds shared helpers used by multiple Skills
+# (currently the OOXML toolchain reused by docx / xlsx / pptx).
+# It is NOT a Skill itself and contains no SKILL.md. The line below
+# tells pi-coding-agent's loadSkillsFromDir scanner to skip every
+# .md file here, defending against future maintainers who might drop
+# a README.md and accidentally have it picked up as a "flat" skill
+# (pi treats top-level .md files in a skills root as flat skills).
+*.md

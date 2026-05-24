@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { CheckCircle2, Clock, Eye, EyeOff, FolderOpen, RefreshCw, Settings2, Cpu, Loader2 } from 'lucide-react';
+import { CheckCircle2, Clock, Eye, EyeOff, FolderOpen, RefreshCw, Settings2, Cpu, Loader2, Search, ExternalLink } from 'lucide-react';
 
 const Card = ({ title, description, children }) => {
   return (
@@ -329,6 +329,160 @@ const LlmConfigCard = () => {
   );
 };
 
+const SearchApiCard = () => {
+  const [apiKey, setApiKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [saveMsg, setSaveMsg] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.ipm?.prefs?.get?.();
+        if (cancelled) return;
+        const sa = res?.prefs?.searchApi;
+        if (sa) setApiKey(sa.apiKey || '');
+      } catch (e) {
+        console.error('Failed to load search API config:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleChange = useCallback((e) => {
+    setApiKey(e.target.value);
+    setDirty(true);
+    setTestResult(null);
+    setSaveMsg('');
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    setSaveMsg('');
+    try {
+      await window.ipm?.prefs?.set?.({ searchApi: { provider: 'bocha', apiKey } });
+      setDirty(false);
+      setSaveMsg('已保存');
+      setTimeout(() => setSaveMsg(''), 2000);
+    } catch (e) {
+      setSaveMsg('保存失败：' + (e?.message || String(e)));
+    } finally {
+      setSaving(false);
+    }
+  }, [apiKey]);
+
+  const handleTest = useCallback(async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await window.ipm?.prefs?.testSearchApi?.({ provider: 'bocha', apiKey });
+      setTestResult(res);
+    } catch (e) {
+      setTestResult({ ok: false, error: e?.message || String(e) });
+    } finally {
+      setTesting(false);
+    }
+  }, [apiKey]);
+
+  const inputCls = 'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 transition-colors';
+
+  const hasKey = Boolean(apiKey && apiKey.trim());
+
+  return (
+    <Card
+      title="网页搜索 API"
+      description="配置博查 (Bocha) 搜索 API Key，为 KnowClaw 提供联网搜索能力。"
+    >
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-medium text-slate-700 mb-1.5">API Key</label>
+          <div className="relative">
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={apiKey}
+              onChange={handleChange}
+              placeholder="sk-bocha-..."
+              className={inputCls + ' pr-10'}
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              onClick={() => setShowKey((v) => !v)}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+              tabIndex={-1}
+            >
+              {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || !dirty}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            保存
+          </button>
+          <button
+            type="button"
+            onClick={handleTest}
+            disabled={testing || !hasKey}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {testing && <Loader2 size={14} className="animate-spin" />}
+            测试连接
+          </button>
+          {saveMsg && <span className="text-xs text-green-600 font-medium">{saveMsg}</span>}
+        </div>
+
+        {testResult && (
+          <div className={`text-xs px-3 py-2 rounded-lg ${testResult.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+            {testResult.ok ? '连接成功，搜索 API 可正常使用。' : `连接失败：${testResult.error || '未知错误'}`}
+          </div>
+        )}
+
+        {!hasKey && (
+          <div className="text-xs px-3 py-2 rounded-lg bg-amber-50 text-amber-800 border border-amber-200">
+            未配置搜索 API Key 时，KnowClaw 仍可抓取你指定的 URL，但无法主动联网搜索。
+          </div>
+        )}
+
+        <div className="text-xs text-slate-500 leading-relaxed border-t border-slate-100 pt-3">
+          <div className="flex items-start gap-2">
+            <Search size={14} className="text-slate-400 mt-0.5 shrink-0" />
+            <div>
+              <div className="text-slate-700 font-medium mb-0.5">如何获取 API Key</div>
+              <div>
+                前往
+                <a
+                  href="https://open.bochaai.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-0.5 text-slate-900 hover:underline mx-1"
+                >
+                  博查 AI 开放平台
+                  <ExternalLink size={11} />
+                </a>
+                注册账号，新用户可免费获得 1000 次搜索调用额度。
+              </div>
+              <div className="mt-1 text-slate-400">
+                配置变更将在下次新建 / 打开 KnowClaw 会话时生效。
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+};
+
 const SettingsPage = () => {
   const [saving, setSaving] = useState(false);
   const [prefs, setPrefs] = useState({ floatingUploadMode: 'auto' });
@@ -381,6 +535,7 @@ const SettingsPage = () => {
         <div className="grid grid-cols-1 gap-6 max-w-4xl">
           <DataDirCard />
           <LlmConfigCard />
+          <SearchApiCard />
 
           <Card
             title="悬浮窗上传文件模式（真实功能）"

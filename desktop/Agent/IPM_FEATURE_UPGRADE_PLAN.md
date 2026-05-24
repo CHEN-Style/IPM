@@ -6,7 +6,8 @@
 > （KnowClaw 引擎迭代 U0–U8 已 DONE，U9+ 规划中）形成三套独立但互相引用的演进
 > 主线。
 >
-> F1/F2/F3 已 `DONE`（2026-05-22），F4/K1/K2/K3 仍为 `RESEARCH` / `PLANNED`。
+> F1/F2/F3/K1/K2 已 `DONE`（K2 落地于 2026-05-23），F4 `DEFERRED`，K3 仍为
+> `PLANNED` / `RESEARCH`。
 
 ---
 
@@ -62,9 +63,9 @@
 | F1 | 外部文件夹「附属导入」 | `DONE` | 2026-05-22 完成。附属壳 + 双根路径解析 + 外部目录扫描 + 前端/后端限制一致性 |
 | F2 | 网页完整信息抓取升级 | `DONE` | 2026-05-22 完成。Electron 隐藏窗口渲染 + HTTP 降级 + Markdown 转换 + 全页截图 + 截图管理 |
 | F3 | 内置 OCR 能力（PP-OCRv5） | `DONE` | 2026-05-22 完成。`ppu-paddle-ocr` + `onnxruntime-node` 纯 Node.js 方案，中英双模型 |
-| F4 | 内置长截屏 | `RESEARCH` | 强依赖 F3 闭环（已完成）；可能复用 `screenshots-record.json` 写入路径 |
-| K1 | KnowClaw 网页搜索/抓取稳定性 | `PLANNED` | 现有 `desktop/Agent/pi-runtime/tools/webTools.js` `fetch_web`；与 F2 共底层 |
-| K2 | KnowClaw 工作空间文件树侧栏 | `PLANNED`（合流） | 见 `KNOWCLAW_UPGRADE_PLAN.md` § Phase U1.5 |
+| F4 | 内置长截屏 | `DEFERRED` | 短期不开发；F3 依赖已解除，后续可按需启动 |
+| K1 | KnowClaw 网页搜索/抓取稳定性 | `DONE` | 2026-05-22 完成。博查 (Bocha) Web Search + F2 渲染抓取桥接 + 设置页 API Key 配置 + LLM 自然降级 |
+| K2 | KnowClaw 工作空间文件树侧栏 + AI 过程可视化 | `DONE` | 2026-05-23 完成。右侧 `WorkspaceFileTree` 面板（树渲染 + 折叠 + 文件点击）、`knowclaw:listWorkspaceTree` IPC、`tool_execution_start` 路径提取 + 5s 新增/修改高亮、heartbeat 状态条（thinking / writing / tool）、30s 空闲倒计时。与 `KNOWCLAW_UPGRADE_PLAN.md` § Phase U1.5 同步交付 |
 | K3 | 悬浮窗 KnowClaw 助手 | `RESEARCH` | Backlog-A 已完成；需先看 Backlog-D（页面切换不丢进度）落地情况 |
 
 ---
@@ -441,12 +442,13 @@ userfile/projects/<壳名>/
 | 2026-05-22 | **实施完成** | 全部 8 步落地：依赖安装 + 构建配置 → 模型下载脚本 → OCR 服务层 → IPC 处理器 → preload 暴露 → knowledge.js 集成（截图+剪藏+手动触发 + snippet 碎片创建） → 前端入库弹窗 OCR 选项 → 详情面板 OCR 结果显示/手动触发 |
 | 2026-05-22 | 修复 | `CreateKnowledgeModal` 中 `pngBuffer` 未正确传递到后端 → 修复 ArrayBuffer → Uint8Array 转换 |
 | 2026-05-22 | 确认 | `onnxruntime-node` DLL 初始化失败为裸 Node.js 环境特有问题，Electron 打包环境不受影响；验证应用正常启动 |
+| 2026-05-22 | **修复** | Electron 中 `onnxruntime-node` 原生 `.node` DLL 与 Electron 不兼容 → 新增 `scripts/patch-onnxruntime.mjs` 将 `onnxruntime-node` shim 为 `onnxruntime-web`（WASM 后端）；`ocrService.js` 执行提供程序改为 `wasm` + 配置 WASM 路径；`package.json` 新增 `postinstall` 自动 patch |
 
 ---
 
 ### Phase F4 — 内置长截屏
 
-**Status:** `RESEARCH`
+**Status:** `DEFERRED`（2026-05-22 用户决策：短期不开发）
 
 **目标**：让用户能在应用内完成"长截屏"：框选区域 → 下拉滚动 → 自动拼接整页
 图 → 可选 OCR + LLM 解读 → 作为知识碎片 / 文件入库。
@@ -488,51 +490,93 @@ userfile/projects/<壳名>/
 
 ### Phase K1 — KnowClaw 网页搜索 / 抓取稳定性大幅升级
 
-**Status:** `PLANNED`
+**Status:** `DONE`（2026-05-22）
 
 **目标**：解决 KnowClaw 内置的网页搜索 / 抓取在代理 / 反爬 / 404 等场景的高
-失败率。
+失败率，并补齐"主动联网搜索"能力。
 
 #### K1.1 用户原文（2026-05-21）
 
 > 目前 KnowClaw 内置的网页搜索功能非常不稳定，代理或者其他情况会经常出现 404
 > 或完全无法访问的错误，这个功能需要大幅度的升级。
 
-#### K1.2 现状锚点
+#### K1.2 调研结论（2026-05-22）
 
-| 工具 | 路径 | 当前实现 |
-|------|------|---------|
-| `fetch_web` | `desktop/Agent/pi-runtime/tools/webTools.js` | Node 原生 `fetch` + simple strip HTML，无重试、无代理、无浏览器渲染 |
-| 网页搜索 | （**待确认**：是否有独立的 search 工具，还是只有 fetch？） | 需要侦察 |
+业界（Claude / OpenAI / Gemini）的"联网搜索"均为厂商私有工具，**对外不可独立
+调用**。可用的独立搜索 API 包括 Tavily / Brave / Exa（海外）与 博查 (Bocha) /
+百度千帆 / 秘塔（国内）。综合"中文优化、合规、价格、是否专为 AI Agent 设计"
+四项指标，选择 **博查 Web Search API** 作为 K1 的主搜索引擎：
 
-> **TODO·K1-A**：开工前先确认 KnowClaw 是否真的有"搜索"工具（如 `web_search`、
-> `bing_search`、`duckduckgo`），还是用户口中的"搜索"实际是 LLM 自己构造 URL
-> 调 `fetch_web`。这影响后续是"修 fetch"还是"加 search"。
+- 接口：`POST https://api.bochaai.com/v1/web-search`，Bearer auth
+- 价格：新用户 1000 次免费额度，之后约 ¥0.036/次
+- 生态：DeepSeek 官方联网搜索供应方，阿里/腾讯/字节官方推荐
+- 合规：数据不出海，符合国内安全规范
 
-#### K1.3 候选方案
+#### K1.3 架构（已实施）
 
-| 方案 | 描述 |
-|------|------|
-| **A · 升级 `fetch_web` 底层为 F2 同一服务** | 直接复用 F2 的 Electron 隐藏窗口 / Browser 渲染，让 LLM 也享受 JS 渲染 |
-| **B · 增加 `web_search` 工具** | 接入 DuckDuckGo / Bing API / Tavily / Brave Search，由 LLM 显式调用 |
-| **C · 系统代理识别** | 自动读取 OS 代理设置 + 让用户在偏好里覆盖 |
-| **D · 重试 + 多源策略** | 失败时自动按"原 URL → archive.org → google cache"顺序重试 |
-| **E · 显式错误反馈给 LLM** | 当抓取失败时把 HTTP 状态码 / 错误类型 / 已尝试 URL 列表反馈到 toolResult，让 LLM 决定 retry / 换源 / 放弃 |
+1. **`search_web` 工具（新增）** — 走博查 API，返回结构化搜索结果（标题 / URL /
+   摘要 / 来源 / 发布日期）；API Key 由用户在「设置 → 网页搜索 API」中配置。
+2. **`fetch_web` 工具（升级）** — 新增 `rendered: true` 参数，走 F2 的
+   `webFetch.fetchWeb`（隐藏 BrowserWindow + Readability + Markdown）。
+   默认 `false` 时仍走轻量 Node fetch，保持原速度优势。
+3. **降级链路** — 搜索 API 未配置 / 额度不足 / 网络失败时，工具返回**带可读
+   降级说明的文本**，由 LLM 自然引导用户提供具体 URL，再用 `fetch_web` 抓取。
+   `fetch_web` 的 `rendered: true` 模式失败时自动 fallback 到 Node fetch。
+4. **配置存储** — `state.prefs.searchApi: { provider: 'bocha', apiKey }`，
+   通过 `prefs/get` / `prefs/set` IPC 持久化；pi-runtime 通过
+   `ipmConfig.getSearchApiConfig()` 读取，注入 `buildWebTools`。配置变更在
+   下次新建 / 打开会话时生效（与 LLM 配置同机制）。
 
-#### K1.4 待回答的问题
+#### K1.4 文件清单
 
-- [ ] **D-K1-1**：是否接受外部搜索 API（B 方案需要 key）？预算？
-- [ ] **D-K1-2**：与 F2 是否共用一套底层？（高度推荐，避免双倍维护）
-- [ ] **D-K1-3**：LLM 自动重试的次数上限 / 是否允许 LLM 自己决定？
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `Agent/services/searchService.js` | 新建 | 博查 API 封装 (`bochaWebSearch` + `testBochaApiKey`) |
+| `Agent/pi-runtime/tools/webTools.js` | 重写 | `search_web` 新增 + `fetch_web` 增加 `rendered` 参数 |
+| `Agent/pi-runtime/ipmConfig.js` | 修改 | 新增 `getSearchApiConfig()` / `describeSearchApiConfig()` |
+| `Agent/pi-runtime/bootstrap.js` | 修改 | 把 `searchApiKey` + `fetchWebRendered` 注入 `buildWebTools` |
+| `Agent/pi-runtime/promptBuilder.js` | 修改 | 修正 `web_fetch` → `fetch_web` 笔误 |
+| `src/main/ipc/prefs.js` | 修改 | `searchApi` 字段持久化 + `prefs/testSearchApi` IPC |
+| `src/main/ipc/knowclaw.js` | 修改 | `toolDeps.fetchWebRendered` 桥接到主进程 `webFetch.fetchWeb` |
+| `src/preload.js` | 修改 | 暴露 `prefs.testSearchApi` |
+| `src/ui/components/SettingsPage.jsx` | 修改 | 新增「网页搜索 API」配置卡片 |
+
+#### K1.5 决策记录
+
+- **D-K1-1（已答）**：使用第三方搜索 API（博查），新用户免费 1000 次，
+  生产用按量付费。API Key 由用户在设置中自配置。
+- **D-K1-2（已答）**：与 F2 **共用底层**——`search_web` 提供 URL，`fetch_web`
+  的 `rendered: true` 复用 F2 `webFetch.js` 的 BrowserWindow 渲染管道。
+- **D-K1-3（已答）**：不在工具层做"自动重试"。失败时返回降级说明文本，由 LLM
+  根据上下文自主决定（请求用户提供 URL / 换关键词 / 放弃）。
+- **D-K1-4（未来）**：是否要接 Tavily / Brave 作为英文搜索补充？目前 KnowClaw
+  以中文场景为主，博查中文优化足够；待用户提出英文场景再扩展。
+
+#### K1.6 变更日志
+
+- 2026-05-22 完成 K1 全部 8 个文件改动：
+  - `searchService.js` 实现博查 API 调用 + 错误分类（unauthorized / quota /
+    timeout / network / parse / unknown），支持 AbortSignal 链。
+  - `webTools.js` 重写为 `buildWebTools({ searchApiKey, fetchWebRendered })`，
+    `search_web` 与 `fetch_web` 二者均带 promptGuidelines 引导 LLM 正确使用
+    与降级。
+  - `fetch_web` 新增 `rendered` 参数，rendered=true 通过 toolDeps 桥接
+    到主进程 `webFetch.fetchWeb`，桥接不可用 / 渲染失败时自动降级到 Node fetch
+    并在结果前注明 fallback 原因，**保证 LLM 永远拿得到内容**。
+  - SettingsPage 新增 `SearchApiCard`：API Key 输入 + 保存 + 测试连接 +
+    新用户引导（链接到 open.bochaai.com）+ 未配置黄色提示。
+  - `bootstrap.js` 在工具注册日志中打印 `searchApi=bocha/sk-xxxx…xxxx` 与
+    `renderedBridge=yes/no`，方便诊断。
 
 ---
 
-### Phase K2 — KnowClaw 工作空间文件树侧栏 + 新文件高亮
+### Phase K2 — KnowClaw 工作空间文件树侧栏 + AI 过程可视化
 
-**Status:** `PLANNED`（与 KnowClaw 主线合流）
+**Status:** `DONE`（2026-05-23 合流 U1.5 + 块 B 同步交付）
 
 **目标**：让 KnowClaw 对话区右侧显示当前工作空间文件树，对话产出 / 修改文件
-后在树中高亮。
+后在树中高亮；同时增强 AI 工作过程的可视化（工具参数摘要、heartbeat 状态条、
+30s 空闲倒计时）。
 
 #### K2.1 用户原文（2026-05-21）
 
@@ -547,17 +591,71 @@ userfile/projects/<壳名>/
 - U1.5 已设计：右侧 `WorkspaceFileTree` 面板、`knowclaw:listWorkspaceTree`
   IPC、监听 `tool_call/tool_result` 触发的 amber 角标 + "new/edited" 徽标 + 5s
   fadeout、`shell.openPath` 跳转
-- U1.5 已估算改动 ~600 行（见 KnowClaw 计划 L303-L310）
+- K2 在 U1.5 基础上额外引入"块 B"（AI 工作过程可视化）
 
-**本计划的动作**：
+#### K2.3 落地范围
 
-- 不重复编写 K2 的设计草案；**直接对接 KnowClaw 计划 § Phase U1.5**
-- 当 KnowClaw 主线启动 U1.5 时，在本节贴落地链接
-- 用户在 2026-05-21 的再次强调 = U1.5 已经被列为"用户最关心"的体验缺口
+**块 A — 工作空间文件树侧栏**
 
-#### K2.3 决策记录
+- 主进程新增 `knowclaw:listWorkspaceTree`（depth 默认 3、最多 6；MAX 500 项；
+  排除 `node_modules`/`.git`/`dist`/`.vite`/`__pycache__` 等噪音目录；全局
+  模式返回 `{ global: true, entries: [] }`）
+- `knowclaw:openInExplorer` 文案更新为「路径」，`shell.openPath` 同时支持
+  目录与文件，文件点击通过同一通道
+- 渲染层：`WorkspaceFileTree.jsx`（嵌套树渲染、折叠、文件大小、按扩展名
+  图标、刷新按钮、在资源管理器中打开当前 cwd）
+- `KnowClawV2Page.jsx` 右上角新增 `PanelRight + FolderTree` toggle，
+  显隐状态写入 `localStorage('knowclaw.v2.showFileTree')`
+- Hook 新增 `workspaceTree` / `treeLoading` / `treeTruncated`
+  `recentTouchedFiles` 状态；`tool_execution_start` 解析 `write`/`edit`
+  的 `args.path` 与 `bash` 命令中的 `touch/mkdir/cp/mv/>` 句段，5s 内
+  amber 背景 + 角标（new = emerald、edited = amber），自动 1s 一跳
+  prune 过期项
+- 刷新触发点：mount / cwd 切换 / `agent_end` 之后延迟 250ms（等待 Windows
+  上 pi 最后一次 child write flush 完成）/ 手动刷新
 
-- （待 U1.5 启动后填写）
+**块 B — AI 工作过程可视化**
+
+- Hook 新增 `streamingPhase`（`'idle' | 'thinking' | 'writing' | 'tool'`）、
+  `activeToolName`、`lastEventTimestamp`、`streamingIdleSeconds`；
+  `tool_execution_start` 时记录 `startTime` 与友好 `summary`，
+  `tool_execution_end` 时记录 `endTime`
+- `MessageBubble.jsx` 在 *当前 streaming* assistant 气泡顶部渲染
+  `HeartbeatStrip`：thinking（amber）/ writing（emerald）/ tool（sky）/
+  idle（slate）+ idle 满 30s 切换为「等待模型响应中…」amber 横条
+- `ToolCallCard` 新增 "工具名 + 参数摘要"（`write` → `写入 path`、
+  `search_web` → `搜索: query`、`fetch_web` → `渲染抓取: hostname`、
+  `bash` → 命令前 80 字、`task_manager` → 任务数 等），完成后右侧显示
+  `endTime - startTime` 耗时
+- 仅向"最后一条 assistant 且 streaming"气泡传 heartbeat 三件套，
+  其它历史气泡静态化、不会出现陈旧状态条
+
+#### K2.4 决策记录
+
+- 文件树面板默认 *折叠*（保护小屏用户的对话主列），用户开关持久化
+- highlighting 5s 而非更久：与一次轮次的注意力窗口一致；过久会被频繁
+  写入的 tool 互相覆盖
+- `bash` 命令的路径提取走"宽松正则 + best-effort"，错配只会让对应
+  relPath 找不到树节点，不会影响主流程
+- 30s idle 阈值参考 OpenAI / Claude 长尾响应中位数（实测国内代理下偶发
+  20-40s 沉默）；早于此报警容易误伤、晚于此用户已经开始焦虑
+- 重用 F2 `knowclaw:openInExplorer` 而非新建文件打开通道：`shell.openPath`
+  本就同时支持文件与目录，省一个 IPC
+
+#### K2.5 改动文件清单
+
+- `desktop/src/main/ipc/knowclaw.js` —— 新增 `listWorkspaceTree` handler、
+  `openInExplorer` 文案
+- `desktop/src/preload.js` —— 暴露 `listWorkspaceTree`
+- `desktop/src/ui/components/knowclaw-v2/useKnowClawV2Chat.js` —— K2 状态 +
+  工具路径提取 + heartbeat 字段 + 周期 prune effect
+- `desktop/src/ui/components/knowclaw-v2/WorkspaceFileTree.jsx` —— **新增**
+- `desktop/src/ui/components/knowclaw-v2/KnowClawV2Page.jsx` —— toggle 按钮、
+  右侧面板挂载、heartbeat props 透传
+- `desktop/src/ui/components/agent-chat/MessageBubble.jsx` —— `HeartbeatStrip`、
+  工具 summary、耗时显示
+- `desktop/Agent/IPM_FEATURE_UPGRADE_PLAN.md` —— 本节
+- `desktop/Agent/KNOWCLAW_UPGRADE_PLAN.md` —— U1.5 状态同步
 
 ---
 
@@ -630,7 +728,7 @@ userfile/projects/<壳名>/
 | RW-F3-3 | OCR 出错率不为零，被误用为法律证据 | F3 | 低 | 高 | UI 显示置信度分数，碎片标记为"OCR 识别" |
 | RW-F4-1 | 系统级长截屏拼接算法复杂度高 | F4 | 高 | 中 | 首版只做应用内嵌浏览器，方案 B 留 P2 |
 | RW-F4-2 | 长图存储与检索成本 | F4 | 中 | 低 | 默认压缩 / 分段保存 |
-| RW-K1-1 | 外部搜索 API key 暴露 / 成本失控 | K1 | 中 | 中 | 后端转发 + 用户可填自有 key |
+| RW-K1-1 | 外部搜索 API key 泄露 / 成本失控 | K1 | 中 | 中 | API Key 仅保存在本地 `state.prefs.searchApi`；设置页提供连通性测试；错误分类明确（401/402/429）并提示用户自行处理配额 |
 | RW-K3-1 | 悬浮窗 UI 简化与完整性失衡 | K3 | 高 | 中 | 先出设计 mockup 再实现 |
 | RW-K3-2 | 悬浮窗产物的"被中台发现"链路不通 | K3 | 中 | 中 | `_floating/` 默认进项目列表，标记为"草稿"域 |
 | RW-K3-3 | 复用 hook 引入 Backlog-D 未修 bug | K3 | 高 | 高 | **强制依赖**：K3 启动前 Backlog-D.1/D.2/D.4 必须完成 |
@@ -644,9 +742,9 @@ userfile/projects/<壳名>/
 | F1 — 外部文件夹「附属导入」 | **DONE** | 2026-05-22 | 附属壳 + 双根路径解析 + 外部扫描 + 前端限制 guard |
 | F2 — 网页完整信息抓取升级 | **DONE** | 2026-05-22 | Electron 隐藏窗口渲染 + HTTP 降级 + Markdown 转换 + 截图 lightbox |
 | F3 — 内置 OCR（PP-OCRv5） | **DONE** | 2026-05-22 | `ppu-paddle-ocr` + `onnxruntime-node`，中英双模型，自动生成 snippet 碎片 |
-| F4 — 内置长截屏 | RESEARCH | | F3 依赖已解除，可启动 |
-| K1 — KnowClaw 网页抓取稳定性 | PLANNED | | 可复用 F2 的 `webFetch.js` |
-| K2 — KnowClaw 工作空间文件树 | PLANNED | | **合流至** `KNOWCLAW_UPGRADE_PLAN.md` § Phase U1.5 |
+| F4 — 内置长截屏 | **DEFERRED** | | 2026-05-22 用户决策短期不开发 |
+| K1 — KnowClaw 网页搜索/抓取稳定性 | **DONE** | 2026-05-22 | 博查 Web Search + F2 渲染桥接 + 设置页 API Key 配置 + LLM 自然降级 |
+| K2 — KnowClaw 工作空间文件树 + AI 过程可视化 | DONE | 2026-05-23 | 右侧 `WorkspaceFileTree` + `listWorkspaceTree` IPC + `tool_execution_start` 路径提取 + 5s 高亮；heartbeat 状态条 + 30s 倒计时 + 工具参数摘要 / 耗时 |
 | K3 — 悬浮窗 KnowClaw 助手 | RESEARCH | | 依赖 Backlog-D |
 
 ---
@@ -663,7 +761,8 @@ userfile/projects/<壳名>/
 5. **KnowClaw 网页能力稳定**：404 / 反爬 / 代理 / 登录态等问题全部收敛到统一
    服务层。
 6. **悬浮窗成为 AI 助手**：随时唤起、零成本沉淀、再迁回主台收编。
-7. **KnowClaw 工作空间一目了然**：右侧文件树 + 新文件高亮（U1.5 主线交付）。
+7. **KnowClaw 工作空间一目了然**：右侧文件树 + 新文件高亮（K2 + U1.5 已合流交付，
+   2026-05-23）；同时 heartbeat 状态条 + 30s 空闲倒计时让 AI 工作过程可见可控。
 
 ---
 
@@ -675,8 +774,9 @@ userfile/projects/<壳名>/
 - **镜像节点**：`structure.json` 中代表外部磁盘文件夹的虚拟节点，由扫描产出。
 - **附属壳扫描**：启动 / 手动刷新时遍历 `external-link.rootPath`，更新 mirror
   树并触发 `pathRemapper` 软重定向。
-- **统一 webFetch 服务**：F2 + K1 共同的底层抓取实现，预计位置
-  `desktop/Agent/services/webFetch.js`。
+- **统一 webFetch 服务**：F2 + K1 共同的底层抓取实现，已落地在
+  `desktop/Agent/services/webFetch.js`，K1 的 `fetch_web(rendered=true)` 通过
+  `toolDeps.fetchWebRendered` 桥接到该服务。
 - **OCR 服务**：F3 实现的 `Agent/services/ocrService.js` 单例，基于 `ppu-paddle-ocr` + `onnxruntime-node` 的纯 Node.js OCR 引擎，懒加载 + 空闲自动释放。
 - **悬浮窗工作空间**：K3 引入的固定路径，承载悬浮窗 KnowClaw 的对话与产出。
 
@@ -714,6 +814,24 @@ U8 完成后密集人工测试采集到的 5 个体验问题，均与核心对�
 2. **P1 · Route keepalive**：用 `<Outlet>` + CSS `display:none` 隐藏 KnowClaw 页面而非 unmount（类似 Vue keep-alive），成本更低但对现有路由架构有侵入。
 3. **P2 · 事件缓冲 + 回放**：主进程侧为 `activeSender` 维护一个有限队列，当 `webContents.send` 失败（页面 navigated away）时缓冲事件，下次 `knowclaw:getStatus` 时一起下发。
 
+**实现记录（2026-05-23 DONE）**
+
+- 采纳方案：**P0 · 状态提升到 App 级 + rehydrate IPC + session 锁定**
+- 修改文件清单：
+  - `desktop/src/ui/hooks/useKnowClawPersist.jsx`（新建）— App 级 Context `KnowClawPersistProvider`，持久化 messages / streaming / sessionId / sessionStats / contextUsage / pendingSteer / pendingFollowUp / tasks / compaction / retrying / workspace / thinkingLevel / subAgentEnabled / models 等全部会话状态；`window.ipm.knowclaw.onEvent` 监听挂在该 Provider 的一次性 useEffect 里，永不随页面切换被 `removeListener`。
+  - `desktop/src/ui/components/knowclaw-v2/knowclawEventReducer.js`（新建）— 从原 hook 提取的纯函数事件处理器（`ensureStreamingMessage`、`updateToolByCallId`、`stringifyResult`、`extractTouchedFilesFromEvent`、`toRelPosix`、`summarizeToolArgs`、`normalizeTasksArray`），便于 reducer 在 Provider 内复用且可单测。
+  - `desktop/src/ui/components/knowclaw-v2/useKnowClawV2Chat.js` — 降级为 Context 的 thin facade，仅保留页面本地 `showSessionPanel` state，并 re-export `summarizeToolArgs` 兼容 `MessageBubble` 的 import 路径。
+  - `desktop/src/ui/App.jsx` — 在 `ConfirmDialogProvider` + `ToastProvider` 内嵌 `KnowClawPersistProvider`，包裹 `TourProvider` 及主内容；浮窗模式分支不挂载（不展示 KnowClaw 内容）。
+  - `desktop/src/main/ipc/knowclaw.js` — 新增 `ipcMain.handle('knowclaw:rehydrate')`，返回 `{ hasSession, sessionId, sessionFile, messages, tasks, promptInFlight, streaming, contextUsage, sessionStats, isCompacting, cwd, isGlobal }`；同时 rebind `activeSender = evt.sender`，保证 renderer 刷新后继续接收事件。
+  - `desktop/src/preload.js` — 暴露 `window.ipm.knowclaw.rehydrate()` API。
+  - `desktop/src/ui/components/KnowClawBubble.jsx` — 全局浮动气泡读取 `streaming / streamingPhase / activeToolName`，streaming 期间展示脉冲动画与“正在思考…/正在回复…/正在执行 xxx…”状态文字；streaming 时点击气泡直接跳到 KnowClaw 页面。
+  - `desktop/src/ui/components/knowclaw-v2/SessionPanel.jsx` — `SessionRow` 与 SessionPanel `+ 新建会话`/历史会话点击/fork/delete 全部支持 `disabled` prop，禁用时 tooltip 提示“当前有对话正在进行，请先等待结束或中止”。
+  - `desktop/src/ui/components/knowclaw-v2/KnowClawV2Page.jsx` — `WorkspaceSelector`、Header 「新对话」按钮、`SessionPanel.disabled` 联动 `isSessionLocked`。
+- 附加机制：
+  - **Session 锁定**：`isSessionLocked = streaming && Boolean(sessionId)`，从 Provider 派生，streaming 期间禁止新建/切换会话与切换工作空间；ChatInput 仍可输入（走 steer / followUp 队列）。
+  - **Install 确认全局化**：`window.ipm.knowclaw.onConfirmInstall` 监听也提升到 Provider，pending install confirmations 跨页面存活，避免切走 KnowClaw 页面时确认弹窗被销毁。
+  - **Rehydrate race guard**：Provider mount 时调 `knowclaw:rehydrate`，对返回的 messages / streaming flag 使用函数式 `setState(prev => ...)` 检查 prev 是否仍为空/false，防止 stale snapshot 覆盖 live event 已经写入的更新状态。
+
 #### D.2 新建会话不自动触发 / 意外延续旧会话
 
 **用户反馈原文**
@@ -730,6 +848,20 @@ U8 完成后密集人工测试采集到的 5 个体验问题，均与核心对�
 2. **P1 · "继续 / 新建" 二选一提示**：切到有历史的 cwd 时弹一个 inline banner "发现此工作空间有一个 XX 分钟前的对话，要继续还是新开？"。
 3. **P2 · 偏好设置项**：`prefs.knowclaw.sessionOnWorkspaceSwitch: 'new' | 'continue' | 'ask'`。
 
+**实现记录（2026-05-23 DONE）**
+
+- 采纳方案：**P0 · 切换工作空间 / 冷启动时自动新建会话 + 防御性兜底**
+- 修改文件清单：
+  - `desktop/src/ui/hooks/useKnowClawPersist.jsx`
+    - `setCwd` 成功后 `await newSession()`，立即在 header 显示新 sessionId；首条消息不再走 `continueRecent` 续旧。
+    - rehydrate `useEffect` 中，当主进程返回 `hasSession: false` 时自动 `await newSession()`，保证 App 冷启动就有可见的 sessionId。
+    - `newSession` 失败时改为 `showToast` 显式上报（IPC throw / `skipped: 未配置 LLM` / `res.error`），并 **无条件** `setSessionId(null) + setCurrentSessionFile(null)`，杜绝 sessionId 残留导致下次 send 误续旧。
+    - 新增 `sessionGenRef`（monotonic counter），在 `newSession` / `setCwd` / `openSession` / `forkSession` / `deleteSession-wasActive` 处 bump，rehydrate 回调对比 `genAtRequest === sessionGenRef.current`，不一致直接 bail-out，彻底消除“切换工作空间或新建会话后被 rehydrate 旧 snapshot 反向覆盖”。
+    - `deleteSession-wasActive` 直接消费主进程返回的 `nextSessionId / nextSessionFile`，省掉一次 newSession round-trip。
+  - `desktop/src/main/ipc/knowclaw.js`
+    - `knowclaw:send` 的 `ensureSession` 默认 mode 从 `'continueRecent'` 改为 `'new'`：即使前端 eager-newSession 失败留下 `activeSession === null`，首条消息也会开新 session 而非续旧（防御性兜底）。
+    - `knowclaw:deleteSession` 在 `wasActive === true` 时同步 `ensureSession(sender, 'new')`，并把 `nextSessionId / nextSessionFile / nextError` 一并返回给前端；`unlinkError` 作为软警告。
+
 #### D.3 新建会话不立即出现在历史列表
 
 **用户反馈原文**
@@ -744,6 +876,15 @@ U8 完成后密集人工测试采集到的 5 个体验问题，均与核心对�
 1. **P0 · 乐观 UI 插入**：`newSession` IPC 返回 `{ sessionId, sessionFile }` 后，hook 立即把一条 `{ id, path, lastModified: Date.now() }` 插到 `sessions` 前面，不依赖 `listSessions` 的磁盘扫描。
 2. **P1 · 刷新轮询频率提高**：在创建新会话后的前 10 秒把 `refreshSessions` 的 polling interval 从"无"缩短到 2s，确保 JSONL 落盘后很快可见。
 
+**实现记录（2026-05-24 DONE）**
+
+- 采纳方案：**P0 · 乐观 UI 插入**
+- 根因确认：pi `SessionManager._persist()` 内含 `hasAssistant` guard——直到首个 assistant 消息写入才会 flush header + entries 到磁盘。因此 `newSession()` 返回时 JSONL 文件尚不存在，`listSessions`（扫磁盘 `*.jsonl`）自然看不到新 session。
+- 修改文件：
+  - `desktop/src/ui/hooks/useKnowClawPersist.jsx` — `newSession` 成功分支中，`void refreshSessions()` 之前新增 `setSessions(prev => ...)` 乐观插入。合成条目包含 `{ path, id, cwd, name: null, created: Date.now(), modified: Date.now(), messageCount: 0, firstMessage: '' }`，按 path 去重防止重复。
+- 无需改其他文件：`SessionPanel.jsx` 已正确渲染 `messageCount === 0` 的条目（显示「(无内容)」），且 `currentSessionFile === session.path` 时给予 amber active 高亮。
+- 自动校正：streaming 结束后 `wasStreamingRef` effect 调 `refreshSessions`，此时 JSONL 已落盘，真实 metadata（`firstMessage`、`messageCount`、`modified`）替换乐观条目。
+
 #### D.4 Streaming 期间无法上滚——强制锚定页面底部
 
 **用户反馈原文**
@@ -757,6 +898,21 @@ U8 完成后密集人工测试采集到的 5 个体验问题，均与核心对�
 1. **P0 · "用户已手动上滚" 检测 + 暂停自动滚**：在滚动容器上监听 `onScroll`，计算 `scrollTop + clientHeight < scrollHeight - threshold`（比如 threshold=80px），一旦成立设 `userScrolledUp = true`，暂停自动 scrollIntoView。当用户滚回底部（或 streaming 结束）时重置为 `false`。
 2. **P1 · "回到底部" 浮动按钮**：当 `userScrolledUp && streaming` 时显示一个小的浮动按钮 "↓ 回到底部"，点击后 `scrollIntoView` + reset。类似 ChatGPT / Claude 的做法。
 
+**实现记录（2026-05-24 DONE）**
+
+- 采纳方案：**P0 + P1 组合实现**
+- 根因确认：`KnowClawV2Page.jsx` 原来的 `useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])` 在每次 `messages` 引用变化时无条件触发。streaming 期间 `text_delta` / `thinking_delta` / `tool_execution_*` 事件高频 `setMessages`，每个 token 都会把用户拉回底部。全项目无任何 `onScroll` 检测或 `userScrolledUp` flag。
+- 修改文件：仅 `desktop/src/ui/components/knowclaw-v2/KnowClawV2Page.jsx`
+  - 补 `useCallback` import。
+  - 新增 `scrollContainerRef`（滚动容器 ref）、`userScrolledUpRef`（ref，避免 onScroll 高频 re-render）、`showScrollButton` state、`SCROLL_BOTTOM_THRESHOLD = 80`px。
+  - `handleScroll` callback：计算 `scrollHeight - scrollTop - clientHeight <= threshold`，据此更新 `userScrolledUpRef` 和 `showScrollButton`。
+  - `scrollToBottom(behavior)` 封装：优先 `scrollTo({ top: scrollHeight })` 直接操作 scrollTop（同步、不与平滑动画冲突），fallback `bottomRef.scrollIntoView`。
+  - 自动滚 useEffect 改为 `if (userScrolledUpRef.current) return`，并从 `'smooth'` 改为直接 `scrollTop = scrollHeight`（streaming 期间避免动画队列堆叠与用户滚动"抢控制权"）。
+  - `handleSend` wrapper 包 `sendMessage`：发消息前 `scrollToBottom('auto')` 强制回到底部（用户发送是明确的跟进意图）。
+  - Chat body 容器加 `relative` 定位。
+  - 「回到底部」浮动按钮（`absolute bottom-4 right-6 z-10`）：只要用户上滚就显示（与 ChatGPT/Claude 行为一致），点击后 smooth 滚底并重置 flag。使用已导入的 `ChevronDown` 图标。
+  - `ChatInput.onSend` 从 `sendMessage` 改为 `handleSend`。
+
 #### D.5 TaskCard 旧 snapshot 仍显示加载图标
 
 **用户反馈原文**
@@ -764,32 +920,48 @@ U8 完成后密集人工测试采集到的 5 个体验问题，均与核心对�
 > 任务清单还是会有加载图标，旧的对话同样也会显示加载，这对用户有一定的误导性，
 > 以为之前的阶段还在加载。"
 
-**根因分析（待侦察确认）**
+**根因分析（已确认）**
 - `task_manager` 工具被多次调用（每完成一步就调一次），每次调用产出一个 `kind:'tasks'` 的 system bubble 嵌在对话流里。**旧 snapshot 被冻结在它产生时的状态**，不会被后续 snapshot 回溯更新——所以 step-2 的 card 里 step-1 可能还是 `in_progress`，而最新 card 里 step-1 才是 `completed`。
 - 同一 assistant turn 内的多次 `task_manager` 调用还可能导致 ToolCallCard 与 TaskCard 同时出现（已在 U7 变更日志中标注为"v1 接受"）。
+- `TaskCard.jsx` 对 `status === 'in_progress'` 无条件渲染 `Loader2 + animate-spin`，没有任何"是否是最后一张 TaskCard"的判断。
+- `agent_end` 事件处理中不涉及 tasks bubble，因此 turn 结束后最新 TaskCard 中 `in_progress` 的任务也会继续转圈。
 
 **候选方案**
 1. **P0 · 只显示最新一张 TaskCard，旧的自动折叠 / 隐藏**：当 messages 里有多个 `kind:'tasks'` 的 bubble 时，只完整渲染**最后一个**，之前的只显示一行摘要（如"任务清单 · 2/4 已完成"）或彻底不渲染。因为 TodoWrite 本身就是原子替换语义（新数组覆盖旧数组），只有最新一张代表真实状态。
 2. **P1 · 回溯染色**：TaskCard 渲染时，不看自己 bubble 里的 `tasks[]`，而是去 messages 里找**最后一个** `kind:'tasks'` 的 bubble，以它的 `tasks[]` 为准来确定状态。这样旧 card 也能显示"后来已完成"。但这打破了 bubble 的自包含性，实现复杂度高。
 3. **P2 · 同 turn 合并**：如果同一个 assistant turn 内连续调了多次 `task_manager`，只保留最后一次的 TaskCard 气泡。需要在 event 处理层做 turn-level dedup。
 
+**采用方案：P0 旧 card 折叠 + agent_end 降级**
+
+**修改文件**
+- `desktop/src/ui/components/knowclaw-v2/TaskCard.jsx` — 新增 `TaskCardSummary` 导出组件（紧凑一行：`[图标] 任务清单 · HH:MM · done/total 已完成`，无 spinner）
+- `desktop/src/ui/components/agent-chat/MessageBubble.jsx` — `kind === 'tasks'` 分支接收 `isLatestTasksBubble` prop，true 渲染完整 `TaskCard`，false 渲染 `TaskCardSummary`
+- `desktop/src/ui/components/knowclaw-v2/KnowClawV2Page.jsx` — `useMemo` 计算 `lastTasksIndex`（messages 中最后一个 tasks bubble 的 index），map 时传 `isLatestTasksBubble` prop
+- `desktop/src/ui/hooks/useKnowClawPersist.jsx` — `agent_end` case 的 `setMessages` 合并为单次调用：关闭 streaming assistant bubble + 倒序找最后一个 `kind:'tasks'` bubble 将 `in_progress` 降级为 `pending`
+
+**行为效果**
+- 同一对话中多次 `task_manager` 调用：只有最新一张 TaskCard 完整展示，旧 snapshot 折叠为一行淡色摘要（无 spinner），保留时间线感
+- turn 结束（agent_end）：最新 TaskCard 中仍为 `in_progress` 的任务自动降级为 `pending`（灰圈无 spin），明确告知用户对话已停
+- 只调一次 / history_loaded / rehydrate：只有一张 TaskCard，完整渲染，无折叠
+- task_manager 出错：现有 `!event.isError` 守卫不 append bubble，无需特殊处理
+
 #### D.6 决策状态
 
 | 编号 | 严重程度 | 推荐优先级 | 状态 |
 |------|---------|-----------|------|
-| D.1 页面切换丢进度 | 高（用户看到"空白"会以为数据丢了） | P0 | **DEFERRED** — 下一阶段首要 |
-| D.2 意外延续旧会话 | 高（误操作 + 困惑） | P0 | **DEFERRED** |
-| D.3 新建会话不马上出现 | 中（反直觉但不阻塞工作） | P0–P1 | **DEFERRED** |
-| D.4 streaming 无法上滚 | 中（影响阅读体验） | P0 | **DEFERRED** |
-| D.5 旧 TaskCard 加载图标 | 低–中（误导但不阻塞） | P0 | **DEFERRED** |
+| D.1 页面切换丢进度 | 高（用户看到"空白"会以为数据丢了） | P0 | **DONE**（2026-05-23） |
+| D.2 意外延续旧会话 | 高（误操作 + 困惑） | P0 | **DONE**（2026-05-23） |
+| D.3 新建会话不马上出现 | 中（反直觉但不阻塞工作） | P0–P1 | **DONE**（2026-05-24） |
+| D.4 streaming 无法上滚 | 中（影响阅读体验） | P0 | **DONE**（2026-05-24） |
+| D.5 旧 TaskCard 加载图标 | 低–中（误导但不阻塞） | P0 | **DONE**（2026-05-24） |
 
 #### D.7 后续启动 Checklist（实现时回到本节核对）
 
-- [ ] D.1：确认 hook unmount 时 pi event 是否真的丢弃；在 `App.jsx` 做 state 提升 PoC
-- [ ] D.2：确认 `ensureSession('continueRecent')` 是否总是续旧；测试 `newSession()` 在 `setCwd` 后自动调的可行性
-- [ ] D.3：确认 pi `SessionManager` 的 JSONL 创建时机；在 hook 里做乐观 UI 插入
-- [ ] D.4：在 messages 容器加 `onScroll` 检测 + `userScrolledUp` flag
-- [ ] D.5：在 `MessageBubble` 或 `KnowClawV2Page` 层面做"只完整渲染最后一张 TaskCard"逻辑
+- [x] D.1：确认 hook unmount 时 pi event 是否真的丢弃；在 `App.jsx` 做 state 提升 PoC — 已落地为 `KnowClawPersistProvider` + `knowclaw:rehydrate` IPC + session 锁定
+- [x] D.2：确认 `ensureSession('continueRecent')` 是否总是续旧；测试 `newSession()` 在 `setCwd` 后自动调的可行性 — `setCwd`/冷启动自动 newSession + `send` 默认 mode 改 `'new'` + sessionGenRef 防竞态
+- [x] D.3：确认 pi `SessionManager` 的 JSONL 创建时机；在 hook 里做乐观 UI 插入 — `_persist` 的 `hasAssistant` guard 确认；`newSession` 成功后 `setSessions` 乐观插入合成条目
+- [x] D.4：在 messages 容器加 `onScroll` 检测 + `userScrolledUp` flag — `scrollContainerRef` + `handleScroll` 80px 阈值 + 条件 auto-scroll + 「回到底部」浮动按钮
+- [x] D.5：在 `MessageBubble` 或 `KnowClawV2Page` 层面做"只完整渲染最后一张 TaskCard"逻辑 — `lastTasksIndex` + `isLatestTasksBubble` prop 路由 `TaskCard` / `TaskCardSummary`；`agent_end` 合并 `setMessages` 将 `in_progress` 降级 `pending`
 
 ---
 
@@ -815,6 +987,38 @@ U8 密集测试后采集的第二批优化方向，侧重 UI 品质、交互丰�
 - DeepSeek web 端右侧导航条 UI
 - VS Code minimap 思路（按比例映射）
 
+**实现记录（2026-05-24）**
+
+采用方案：DeepSeek 风格右侧浮动导航条，仅以 user 消息作为锚点，hover 显示摘要 tooltip，点击 smooth scrollIntoView 跳转。
+
+**v1（已废弃）**：marker 为小圆点、按 `offsetTop / scrollHeight` 比例分布、紧贴右边缘、附视口指示条。
+**v2（已废弃）**：marker 为短横线、垂直居中堆叠、单个 hover 时弹出 tooltip。仍不符合 DeepSeek 真实交互。
+**v3（最终采纳，参考 DeepSeek 截图 1:1 实现）** — 折叠 / 展开两态浮动卡片：
+
+- **折叠态（默认）**：仅一列短横线 marker，距右边缘 12px，垂直居中。卡片背景透明、无阴影、无文字 — 看起来只是侧栏的简洁装饰
+- **展开态（hover 整个 nav 区域）**：卡片变白色面板（`bg-white/95 + ring-slate-200 + shadow-lg + backdrop-blur-sm`，与「回到底部」按钮、WorkspaceFileTree 同套浅色调）+ 每条 tick 左侧的摘要文本（24 字）从 `max-w-0 opacity-0` 平滑展开到 `max-w-[220px] opacity-100`，文字默认色 `text-slate-600`
+- **单条 hover（展开态下进一步 hover 某行）**：该行文字变 `text-blue-600 font-medium`，横线变长变粗变蓝（14×1 → 20×2 px，`bg-blue-500`）
+- **卡片有 max-height**（`max-h-[70vh]`），节点过多时整个卡片内部纵向滚动（`overflow-y-auto scrollbar-hide`）
+- **点击单条**：通过 `data-msg-index` 找到 DOM 节点 → `scrollIntoView({ behavior: 'smooth', block: 'start' })`
+
+**技术实现**：使用 Tailwind v4 嵌套**命名 group**（`group/nav` + `group/item`），整个 hover 交互 CSS-only，无 React state 驱动 hover，避免 onMouseEnter 回调引起的 re-render 卡顿，鼠标在 tick → 文字间穿越也不会闪烁。
+
+**最终文件**
+- `desktop/src/ui/components/knowclaw-v2/ChatNavTrack.jsx`（~110 行）：
+  - `useMemo` 从 `messages` 筛 `role === 'user'` 提取锚点 `{ index, snippet, hasMore }`（snippet 取 24 字，去除连续空白）
+  - `scrollToAnchor(index)` → `el.scrollIntoView({ behavior: 'smooth', block: 'start' })`
+  - `userAnchors.length < 2` 时 return null，单轮对话不渲染
+  - 外层 `group/nav` 控制卡片显隐 + 文字宽度展开
+  - 每个 `<button>` 加 `group/item` 控制单条高亮
+
+**修改文件**
+- `desktop/src/ui/components/knowclaw-v2/KnowClawV2Page.jsx`：
+  - 导入 `ChatNavTrack`
+  - `messages.map` 中每条消息外层包 `<div key={i} data-msg-index={i}>` wrapper，作为 nav 的 DOM 锚点
+  - Chat body 的 `relative` 容器内，「回到底部」按钮之后插入 `<ChatNavTrack messages={messages} scrollContainerRef={scrollContainerRef} />`
+
+**布局关系**：nav `right-3` + tick 宽 14-20px，与「回到底部」按钮 `bottom-4 right-6` 横向不冲突；nav 垂直居中、按钮居底部，Y 轴也基本不重叠
+
 #### E.2 文件写入实时可视化（参考 Cursor）
 
 **需求描述**
@@ -826,7 +1030,44 @@ U8 密集测试后采集的第二批优化方向，侧重 UI 品质、交互丰�
 - 方案 B（**重量**）：主进程在 `beforeToolCall` / tool 执行后推送 `file_preview` 事件，携带文件完整内容或 diff，渲染端做实时 preview tab。更接近 Cursor 效果但架构侵入大。
 - 建议从方案 A 起步：解析 `toolCall` 事件中的 `input.content` / `input.old_string` / `input.new_string`，在 ToolCallCard 的展开区域渲染。
 
-#### E.3 任务卡片 / 思考过程 / 处理过程的 UI 升级（参考 Cursor）
+**实现记录（2026-05-24）**
+
+**重要命名澄清**：pi SDK 实际工具名是 **`write` / `edit`**（不是 `write_file` / `edit_file`），edit 字段是 **`oldText` / `newText`**（不是 `old_string` / `new_string`）。计划文档原始描述是误名，代码中统一以 pi SDK 真实名称为准。
+
+**采用方案**：方案 A（args 一次性快照） — `tool_execution_start` 时 args 已完整传到 renderer，本期实现「执行中即可预览」效果。方案 B（接 `message_update.toolcall_delta` 实现 LLM 流式逐字增量预览）留 v2，本期不做。
+
+**新增文件**
+- `desktop/src/ui/components/knowclaw-v2/FileChangePreview.jsx`（~190 行）：
+  - `WritePreview`：头部显示 `path · N 行 · N 字符`，主体 `<pre>` 等宽字体 + `max-h-96` 滚动；> 800 行时只渲染首 200 + 尾 200 + 中间省略提示
+  - `EditPreview`：头部 `path · N 处修改`；多 edit 时显示编号 `修改 N/M`；每个 edit 渲染两个 `<pre>` 块（红底 `bg-rose-50 border-l-2 border-rose-300 text-rose-700` 显示 oldText；绿底 `bg-emerald-50 border-l-2 border-emerald-300 text-emerald-700` 显示 newText）
+  - `normalizeEdits` 兼容 pi legacy 格式：顶层 `oldText`/`newText` 自动包成单元素 `edits[]`；`edits` 为 JSON 字符串时 try-parse；同时支持旧的 `old_string`/`new_string` 字段名
+  - `truncateEditText` 单个 oldText/newText 超过 200 行也截断中间
+  - `shortenPath` 路径超过 60 字符时显示 `…/last3segments`
+  - `args` 为 undefined / 工具不是 write/edit → return null
+  - 不引入任何新 npm 依赖
+
+**修改文件**
+- `desktop/src/ui/components/agent-chat/MessageBubble.jsx`（ToolCallCard）：
+  - 导入 `FileChangePreview`
+  - 新增 `isFileMutator` / `hasPreviewableArgs` 判定
+  - 解锁 busy 展开：`canExpand = hasPreviewableArgs || (!isBusy && !!tool.result)`
+  - `autoExpandedRef` + `useEffect` 实现 write/edit 自动展开（仅在首次出现 args 时自动展开，之后尊重用户手动操作）
+  - 展开区分流：
+    - `hasPreviewableArgs` → `<FileChangePreview />` + 完成后底部追加迷你 result 提示（前 200 字 truncate，title 上挂完整 result）
+    - 其他工具 → 现有 `<pre>` result panel（保持不变）
+
+- `desktop/src/main/ipc/knowclaw.js`（`mapPiMessagesForRenderer`，L257-269）：
+  - `toolCall` block 映射时补 `arguments` → `args`
+  - 历史会话 / `openSession` / `rehydrate` 回放时 write/edit 也能预览，与实时会话体验对齐
+
+**行为效果**
+- LLM 调用 `write` 或 `edit` 工具瞬间：ToolCallCard 自动展开，全文 / 双块 diff 即刻呈现
+- 工具完成：预览保留不动，底部追加一行迷你 result（如 `Successfully wrote 1234 bytes to ...`），用户可见但不抢主视觉
+- 用户可随时点击 header 手动收起 / 再展开
+- 历史会话切回：所有 write/edit 都能展开预览
+- 超长文件（> 800 行）：截断防卡顿；超长 edit oldText/newText（> 200 行）：也截断
+
+#### E.3 任务卡片 / 思考过程 / 处理过程的 UI 升级（参考 Cursor） — **DONE**（2026-05-24）
 
 **需求描述**
 模仿 Cursor 的展示效果，让 TaskCard、ThinkingBlock、ToolCallCard 的视觉层次更清晰、更专业：
@@ -839,7 +1080,47 @@ U8 密集测试后采集的第二批优化方向，侧重 UI 品质、交互丰�
 - 优先级：ToolCallCard 展示升级 > TaskCard 视觉升级 > ThinkingBlock 微调。
 - 需要一次性做 design review（可以先出 Figma 或 HTML mockup），避免改完还要再调。
 
-#### E.4 子代理（Sub-Agent）执行可视化（参考 Cursor）
+**实施范围与决策**
+
+经与用户确认后缩减为两项，与已完成的 K2 / D.5 / E.2 改动互补：
+
+| 子项 | 决策 | 说明 |
+|---|---|---|
+| ToolCallCard | **跳过** | K2（spinner / 摘要 / elapsed）+ E.2（write/edit 预览、busy 解锁、自动展开）已覆盖需求 |
+| TaskCard 进度条 | **不做** | 用户选择保持简洁，header 文字 `X/Y 已完成` 已足够 |
+| TaskCard 完成动画 | **不做** | 用户选择不引入动画，静态切换图标即可 |
+| TaskCard 分组/缩进 | **不做** | 当前 pi SDK `task_manager` 数据为扁平列表（无 group / indent 字段），等数据模型支持后再做 |
+| TaskCard 视觉打磨 | **做** | 卡片阴影、header 渐变、间距/图标微调、空态优化、Summary 风格统一 |
+| ThinkingBlock shimmer 光条 | **做** | streaming 时左侧渐变色条上下循环扫，结束后变静态灰边框 |
+| ThinkingBlock 流式光标 | **做** | streaming 时文本末尾追加 1px 闪烁竖线 |
+
+**修改文件**
+
+- `desktop/src/ui/components/knowclaw-v2/TaskCard.jsx`（~15 处 className 变更）：
+  - **卡片容器**：`border border-gray-200` → `shadow-sm ring-1 ring-gray-100`，更细腻的边框 + 轻微阴影
+  - **Header**：背景从纯色 `bg-gray-50/60` 改为 `bg-gradient-to-r from-gray-50/80 to-white` 微渐变；`py-2` → `py-2.5`
+  - **TaskRow**：`gap-2.5 py-1.5` → `gap-3 py-2`；图标 `size={14}` → `size={15}`
+  - **completed 状态**：`text-emerald-500` → `text-emerald-500/70`，`text-gray-400 line-through` → `text-gray-400/70 line-through`，已完成项视觉退后
+  - **空态**：单行 italic 文字 → 居中 flex 布局 + `ListTodo` 浅色图标 + 更多 padding
+  - **TaskCardSummary**：`border border-gray-100` → `ring-1 ring-gray-100 shadow-xs`，与主卡片风格统一
+  - **列表区**：`px-3 py-1.5 divide-gray-50` → `px-3.5 py-2 divide-gray-100/60`，与 header 左对齐、分割线更明显
+
+- `desktop/src/ui/components/agent-chat/MessageBubble.jsx`（ThinkingBlock）：
+  - 内容区改为条件渲染：streaming 时用 `flex` 布局 + shimmer 光条 + 末尾光标；非 streaming 时保持原静态 `border-l-2 border-slate-200`
+  - shimmer 光条：`w-0.5` 渐变背景（`#cbd5e1 → #f1f5f9 → #cbd5e1`）+ `backgroundSize: '100% 200%'` + `animation: thinkShimmer 1.8s linear infinite`
+  - 闪烁光标：`<span className="inline-block w-px h-3.5 bg-slate-400 animate-pulse">`
+  - 新增 `@keyframes thinkShimmer`：`background-position: 0% 0%` → `0% 200%`，放在 ThinkingBlock 内部 `<style>` 块（**而非 ThinkingIndicator**，因为 ThinkingBlock 进入 streaming 状态时 ThinkingIndicator 已卸载）
+
+**行为**
+
+- 普通对话（无 task / 无 thinking）：完全无变化
+- TaskCard 出现：阴影 + 渐变 header + 更宽松行距，视觉更精致；completed 项更淡
+- TaskCard 旧 snapshot（D.5 Summary）：自动对齐新风格
+- ThinkingBlock 出现 + streaming：左侧光条上下流动 + 末尾光标闪烁，配合 thinking_delta 文本追加，效果如 Cursor 的"正在思考"动画
+- ThinkingBlock streaming 结束（content 开始或 agent_end）：自动切回静态灰边框 + 光标消失
+- 历史会话加载：所有 ThinkingBlock 默认折叠，展开后为静态灰边框（与现有行为一致）
+
+#### E.4 子代理（Sub-Agent）执行可视化（参考 Cursor） — **DONE**（2026-05-24）
 
 **需求描述**
 当 KnowClaw 通过 `delegate_task` 启动子代理时，用户目前只能看到一个 ToolCallCard 显示 "delegate_task · running"，对子代理在做什么完全不可见。参考 Cursor 的效果：子 agent 的执行过程应该以内嵌折叠面板的形式展示，用户能看到子代理的思考过程、工具调用、中间结果。
@@ -849,6 +1130,42 @@ U8 密集测试后采集的第二批优化方向，侧重 UI 品质、交互丰�
 - 当前 `delegate_task` 的 ToolCallCard 只显示 "delegate_task · running"，完全不透明。改进方向：在 ToolCallCard 展开区域显示 `toolCall.input` 中的 `description`（子代理任务描述）和 `kind`（research / edit）。
 - 完成后显示子代理的最终结论摘要（`toolResult.content` 的前 N 字），不需要完整执行日志。
 - 实现上是纯 UI 侧改动：解析 `delegate_task` 的 `toolCall.input` 参数即可，不需要事件转发或子 session streaming 管道。复杂度大幅降低。
+
+**实施范围与决策**
+
+| 子项 | 决策 | 说明 |
+|---|---|---|
+| header summary bug 修复 | **做** | `summarizeToolArgs` 中 `delegate_task` 读 `a.description`，应为 `a.task`（与 pi 工具定义对齐），导致历史 bubble 摘要始终为空 |
+| 任务描述显示 | **做** | 直接靠 header summary 行展示前 80 字任务描述，无需额外执行中卡片 |
+| 执行中实时进度 | **跳过** | 已有 `streamingStdout` 暗色终端（K2 + U3）显示子代理 `[delegate_task \| research] Turn N/M · calls: K` 进度，足够 |
+| 结构化结果卡片 | **做** | 新建 `DelegateTaskResult.jsx`：ok/error badge + kind badge + summary 文本 + 统计行 + 折叠文件列表 + error 详情，替代 raw JSON dump |
+| busy 期间展开 | **不做** | 与 write/edit 不同，delegate_task 结果只有任务完成时才有意义，沿用「`!isBusy && tool.result` 才可展开」规则 |
+
+**新增文件**
+- `desktop/src/ui/components/knowclaw-v2/DelegateTaskResult.jsx`（~180 行）：
+  - 解析 `tool.result`（JSON 字符串），失败时回退原 `<pre>` 渲染
+  - **顶部状态行**：ok = true → 绿色 `完成` badge + `CheckCircle2`；ok = false → 红色 badge + 中文化的 `truncatedReason`（`已中止` / `超时` / `超出最大轮数` / `出错`）+ `AlertCircle`
+  - **kind badge**（来自 `tool.args.kind`）：`research` → 蓝色 `只读研究`，`edit` → 琥珀色 `编辑模式`
+  - **summary 区域**：`text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap`，`max-h-64 overflow-y-auto` 防超长溢出
+  - **统计行**：`text-[11px] text-gray-400 font-mono`，格式 `N 轮 · M 次工具调用 · Xs/Xm Ys`，自动跳过 0 值
+  - **`FileList` 组件**：`filesRead` / `filesModified` 各一个折叠列表，默认折叠，header `读取文件 · N` / `修改文件 · N`，展开后用 `shortenPath`（路径 > 60 字符显示 `…/last3segments`）+ `FileText` / `FilePenLine` 图标
+  - **error 区域**：仅 `truncatedReason === 'error'` 时渲染，红底 `bg-rose-50 ring-1 ring-rose-100` + `font-mono`
+
+**修改文件**
+- `desktop/src/ui/components/knowclaw-v2/knowclawEventReducer.js`：`summarizeToolArgs` 中 `delegate_task` 读 `a.task`（修正字段名 bug）
+- `desktop/src/ui/components/agent-chat/MessageBubble.jsx`：
+  - import `DelegateTaskResult`
+  - ToolCallCard 新增 `const isDelegateTask = tool.name === 'delegate_task'`
+  - 展开区域 `!hasPreviewableArgs && tool.result` 分支内判断 `isDelegateTask`，是则渲染 `<DelegateTaskResult result={tool.result} args={tool.args} />`，否则回退原 `<pre>` 渲染
+
+**行为**
+
+- 子代理调用 live：header 行立刻显示 `委托子任务: <task 前 80 字>`；下方暗色终端实时滚动子代理进度
+- 子代理完成（ok）：可展开后看到绿色「完成」+ kind badge + 子代理 summary + 轮次/调用次数/耗时 + 折叠的读写文件列表
+- 子代理失败/超时/中止：红色 badge + 对应中文化原因 + （error 时）红底详情；统计区仍展示已发生的轮次和文件操作
+- 历史会话回放：依赖 E.2 的 `args` 映射，kind badge 在历史 bubble 同样正确显示；header summary 也因 bug 修复而正常显示
+- 非 delegate_task 工具：行为完全不变（write/edit 走 FileChangePreview；其他走原 `<pre>`）
+- result JSON 解析失败（理论上不该发生）：优雅回退为原 raw `<pre>` dump
 
 #### E.5 Plan 模式——先规划再执行（参考 Cursor Plan Mode）
 
@@ -867,6 +1184,30 @@ U8 密集测试后采集的第二批优化方向，侧重 UI 品质、交互丰�
 - **"开始执行" 触发**：用户点击按钮后，hook 发送一条特殊的 steer/followUp 消息（如 `[PLAN_APPROVED] 按照上述方案开始执行`），同时切换工具集回完整模式。
 - 这个功能复杂度较高（涉及 prompt / 工具集 / UI 三层改动），建议作为独立的 U9 阶段规划。
 
+**实现概要（2026-05-24 完成）**
+
+- **核心决策**
+  - **不为切模式新建会话**：切换 Plan ⇄ Agent 在当前会话内进行，靠 `[MODE: plan]` 用户消息前缀 + system prompt 双模式段告知模型当前模式，避免割裂上下文与历史回放复杂度。
+  - **完整功能实现**：包含 prompt 双模式段、`beforeToolCall` 拦截、`ask_user` 结构化提问、`save_plan` 落盘、"开始执行" CTA 一站式交付，不分阶段。
+  - **Plan 模式允许 research delegate**：`delegate_task(kind='research')` 是只读探索，与 Plan 模式定位一致；只拦截 `kind='edit'`。
+- **工具白/黑名单**
+  - 黑：`write` / `write_file` / `edit` / `edit_file` / `bash` / `delegate_task(kind='edit')`，由 `beforeToolCall` 返回阻断原因，模型可读到原因并改换策略（如改用 `ask_user`、`save_plan`）。
+  - 白：所有只读工具（read/list/grep/glob/search_web/fetch_web）+ `task_manager` + `delegate_task(kind='research')` + **Plan 模式专用**：`ask_user`、`save_plan`。
+- **后端**
+  - `knowclaw.js`：模块级 `currentPlanMode` + `knowclaw:setPlanMode` / `knowclaw:getPlanMode` IPC + `getStatus` 返回 `planMode`；`knowclawBeforeToolCall` 顶部新增 Plan-mode 拦截分支；`knowclaw:send` / steer / followUp 在用户消息前注入 `[MODE: plan]\n`；`mapPiMessagesForRenderer` 显示时剥离前缀；新增 `pendingAskUser` Map + `askUserViaRenderer(questions, signal)` + `knowclaw:askUserReply` handler；`runtime.createSession` 调用统一传入 `askUser: askUserViaRenderer`。
+  - `pi-runtime/promptBuilder.js`：新增 `# 工作模式 (Plan / Agent)` 段，说明双模式行为、可用/禁用工具、`[MODE: plan]` 标识，以及 Plan 模式下应优先使用 `ask_user` / `save_plan` / `task_manager`。
+  - `pi-runtime/bootstrap.js`：新增 `askUserTool` / `savePlanTool` 注册（位于 `task_manager` 之后）；`createAgentSession` 新增 `opts.askUser` 参数。
+  - **新文件** `pi-runtime/tools/askUserTool.js`：`defineTool` 自定义工具，`parameters.questions` 为数组（每项含 `id` / `prompt` / `options` / `allow_multiple`），`execute` 调用 `opts.askUser` 等待 IPC 返回；处理 `{ cancelled }` / `{ timeout }` / `{ error }` / 正常答案四种结果，结果以 JSON 文本回给模型。
+  - **新文件** `pi-runtime/tools/savePlanTool.js`：`defineTool` 自定义工具，写入 `<cwd>/.knowclaw/plans/<filename>.md`（默认 `plan-YYYYMMDD-HHmm.md`），含文件名 sanitize + `MAX_PLAN_BYTES` 上限，绕开 Plan 模式 write 拦截以保证方案可落盘。
+- **桥层**
+  - `preload.js`：暴露 `setPlanMode` / `getPlanMode` / `onAskUser` / `replyAskUser`。
+- **前端**
+  - `useKnowClawPersist.jsx`：新增 `planMode` state（在 `refreshStatus` 时同步）+ `setPlanMode`（IPC + 注入系统消息）+ `onAskUser` 监听（向 messages 注入 `kind: 'ask_user'` 气泡）+ `replyAskUser` / `cancelAskUser`（IPC 回写 + 标记气泡为 `answered`/`cancelled`）+ `startExecuting`（切回 Agent + 发送"请按照上述规划方案开始执行"消息）。
+  - **新文件** `AskUserCard.jsx`：在对话气泡内渲染结构化问卷，单选 radio / 多选 checkbox，提交前禁用按钮，回复后 readonly 显示「已回复」或「已取消」；紫色品牌色。
+  - `MessageBubble.jsx`：新增 `kind: 'ask_user'` 分支路由到 `AskUserCard`；签名增加 `onAskUserReply` / `onAskUserCancel`。
+  - `KnowClawV2Page.jsx`：header 新增 `PlanModeToggle`（紫色品牌色，ClipboardList 图标，streaming 时 disabled）；message list 与 ChatInput 之间新增「开始执行」浮动 CTA（仅 Plan 模式且非 streaming 且 messages 非空时显示）；`<MessageBubble>` 透传 `onAskUserReply` / `onAskUserCancel`。
+  - `knowclawEventReducer.js`：`summarizeToolArgs` 新增 `ask_user`（`${n} 个问题`）和 `save_plan`（`保存方案: <filename>`）摘要。
+
 #### E.6 Header 响应式设计 + 状态持久化
 
 **需求描述**
@@ -880,6 +1221,27 @@ U8 密集测试后采集的第二批优化方向，侧重 UI 品质、交互丰�
 - 响应式：用 `ResizeObserver` 监听 header 容器宽度，按阈值切换 3 档布局。或者用 CSS container queries（Electron Chromium 版本应该支持）。
 - 状态 hydrate：`refreshStatus` 在 mount 时立即调一次，其返回的 `sessionStats` / `contextUsage` 应该马上填充 state，不需要等 polling interval。需确认当前代码是否已经这样做（可能是但被 D.1 的 unmount 掩盖了）。
 
+**实现概要（2026-05-24 完成）**
+
+- **核心决策**
+  - **响应式实现走 `ResizeObserver` + tier state**：监听 header 右侧容器的 `contentRect.width`，按阈值产出 `wide / medium / compact` 三档；不用 CSS container queries 是因为需要 JS 状态来驱动「溢出菜单是否挂载」这一行为，纯 CSS 做不到。
+  - **完整溢出菜单**：compact 档把 6 个次要项（Model / Thinking / SubAgent / PlanMode / Compact / FileTree）折叠进 `...` popover，主要项（WorkspaceSelector / ContextPill / TokenPill / 新对话）始终常驻。
+  - **不动 Pill 内部**：ContextPill / TokenPill 已经够紧凑且承载关键信息，本次只对外层布局做 tier 化；如未来实测仍挤压再单独优化。
+- **响应式阈值与 hysteresis**
+  - `wide >= 1180px`、`medium 880-1180px`、`compact < 880px`。
+  - **30px 滞回带**：避免拖动窗口边到阈值附近时反复抖动；上行需越过 `阈值 + 30px`，下行需越过 `阈值 - 30px`。
+- **新文件**
+  - `useHeaderTier.js`：`useHeaderTier(ref)` hook，`ResizeObserver` + `classifyWidth(width, prevTier)`（带 hysteresis），仅 tier 变化时 setState；mount 时 `getBoundingClientRect()` 同步播种避免首帧误判 `wide`；卸载时 disconnect observer。
+  - `HeaderOverflowMenu.jsx`：`...` 触发按钮 + popover panel，纵向渲染 `Model / Thinking / SubAgent / PlanMode / Compact / FileTree` 六行（每行左侧 14px 灰色 label + 右侧原组件实例）；`mousedown` outside-click 关闭、Esc 关闭；嵌套的 ModelSelector / ThinkingLevelSelector 自身的下拉因为渲染在 popover DOM 子树内，与 popover 的 outside-click 不冲突；接受 `components={{ ModelSelector, ThinkingLevelSelector, ... }}` 注入避免循环依赖。
+- **改动**
+  - `KnowClawV2Page.jsx`：新增 `headerRightRef` + `const headerTier = useHeaderTier(headerRightRef)`；header 右侧 `<div>` 绑 ref 并加 `min-w-0`；secondary 控件用 `headerTier !== 'compact'` 整体条件渲染，传 `tier={headerTier}` 让组件内部决定 label；compact 档常驻控件保持但「新对话」按钮自动 icon-only 化；compact 档挂载 `<HeaderOverflowMenu>`，把 5 个 toggle + FileTree 转发进去。
+  - `ModelSelector` / `ThinkingLevelSelector` / `SubAgentToggle` / `PlanModeToggle` 签名增加 `tier = 'wide'` 可选 prop；`tier === 'wide'` 显示文字 label，否则 icon-only；ModelSelector 在非 wide 档下额外截断超过 12 字的 model 名（`首10字…`），完整名进 title 属性。
+  - `useKnowClawPersist.jsx::openSession`：成功分支末尾追加 `void refreshStatus()`，修复历史会话切换后 ContextPill/TokenPill 清零、要等下一轮 polling 才回填的 bug；因 `refreshStatus` 在文件中声明在 `openSession` 之后，dep 数组省略并加 `eslint-disable react-hooks/exhaustive-deps` 注释规避 TDZ（与 E.5 `startExecuting` 同一模式，但此处选择不重排序代码）。
+- **风险与坑位**
+  - ResizeObserver 在 Electron 23+ 默认可用，无需 polyfill。
+  - 嵌套 popover 的 outside-click：内层 dropdown 渲染在外层 popover DOM 子树内，外层 `!panelRef.contains(target)` 检查自然把内层视为「内部点击」，不会误关。
+  - tier seed：mount 时同步用 `getBoundingClientRect` 播种，避免首帧渲染 `wide` 再被 RO 覆盖为 `compact` 导致一帧抖动。
+
 #### E.7 对话中上传文件到工作空间
 
 **需求描述**
@@ -892,27 +1254,71 @@ U8 密集测试后采集的第二批优化方向，侧重 UI 品质、交互丰�
 - 对话整合：上传成功后，自动在对话中插入一条 system 提示 "用户上传了文件：`<path>`"，或作为 user message 的附带信息传给 LLM。
 - **具体的目标文件夹策略、文件大小限制、重名处理等需要进一步讨论后决定**，本阶段仅记录需求。
 
+**实现概要（2026-05-24 完成）**
+
+E.7 实际实施时与最初需求做了重要扩展：除文件上传外，还把文件树升级为「双击打开 + 单击选中 + 拖拽交互」，并通过拖拽实现了上传与文件引用的统一入口（替代附件按钮方案）。
+
+- **核心决策**
+  - **不走 ChatInput 附件按钮路径**，改为「拖拽优先」：① 文件树文件拖到 input 插入 `@relPath` 引用；② 系统文件拖到文件树目录上 = 复制到该目录；③ 系统文件拖到 input = 复制到工作空间根 + 自动插入 `@` 引用。对用户更直观，且与现有图片拖拽 UX 一致。
+  - **`@` 引用前后端分离展示**：用户看到的对话气泡保留 `@过程文档/合同.docx` 自然语法（类似 Cursor）；发给 LLM 的实际 payload 是 `[文件引用 — 请用 read_file 读取以下工作空间相对路径]\n- 过程文档/合同.docx\n\n<用户原文>`，让模型可直接用 `read_file` 读取，避免 `@` 语义歧义。
+  - **上传目标 = 拖入位置**：拖到文件树某目录上落到该目录（IDE 风格）；拖到根 / 拖到 input 落到工作空间根。重名自动加 `(1)`、`(2)` 后缀。
+  - **单击改选中、双击改打开**：原本单击直接打开太激进，新加蓝色选中态作为「我要对这个文件做点什么」的中转，双击才走 `shell.openPath`。
+  - **Electron 39 用 `webUtils.getPathForFile`**：`File.path` 在 Electron 32+ 已废弃；项目已在 preload 暴露 `window.ipm.files.getPathForFile`，复用即可。
+- **后端**
+  - **新增 IPC `knowclaw:uploadToWorkspace`**（`knowclaw.js`）：入参 `{ filePaths: string[], destRelDir?: string }`，逐一 `fs.copyFileSync` 到 `cwd/destRelDir`。包含容器边界校验（防 `../` 穿越）、目录存在性检查、单文件 100MB 上限、重名 `name (N).ext` 自增后缀（`nextAvailableName` 辅助函数，1..999 + 时间戳兜底）、跳过目录与超大文件并在返回 `skipped` 里说明原因。全局模式下拒绝上传（要求先选工作空间）。
+  - 返回：`{ ok, uploaded: [{ name, relPath, size, src }], skipped: [{ src, reason }] }`，`relPath` 用 POSIX 分隔符方便 LLM 用 `read_file`。
+- **桥层**
+  - `preload.js` 新增 `knowclaw.uploadToWorkspace(filePaths, destRelDir)` 转 IPC。
+- **前端**
+  - **`WorkspaceFileTree.jsx` 大改**：
+    - `TreeNode` 加 `onDoubleClick` 触发原 `onOpenFile`、`onClick` 改为选中（文件）或 toggle（目录）；选中态 `bg-blue-50 ring-1 ring-blue-300`。
+    - 文件 `draggable`，`onDragStart` 写 `text/knowclaw-file-path` + 兜底 `text/plain` 都设为 `relPath`。
+    - 目录行 `onDragOver` 检测 `Files` MIME 后 `preventDefault` 并 `stopPropagation`（防冒泡到 panel），通过 `dropTargetDir` state 高亮当前 hover 的目录。
+    - 整个 `<aside>` panel 接收系统文件 drop 作为兜底（落到根目录）；hover 时显示蓝色 ring + 居中浮动「放开以上传到工作空间根目录」提示。
+    - 切换 cwd 时清空 `selectedPath`，避免跨工作空间的陈旧选中；点击 panel 空白也清选中。
+    - 全局模式 / 空树时给出「可以拖入文件」引导文案。
+    - 导出常量 `TREE_DRAG_MIME = 'text/knowclaw-file-path'`。
+  - **`ChatInput.jsx` 扩展 onDrop**：
+    - 新增 prop `onUploadFiles(filePaths, destRelDir) → Promise<{ ok, uploaded, skipped }>`，缺省时仅处理图片。
+    - `handleDragOver` 同时识别 `TREE_DRAG_MIME`、`Files`，根据情况设 `dragKind = 'file' | 'image'`。
+    - `handleDrop` 优先级：① `text/knowclaw-file-path`（文件树拖来）→ 在 caret 插入 `@relPath ` 不走上传；② 图片 → 原 `addFiles` 链路；③ 其他系统文件 → 调 `onUploadFiles`，上传成功后批量在 caret 插入 `@relPath`。
+    - `insertReferences` 智能插入：focus 在 textarea 时用 `selectionStart/End` 在光标位置插入并 reposition caret；未 focus 则追加到末尾。前后自动补空格防止与已有文字粘连。
+    - 视觉：drop 期间整个 composer 加蓝色 ring + 中央 pill `放开以添加文件引用` / `放开以添加图片附件`；上传中右上角显示 `正在上传...` 小 spinner。
+    - 底部 hint 行追加 `· 可从文件树或本机拖入文件引用`（仅当 `onUploadFiles` 传入时）。
+  - **`useKnowClawPersist.jsx` 新增 `uploadToWorkspace` action**：调 IPC + 自动 `loadWorkspaceTree()` + 按 `uploaded` / `skipped` 数量发 success/warn/error toast；首个失败文件名显式列出，后续合并为「另 N 个」。
+  - **`useKnowClawPersist.jsx` 新增 `@` 引用 → LLM 展开**：
+    - 模块级 helper `extractFileRefs(text)` + `expandFileRefsForLlm(text)`，正则 `/(^|[\s(\[{,;])@([^\s@()[\]{},;]+\.[A-Za-z0-9]{1,8})/g` 匹配带扩展名的 `@ref`，要求 `@` 前是空白或常见标点防止 email 误命中。
+    - `sendMessage` / `steerMessage` / `followUpMessage` 调用前用 `expandFileRefsForLlm` 改写 IPC 文本；UI 气泡保留用户原文 with `@`。
+    - 展开格式：`[文件引用 — 请用 read_file 读取以下工作空间相对路径]\n- path1.ext\n- path2.ext\n\n<原文>`。
+  - **`KnowClawV2Page.jsx`**：从 hook 取 `uploadToWorkspace` 并透传给 `<ChatInput onUploadFiles>` 和 `<WorkspaceFileTree onUpload>`。
+- **风险与坑位**
+  - `File.path` 在 Electron 32+ 已移除，通过 `webUtils.getPathForFile()`（已暴露在 `window.ipm.files.getPathForFile`）替代；保留 `f.path` 作为旧 Electron 兜底。
+  - 目录拖拽：源是目录时 `srcStat.isDirectory()` 返回 true，直接 `skipped`（不递归），与 IDE 上传行为一致。
+  - 路径穿越：`path.relative(cwd, destAbs)` 以 `..` 开头或 `path.isAbsolute(rel)` 即拒绝。
+  - 嵌套 dragover 事件：目录行 `stopPropagation` 防止冒泡到 panel，否则会双重高亮。
+  - `@` 正则：要求带扩展名 + `@` 前是空白/标点，可大幅减少 email/handle 误命中；用户可能输入不带扩展名的 `@文件夹` 引用，本期不支持（保持简单）。
+
 #### E.8 决策状态
 
 | 编号 | 复杂度 | 推荐阶段 | 状态 |
 |------|-------|---------|------|
-| E.1 侧边快速导航 | 中（纯 UI，~150 行） | U9 或独立 sprint | **DEFERRED** |
-| E.2 文件写入可视化 | 中–高（方案 A 低侵入，方案 B 架构改） | U9 | **DEFERRED** |
-| E.3 UI 品质升级 | 中（纯 UI，需 design review） | U9 | **DEFERRED** |
-| E.4 子代理可视化 | 低（纯 UI，解析 toolCall.input 展示任务描述） | U9 | **DEFERRED** |
-| E.5 Plan 模式 | 高（prompt + 工具集 + UI 三层） | U9 独立阶段 | **DEFERRED** |
-| E.6 Header 响应式 + 状态持久化 | 低–中（CSS + hydrate 修复） | 随 D.1 一起做 | **DEFERRED** |
-| E.7 文件上传到工作空间 | 中（IPC + UI + 策略待定） | 需进一步讨论 | **DEFERRED** |
+| E.1 侧边快速导航 | 中（纯 UI，~200 行） | U9 或独立 sprint | **DONE**（2026-05-24） |
+| E.2 文件写入可视化 | 中–高（方案 A 低侵入，方案 B 架构改） | U9 | **DONE**（2026-05-24，方案 A；toolcall_delta 流式增量留 v2） |
+| E.3 UI 品质升级 | 中（纯 UI，需 design review） | U9 | **DONE**（2026-05-24，TaskCard 视觉打磨 + ThinkingBlock shimmer 光条 + 流式光标） |
+| E.4 子代理可视化 | 低（纯 UI，解析 toolCall.input 展示任务描述） | U9 | **DONE**（2026-05-24，summarizeToolArgs bug 修复 + DelegateTaskResult 结构化结果卡片） |
+| E.5 Plan 模式 | 高（prompt + 工具集 + UI 三层） | U9 独立阶段 | **DONE**（2026-05-24，双模式 prompt + `beforeToolCall` 拦截 + `ask_user` / `save_plan` 自定义工具 + `[MODE: plan]` 前缀 + `PlanModeToggle` + 「开始执行」CTA） |
+| E.6 Header 响应式 + 状态持久化 | 低–中（CSS + hydrate 修复） | 随 D.1 一起做 | **DONE**（2026-05-24，`useHeaderTier` ResizeObserver + hysteresis + `HeaderOverflowMenu` compact 档溢出菜单 + 4 toggle 接受 tier prop + `openSession` 追加 `refreshStatus()` 修复 pill 不重填） |
+| E.7 文件上传到工作空间 | 中（IPC + UI + 策略待定） | 需进一步讨论 | **DONE**（2026-05-24，`knowclaw:uploadToWorkspace` IPC + WorkspaceFileTree 双击/选中/拖出/拖入上传 + ChatInput 接收文件树拖拽与系统文件拖拽 + `@relPath` 引用前端显示 + LLM payload 展开为 read_file 提示） |
 
 #### E.9 后续启动 Checklist（实现时回到本节核对）
 
-- [ ] E.1：确定导航条 UI 形态（竖线 marker vs minimap vs 浮动目录）；节点仅取 user 消息
-- [ ] E.2：先做方案 A（从 toolCall.input 提取内容渲染 diff），评估效果后决定是否做方案 B
-- [ ] E.3：产出 UI design mockup 或 HTML 静态页面，确认视觉方向后再动代码
-- [ ] E.4：在 ToolCallCard 里解析 `delegate_task` 的 `input.description` + `input.kind` 展示；完成后展示 result 摘要
-- [ ] E.5：作为 U9 独立规划，先做 prompt + 工具过滤 PoC，再做结构化提问 UI
-- [ ] E.6：和 D.1 一起做；响应式用 ResizeObserver 还是 container queries 需测试
-- [ ] E.7：与产品侧讨论目标文件夹策略、大小限制、重名处理后再开始实现
+- [x] E.1：确定导航条 UI 形态（竖线 marker vs minimap vs 浮动目录）；节点仅取 user 消息 — 新增 `ChatNavTrack.jsx` 右侧固定导航条 + `data-msg-index` DOM 锚点 + `ResizeObserver` 比例映射 + hover tooltip + click-to-scroll
+- [x] E.2：先做方案 A（从 toolCall.input 提取内容渲染 diff），评估效果后决定是否做方案 B — 已落地 `FileChangePreview.jsx`（write 全文 + edit 极简 oldText/newText 双块）+ ToolCallCard busy 自动展开 + `mapPiMessagesForRenderer` 补 args 历史回放
+- [x] E.3：TaskCard 视觉打磨（shadow + ring + 渐变 header + completed 透明度 + 居中空态 + Summary 风格统一） + ThinkingBlock streaming 时 shimmer 光条 + 末尾 1px 闪烁光标；ToolCallCard 已由 K2 + E.2 覆盖故跳过；分组/缩进/进度条/完成动画用户决定不做
+- [x] E.4：修复 `summarizeToolArgs` 中 `delegate_task` 字段名 bug（`description` → `task`）；新增 `DelegateTaskResult.jsx`（ok/error + kind badge + summary + 轮次/调用次数/耗时统计 + 折叠的读写文件列表 + error 详情），ToolCallCard 为 `delegate_task` 路由到该组件；执行中靠已有 streamingStdout 暗色终端展示进度
+- [x] E.5：双模式 prompt（`# 工作模式 (Plan / Agent)` 段 + `[MODE: plan]` 用户消息前缀）+ `beforeToolCall` 拦截 write/edit/bash/`delegate_task(edit)`（research delegate 仍放行）+ 新增 `ask_user` / `save_plan` 自定义工具 + `AskUserCard.jsx` 结构化问卷气泡 + `PlanModeToggle` header 按钮 + Plan 模式下「开始执行」浮动 CTA + `useKnowClawPersist` 全链路 state 与 IPC 桥
+- [x] E.6：`useHeaderTier.js` ResizeObserver + 1180/880px 阈值 + 30px hysteresis 三档 tier；`HeaderOverflowMenu.jsx` compact 档纵向 popover 折叠 Model/Thinking/SubAgent/PlanMode/Compact/FileTree；4 toggle 组件接受 `tier` prop 控制 label 显隐；`openSession` 成功分支追加 `void refreshStatus()` 立即重填 ContextPill/TokenPill
+- [x] E.7：实施时与初始需求大幅扩展 — 改为「拖拽优先」交互（替代附件按钮路径）：文件树双击打开 + 单击选中 + draggable 拖出 + 整 panel 接收系统文件 drop（拖到目录=复制到该目录；拖到 panel 空白=复制到根）；ChatInput 同时接收文件树拖拽（插入 `@ref`）与系统非图片文件拖拽（先 IPC 上传到根 + 自动插入 `@ref`）。新 IPC `knowclaw:uploadToWorkspace`（100MB 上限 + 路径穿越校验 + `name (N).ext` 重名自增 + 跳过目录）。`@relPath` 双层语义：UI 气泡保留 `@xxx.ext` 自然语法、IPC payload 展开为 `[文件引用 — 请用 read_file 读取...]\n- path\n\n<原文>` 让 LLM 直接 read_file
 
 ---
 
@@ -925,3 +1331,16 @@ U8 密集测试后采集的第二批优化方向，侧重 UI 品质、交互丰�
 | 2026-05-22 | F1 实施完成 | 附属壳 + 双根路径解析 + 外部目录扫描 + 前端/后端限制一致性全部落地，用户测试反馈的 guard 遗漏已修复 |
 | 2026-05-22 | F2 实施完成 | Electron 隐藏窗口渲染 + HTTP 降级 + Markdown 转换 + 全页截图 + 截图管理 lightbox 全部落地 |
 | 2026-05-22 | F3 实施完成 | `ppu-paddle-ocr` + `onnxruntime-node` 纯 Node.js OCR 方案落地：中英双模型 + 懒加载 + 空闲释放 + 截图/剪藏自动识别 + 手动触发 + snippet 碎片自动创建 |
+| 2026-05-22 | K1 实施完成 | KnowClaw 新增 `search_web`（博查 API）+ 升级 `fetch_web(rendered=true)` 复用 F2 `webFetch`，并在设置页新增搜索 API Key 配置与测试连接；搜索失败按用户决策降级为引导输入 URL 后抓取 |
+| 2026-05-23 | K2 实施完成 | 与 KnowClaw `Phase U1.5` 合流交付。新增 `knowclaw:listWorkspaceTree` IPC、右侧 `WorkspaceFileTree` 面板（折叠 / 文件大小 / 类型图标 / 文件点击）、`tool_execution_start` 触发的 `recentTouchedFiles` 5s 高亮、`agent_end` 后自动刷新；同步交付块 B：`MessageBubble` heartbeat 状态条（thinking / writing / tool / idle）+ 30s 空闲倒计时 + 工具参数摘要（write / edit / read / bash / search_web / fetch_web / task_manager 等）+ 完成耗时 |
+| 2026-05-24 | D.1–D.5 实施完成 | Backlog-D 全部 5 项修复落地：D.1 `KnowClawPersistProvider` + `rehydrate` IPC + session 锁定；D.2 `setCwd`/冷启动自动 `newSession` + `sessionGenRef` 防竞态；D.3 `newSession` 乐观 UI 插入；D.4 `scrollContainerRef` + `handleScroll` 条件 auto-scroll + 「回到底部」浮动按钮；D.5 `lastTasksIndex` + `TaskCardSummary` 折叠旧 snapshot + `agent_end` 降级 `in_progress` → `pending` |
+| 2026-05-24 | E.1 实施完成 | 新增 `ChatNavTrack.jsx` 侧边导航组件：`data-msg-index` DOM 锚点 + `ResizeObserver` 比例映射 + 视口指示条 + hover tooltip（前 20 字摘要）+ click smooth-scroll 跳转；仅 user 消息作为锚点，< 2 轮不渲染 |
+| 2026-05-24 | E.1 UI 重做 | 用户反馈 v1 紧贴侧边、圆点形状、按位置分布不符合 DeepSeek 风格。v2 改为：横线 marker（"-"）+ 距右 12px 空隙 + 垂直居中堆叠（不反映滚动位置，是目录式）+ 节点过多时内部滚动 + 移除视口指示条 / 背景竖线 / offsetTop 计算 / ResizeObserver；组件体量从 ~200 行精简到 ~100 行 |
+| 2026-05-24 | E.1 UI 再做（v3） | 用户进一步反馈 v2 仍未实现 DeepSeek 的「hover 弹出大卡片显示所有节点摘要」效果。v3 用 Tailwind v4 嵌套命名 group（`group/nav` + `group/item`）实现折叠/展开两态：折叠态仅显示一列横线 marker；hover 整个 nav 时卡片整体展开面板，所有摘要文本从 `max-w-0` 平滑展开到 `max-w-[220px]`；再 hover 单条时该行文字变蓝加粗、tick 变长变粗变蓝；卡片 `max-h-[70vh]` 内部滚动。CSS-only 交互，无 React state |
+| 2026-05-24 | E.1 浅色风格对齐 | 用户反馈 v3 的深色卡片与页面浅色风格不搭。卡片改为浅色面板：背景 `bg-white/95`、ring `ring-slate-200`、阴影 `shadow-lg`、`backdrop-blur-sm`；文字默认 `text-slate-600`、hover `text-blue-600`；tick 默认 `bg-slate-300/80`、展开后 `bg-slate-400`、hover `bg-blue-500`。整体与「回到底部」按钮、WorkspaceFileTree 同套调色板 |
+| 2026-05-24 | E.2 实施完成（方案 A） | 新增 `FileChangePreview.jsx`：write 显示全文代码块 + 字符/行数 meta + 超长截断（首 200 + 尾 200），edit 极简 diff（红底 oldText / 绿底 newText 双块 + N/M 编号 + 单段截断）；`MessageBubble.jsx` ToolCallCard 解锁 busy 展开 + `autoExpandedRef` 自动首次展开 + 分流渲染 + done 后底部追加迷你 result（200 字）；`knowclaw.js` `mapPiMessagesForRenderer` 补 `arguments → args` 让历史会话也能预览。修正命名：pi 真实工具名是 `write` / `edit`，字段是 `oldText` / `newText`。不引入 npm 依赖；toolcall_delta 流式增量留 v2 |
+| 2026-05-24 | E.3 实施完成 | TaskCard 视觉打磨：卡片改为 `shadow-sm + ring-1 ring-gray-100`（去掉粗边框）、header 微渐变 `from-gray-50/80 to-white`、TaskRow `gap-3 py-2` + 图标 15px、completed 项加 `/70` 透明度退后、空态改为居中 flex + 浅色 `ListTodo` 图标、`TaskCardSummary` 对齐主卡风格 `ring + shadow-xs`、列表分割线 `divide-gray-100/60`。ThinkingBlock：streaming 时改 `flex` 布局，左侧 `w-0.5` shimmer 光条（渐变色 + `thinkShimmer` keyframes 上下循环扫）+ 文本末尾 `w-px h-3.5` 闪烁光标；streaming 结束后切回静态 `border-l-2 border-slate-200`。范围经用户确认后缩减：跳过 ToolCallCard（K2 + E.2 已覆盖）、不做分组/缩进/进度条/完成动画。纯样式改造，不引入 npm 依赖 |
+| 2026-05-24 | E.7 实施完成 | 文件上传 + 文件树拖拽交互大改。决策：「拖拽优先」替代附件按钮路径（文件树→input 插入 `@ref`、系统→文件树目录复制到该目录、系统→input 复制到根+自动插入 `@ref`），`@relPath` UI 显示原文 + IPC payload 展开为 `read_file` 提示，目标目录=拖入位置（IDE 风格），单击选中/双击打开。后端：新增 IPC `knowclaw:uploadToWorkspace`（cwd 容器校验 + 单文件 100MB + 重名 `name (N).ext` 自增 + 跳目录 + 全局模式拒绝 + POSIX `relPath` 返回），preload 暴露同名 API。前端：`WorkspaceFileTree.jsx` 大改（TreeNode `onClick` 选 / `onDoubleClick` 开 / `draggable` 写 `text/knowclaw-file-path` 自定义 MIME / 目录 `onDragOver` 高亮单 dropTarget 用 `stopPropagation` 防冒泡；panel 兜底接收 drop 到根 + 蓝色 ring + 居中浮动提示 + 切 cwd 清选中 + 空树引导文案），导出常量 `TREE_DRAG_MIME`；`ChatInput.jsx` 新增 `onUploadFiles` prop + `handleDragOver/Drop` 三档优先（tree drag→插入 ref / 图片→走 addFiles / 其他→`onUploadFiles` 后插入 ref）+ `insertReferences` caret-aware 智能插入 + drop 期间蓝色 ring + 中央 pill 提示 + 上传中右上角小 spinner + 底部 hint 追加文案；`useKnowClawPersist.jsx` 新增 `uploadToWorkspace` action（IPC + 自动 `loadWorkspaceTree` + 三档 toast）和模块级 helper `extractFileRefs` / `expandFileRefsForLlm`（正则 `(^|[\s\(\[\{,;])@([^\s@\(\)\[\]\{\},;]+\.[A-Za-z0-9]{1,8})` 防 email 误命中），`sendMessage` / `steerMessage` / `followUpMessage` IPC 调用前用 expand 改写、UI 气泡保留 `@` 原文；`KnowClawV2Page.jsx` 透传 `uploadToWorkspace` 给 `<ChatInput onUploadFiles>` 和 `<WorkspaceFileTree onUpload>`。Electron 39 用已暴露的 `window.ipm.files.getPathForFile`（替代废弃的 `File.path`）。`vite build` 通过 |
+| 2026-05-24 | E.6 实施完成 | Header 响应式 + 状态持久化双交付。决策：ResizeObserver + tier state（不走 CSS container queries，因为需要 JS 控制 overflow menu 挂载）；完整溢出菜单；不动 Pill 内部。新文件 `useHeaderTier.js`（1180/880px 阈值 + 30px hysteresis + 同步 seed 防首帧抖动 + tier ref 仅变化时 setState）；新文件 `HeaderOverflowMenu.jsx`（`MoreHorizontal` 触发 + popover panel 纵向 6 行 + mousedown outside-click + Esc 关闭 + components 注入避免循环依赖 + 嵌套 ModelSelector 下拉与外层 popover outside-click 天然不冲突，因下拉渲染在 popover DOM 子树内）。`KnowClawV2Page.jsx` 新增 headerRightRef + `headerTier`：右侧容器加 `min-w-0`；compact 档隐藏 secondary 控件块挂载 HeaderOverflowMenu；「新对话」按钮 compact 档自动 icon-only；FileTree 按钮 compact 档也进溢出菜单。`ModelSelector` / `ThinkingLevelSelector` / `SubAgentToggle` / `PlanModeToggle` 签名加 `tier='wide'` prop，`tier === 'wide'` 显示文字 label 否则 icon-only；ModelSelector 非 wide 档下额外截断 model 名为「首10字…」+ 完整名进 title。`useKnowClawPersist.jsx::openSession` 成功分支末尾追加 `void refreshStatus()` 修复历史会话切换后 ContextPill/TokenPill 清零、要等下一轮 polling 才回填的 bug；因 `refreshStatus` 声明在后，dep 数组省略并加 `eslint-disable react-hooks/exhaustive-deps`（同 E.5 startExecuting 模式）。`vite build` 通过 |
+| 2026-05-24 | E.5 实施完成 | Plan 模式全链路落地。决策：不为切模式新建会话（用 `[MODE: plan]` 前缀 + 双模式 system prompt 协同），完整实现一次性交付，Plan 模式放行 `delegate_task(kind='research')` 但拦截 `kind='edit'`。后端：`knowclaw.js` 新增 `currentPlanMode` 模块状态 + `setPlanMode`/`getPlanMode` IPC + `getStatus` 返回 `planMode`；`knowclawBeforeToolCall` 顶部拦截 write/edit/bash + `delegate_task(edit)` 并返回中文阻断原因；`knowclaw:send`/steer/followUp 在 user content 前注入 `[MODE: plan]\n`；`mapPiMessagesForRenderer` 显示时剥离前缀；新增 `pendingAskUser` Map + `askUserViaRenderer(questions, signal)` + `knowclaw:askUserReply` handler；`runtime.createSession` 统一传 `askUser`。Runtime：`promptBuilder.js` 新增 `# 工作模式 (Plan / Agent)` 段说明双模式行为；`bootstrap.js` 注册 `ask_user` + `save_plan`；新增 `pi-runtime/tools/askUserTool.js`（向用户结构化问卷，IPC 等待）和 `pi-runtime/tools/savePlanTool.js`（写入 `.knowclaw/plans/<name>.md`，绕开 write 拦截）。桥：`preload.js` 暴露 `setPlanMode`/`getPlanMode`/`onAskUser`/`replyAskUser`。前端：`useKnowClawPersist.jsx` 新增 `planMode` state + `setPlanMode`（IPC + 注入系统消息）+ `onAskUser` 监听（注入 `kind:'ask_user'` 气泡）+ `replyAskUser`/`cancelAskUser` + `startExecuting`（切回 Agent + 发送执行指令）；新增 `AskUserCard.jsx` 紫色品牌色结构化问卷气泡（单选 radio / 多选 checkbox / 提交校验 / readonly answered/cancelled 态）；`MessageBubble.jsx` 新增 `kind:'ask_user'` 路由 + onAskUserReply/Cancel props；`KnowClawV2Page.jsx` header 新增 `PlanModeToggle`（ClipboardList 紫色 pill，streaming 时 disabled）+ messages/ChatInput 之间新增「开始执行」浮动 CTA（仅 Plan 模式 + 非 streaming + 非空 messages）+ 向 MessageBubble 透传 callbacks；`knowclawEventReducer.js` `summarizeToolArgs` 新增 `ask_user` / `save_plan` 摘要 |
+| 2026-05-24 | E.4 实施完成 | 修复 `summarizeToolArgs` 中 `delegate_task` 字段名 bug（`a.description` → `a.task`，与 pi 工具定义对齐），让 header 行任务摘要正确显示。新增 `DelegateTaskResult.jsx`：解析子代理返回的 JSON 结果，渲染 ok/error badge（中文化的 `truncatedReason`：已中止/超时/超出最大轮数/出错）+ kind badge（research → 蓝色「只读研究」/edit → 琥珀色「编辑模式」）+ summary 文本 + 统计行（`N 轮 · M 次工具调用 · 耗时`）+ 折叠的读取/修改文件列表（`shortenPath` 截断长路径 + 图标）+ error 详情。JSON parse 失败时回退原 raw `<pre>` dump。ToolCallCard 为 `delegate_task` 路由结果到该组件。执行中沿用已有 `streamingStdout` 暗色终端展示进度，不引入额外面板 |

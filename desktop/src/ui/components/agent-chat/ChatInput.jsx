@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useId } from 'react';
-import { ArrowUp, Loader2, ImagePlus, X } from 'lucide-react';
+import { ArrowUp, Loader2, ImagePlus, X, FileUp } from 'lucide-react';
 import {
   resizeImageToBase64,
   makePreviewUrl,
@@ -8,6 +8,11 @@ import {
 
 const MAX_ROWS = 6;
 const MAX_ATTACHMENTS = 8;
+
+// E.7: custom MIME type written by WorkspaceFileTree when a file row is
+// dragged. Kept inline (not imported) so ChatInput doesn't reach across
+// the agent-chat / knowclaw-v2 module boundary.
+const TREE_DRAG_MIME = 'text/knowclaw-file-path';
 
 let attachmentIdSeq = 0;
 function nextAttachmentId() {
@@ -18,21 +23,41 @@ function nextAttachmentId() {
 /**
  * U8b-5/9: KnowClaw composer with optional image attachments.
  *
+ * E.7 additions: accepts both intra-app file-tree drags (`text/knowclaw-file-path`)
+ * and native OS file drops. Tree drags insert `@relPath` references at the
+ * caret. System file drops route through `onUploadFiles(filePaths, '')` (which
+ * copies them into the workspace root) and then insert `@relPath` for each
+ * successful upload. Image drops still go through the existing image-attachment
+ * pipeline.
+ *
  * @param {object} props
  * @param {(text: string, images?: Array<{ mimeType: string, data: string }>) => void} props.onSend
  * @param {boolean} [props.disabled]
  * @param {string} [props.placeholder]
  * @param {boolean} [props.supportsImages] When false, hides the attach
  *   button and ignores paste/drop image events.
+ * @param {(filePaths: string[], destRelDir: string) => Promise<{ ok: boolean, uploaded?: Array<{ relPath: string, name: string }>, skipped?: any[], error?: string }>} [props.onUploadFiles]
+ *   E.7. Async upload to current workspace. When omitted, system file drops
+ *   that aren't images are ignored.
  */
-const ChatInput = ({ onSend, disabled, placeholder, supportsImages = false }) => {
+const ChatInput = ({ onSend, disabled, placeholder, supportsImages = false, onUploadFiles }) => {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState([]);
   const [modelNotice, setModelNotice] = useState('');
+  // E.7: visual state while a drag is hovering. 'image' for image
+  // drags, 'file' for tree-drag or non-image system drag, null otherwise.
+  const [dragKind, setDragKind] = useState(null);
+  // E.7: pending upload state — true while system files are being
+  // copied into the workspace. Blocks duplicate drops on the same
+  // batch and lets us show a spinner.
+  const [uploading, setUploading] = useState(false);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
   const attachmentsRef = useRef(attachments);
+  const textRef = useRef(text);
   const inputId = useId();
+
+  textRef.current = text;
 
   attachmentsRef.current = attachments;
 
@@ -156,23 +181,131 @@ const ChatInput = ({ onSend, disabled, placeholder, supportsImages = false }) =>
     }
   }, [supportsImages, addFiles]);
 
-  const handleDragOver = useCallback((e) => {
-    if (!supportsImages) return;
-    if (e.dataTransfer?.types?.includes('Files')) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
+  // E.7: insert `@relPath ` reference(s) at the textarea caret. Falls
+  // back to appending when the textarea isn't focused. Uses a ref to
+  // read the *latest* text (handlers' `text` closure may be stale
+  // mid-batch).
+  const insertReferences = useCallback((relPaths) => {
+    if (!Array.isArray(relPaths) || relPaths.length === 0) return;
+    const fragment = relPaths.map((p) => `@${p}`).join(' ') + ' ';
+    const el = textareaRef.current;
+    const current = textRef.current || '';
+    if (!el || document.activeElement !== el) {
+      // Not focused — append at end. Prepend a space if needed so we
+      // don't glue onto existing text.
+      const sep = current && !current.endsWith(' ') && !current.endsWith('\n') ? ' ' : '';
+      setText(current + sep + fragment);
+      setTimeout(() => {
+        textareaRef.current?.focus();
+        const next = textareaRef.current;
+        if (next) next.selectionStart = next.selectionEnd = next.value.length;
+      }, 0);
+      return;
     }
-  }, [supportsImages]);
+    const start = el.selectionStart ?? current.length;
+    const endSel = el.selectionEnd ?? start;
+    const before = current.slice(0, start);
+    const after = current.slice(endSel);
+    // Pad with a leading space if previous char isn't whitespace, so
+    // the @ ref isn't accidentally glued to a prior word.
+    const needsLeftPad = before.length > 0 && !/\s$/.test(before);
+    const composed = `${before}${needsLeftPad ? ' ' : ''}${fragment}${after}`;
+    setText(composed);
+    const newCaret = (before + (needsLeftPad ? ' ' : '') + fragment).length;
+    setTimeout(() => {
+      const e2 = textareaRef.current;
+      if (!e2) return;
+      e2.focus();
+      e2.selectionStart = e2.selectionEnd = newCaret;
+    }, 0);
+  }, []);
 
-  const handleDrop = useCallback((e) => {
-    if (!supportsImages) return;
-    const { files } = e.dataTransfer || {};
-    if (!files?.length) return;
-    const imageFiles = Array.from(files).filter(isSupportedImageFile);
-    if (imageFiles.length === 0) return;
+  // E.7: a single dragover handler accepts both image and non-image
+  // drags, and both tree drags + system file drags. We classify the
+  // drag to set the right visual state.
+  const handleDragOver = useCallback((e) => {
+    const types = e.dataTransfer?.types;
+    if (!types) return;
+    const list = Array.from(types);
+    const isTreeDrag = list.includes(TREE_DRAG_MIME);
+    const isFileDrag = list.includes('Files');
+    if (!isTreeDrag && !isFileDrag) return;
     e.preventDefault();
-    addFiles(imageFiles);
-  }, [supportsImages, addFiles]);
+    e.dataTransfer.dropEffect = 'copy';
+    if (isTreeDrag) {
+      setDragKind('file');
+    } else if (isFileDrag) {
+      // We don't know yet if these are images or other files without
+      // sniffing `files` (which is unavailable during dragover for
+      // privacy). Default to 'file' when an upload handler exists,
+      // else 'image' if image support is on, else still 'file' for
+      // the visual cue (the drop will be ignored anyway).
+      setDragKind(onUploadFiles ? 'file' : (supportsImages ? 'image' : 'file'));
+    }
+  }, [onUploadFiles, supportsImages]);
+
+  const handleDragLeave = useCallback((e) => {
+    // Only clear when the cursor leaves the composer entirely.
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    setDragKind(null);
+  }, []);
+
+  const handleDrop = useCallback(async (e) => {
+    setDragKind(null);
+    const dt = e.dataTransfer;
+    if (!dt) return;
+    // 1) Tree drag wins outright — even if a File somehow also rode
+    //    along, the explicit reference intent supersedes upload.
+    const treePath = dt.getData(TREE_DRAG_MIME);
+    if (treePath) {
+      e.preventDefault();
+      insertReferences([treePath]);
+      return;
+    }
+    const files = dt.files;
+    if (!files || files.length === 0) return;
+
+    const fileArr = Array.from(files);
+    const imageFiles = supportsImages ? fileArr.filter(isSupportedImageFile) : [];
+    const nonImageFiles = fileArr.filter((f) => !isSupportedImageFile(f));
+
+    // 2) Images go through the existing attachment pipeline. We only
+    //    preventDefault here so the browser doesn't navigate away on
+    //    unhandled drops; the actual handler is addFiles.
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      addFiles(imageFiles);
+    }
+
+    // 3) Non-image files → upload IPC, then insert `@relPath` for each.
+    if (nonImageFiles.length === 0) return;
+    if (!onUploadFiles) {
+      if (imageFiles.length === 0) {
+        // Don't let the browser navigate to the dropped file.
+        e.preventDefault();
+      }
+      return;
+    }
+    e.preventDefault();
+    const filePaths = [];
+    for (const f of nonImageFiles) {
+      let p = '';
+      try { p = window.ipm?.files?.getPathForFile?.(f) || ''; } catch { /* ignore */ }
+      if (!p && typeof f.path === 'string') p = f.path;
+      if (p) filePaths.push(p);
+    }
+    if (filePaths.length === 0) return;
+    setUploading(true);
+    try {
+      const res = await onUploadFiles(filePaths, '');
+      const uploaded = Array.isArray(res?.uploaded) ? res.uploaded : [];
+      if (uploaded.length > 0) {
+        insertReferences(uploaded.map((u) => u.relPath));
+      }
+    } finally {
+      setUploading(false);
+    }
+  }, [supportsImages, addFiles, onUploadFiles, insertReferences]);
 
   const handleSubmit = useCallback(() => {
     const trimmed = text.trim();
@@ -244,10 +377,42 @@ const ChatInput = ({ onSend, disabled, placeholder, supportsImages = false }) =>
         </div>
       )}
       <div
-        className="flex items-end gap-2 bg-gray-50 border border-gray-200 rounded-2xl px-3 py-3 focus-within:border-gray-400 focus-within:bg-white focus-within:shadow-sm transition-all"
+        className={`relative flex items-end gap-2 bg-gray-50 border rounded-2xl px-3 py-3 focus-within:bg-white focus-within:shadow-sm transition-all ${
+          dragKind
+            ? 'border-blue-400 ring-2 ring-blue-100 bg-blue-50/40'
+            : 'border-gray-200 focus-within:border-gray-400'
+        }`}
         onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        {/* E.7: drag-over indicator. Sits as a centered pill so it
+            doesn't reflow the composer, and uses pointer-events-none
+            so it can't swallow the drop. */}
+        {dragKind && (
+          <div
+            className="pointer-events-none absolute inset-0 flex items-center justify-center"
+            aria-hidden="true"
+          >
+            <div className="px-3 py-1.5 rounded-full bg-blue-500/90 text-white text-[11px] flex items-center gap-1.5 shadow">
+              <FileUp size={12} />
+              <span>
+                {dragKind === 'image'
+                  ? '放开以添加图片附件'
+                  : '放开以添加文件引用'}
+              </span>
+            </div>
+          </div>
+        )}
+        {uploading && (
+          <div
+            className="pointer-events-none absolute right-3 top-1 text-[10px] text-blue-600 flex items-center gap-1"
+            aria-live="polite"
+          >
+            <Loader2 size={10} className="animate-spin" />
+            <span>正在上传...</span>
+          </div>
+        )}
         {supportsImages && (
           <>
             <input
@@ -302,6 +467,7 @@ const ChatInput = ({ onSend, disabled, placeholder, supportsImages = false }) =>
       <p className="mt-2 text-[10px] text-gray-400 text-center select-none">
         Enter 发送 · Shift+Enter 换行
         {supportsImages ? ' · 可粘贴或拖拽图片' : ''}
+        {onUploadFiles ? ' · 可从文件树或本机拖入文件引用' : ''}
       </p>
     </div>
   );

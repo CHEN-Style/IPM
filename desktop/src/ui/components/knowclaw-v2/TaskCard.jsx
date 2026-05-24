@@ -43,8 +43,8 @@ const STATUS_META = {
   },
   completed: {
     Icon: CheckCircle2,
-    iconClass: 'text-emerald-500',
-    titleClass: 'text-gray-400 line-through',
+    iconClass: 'text-emerald-500/70',
+    titleClass: 'text-gray-400/70 line-through',
     spin: false,
   },
   cancelled: {
@@ -59,10 +59,10 @@ function TaskRow({ task }) {
   const meta = STATUS_META[task.status] || STATUS_META.pending;
   const { Icon } = meta;
   return (
-    <li className="flex items-start gap-2.5 py-1.5">
+    <li className="flex items-start gap-3 py-2">
       <span className="mt-0.5 shrink-0">
         <Icon
-          size={14}
+          size={15}
           className={`${meta.iconClass}${meta.spin ? ' animate-spin' : ''}`}
           strokeWidth={2}
         />
@@ -78,6 +78,40 @@ function TaskRow({ task }) {
         )}
       </div>
     </li>
+  );
+}
+
+// D.5: compact one-line summary for stale TaskCard snapshots.
+// When an assistant turn fires `task_manager` multiple times, every
+// successful call appends a new `kind:'tasks'` bubble. Old snapshots
+// freeze in whatever state they had at the time — including any
+// `in_progress` rows that keep spinning forever. To avoid misleading
+// the user, only the latest snapshot renders as the full TaskCard;
+// older snapshots collapse into this summary row (no spinner).
+export function TaskCardSummary({ tasks, ts }) {
+  const safe = Array.isArray(tasks) ? tasks : [];
+  const total = safe.length;
+  const done = safe.reduce(
+    (acc, t) => (t?.status === 'completed' ? acc + 1 : acc),
+    0,
+  );
+  const timeStr =
+    typeof ts === 'number' && Number.isFinite(ts)
+      ? new Date(ts).toLocaleTimeString('zh-CN', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : '';
+  const label = total > 0
+    ? `任务清单${timeStr ? ` · ${timeStr}` : ''} · ${done}/${total} 已完成`
+    : `任务清单${timeStr ? ` · ${timeStr}` : ''} · 已清空`;
+  return (
+    <div className="my-1.5 max-w-full">
+      <div className="inline-flex items-center gap-2 px-3 py-1 text-[11px] text-gray-400 rounded-lg bg-gray-50/50 ring-1 ring-gray-100 shadow-xs">
+        <ListTodo size={11} className="shrink-0" strokeWidth={2} />
+        <span className="truncate">{label}</span>
+      </div>
+    </div>
   );
 }
 
@@ -103,8 +137,8 @@ const TaskCard = ({ tasks, ts }) => {
 
   return (
     <div className="my-2 max-w-full">
-      <div className="border border-gray-200 rounded-xl bg-white overflow-hidden">
-        <div className="flex items-center gap-2 px-3.5 py-2 bg-gray-50/60 border-b border-gray-100">
+      <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-100 overflow-hidden">
+        <div className="flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-r from-gray-50/80 to-white border-b border-gray-100">
           <ListTodo size={13} className="text-gray-500 shrink-0" />
           <span className="text-[12px] text-gray-600 font-medium">
             {headerLabel}
@@ -127,11 +161,12 @@ const TaskCard = ({ tasks, ts }) => {
         </div>
 
         {isEmpty ? (
-          <div className="px-3.5 py-3 text-[12px] text-gray-400 italic">
-            （任务清单已清空）
+          <div className="flex items-center justify-center gap-2 px-3.5 py-4 text-[12px] text-gray-300 italic">
+            <ListTodo size={14} className="text-gray-200" />
+            任务清单已清空
           </div>
         ) : (
-          <ul className="px-3 py-1.5 divide-y divide-gray-50">
+          <ul className="px-3.5 py-2 divide-y divide-gray-100/60">
             {safe.map((task) => (
               <TaskRow key={task.id} task={task} />
             ))}

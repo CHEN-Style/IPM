@@ -36,7 +36,12 @@ import {
   getAgentDir,
 } from '@earendil-works/pi-coding-agent';
 
-import { describeIpmConfig, getIpmLlmConfig } from './ipmConfig.js';
+import {
+  describeIpmConfig,
+  describeSearchApiConfig,
+  getIpmLlmConfig,
+  getSearchApiConfig,
+} from './ipmConfig.js';
 import { applyIpmRuntimeKey, buildAuthStorage } from './auth.js';
 import {
   registerIpmProvider,
@@ -48,6 +53,8 @@ import {
 import { describeSessionManager, makeSessionManager } from './sessionFactory.js';
 import { buildProjectTools } from './tools/projectTools.js';
 import { buildWebTools } from './tools/webTools.js';
+import { buildAskUserTool } from './tools/askUserTool.js';
+import { buildSavePlanTool } from './tools/savePlanTool.js';
 import { buildEnvTools } from './tools/envTools.js';
 import { buildDelegateTool } from './tools/delegateTool.js';
 import { buildTaskTool } from './tools/taskTool.js';
@@ -254,6 +261,17 @@ function makeEventLogger(prefix = '[KnowClaw-PoC]') {
  *                                     installs its own `beforeToolCall` that delegates
  *                                     to the extension runtime — we chain ours in front
  *                                     of it so both run.
+ * @param {(questions: any[], signal?: AbortSignal) => Promise<any>} [opts.askUser]
+ *                                     E.5: optional bridge for the `ask_user`
+ *                                     customTool. When the model calls `ask_user`,
+ *                                     the tool defers to this function to surface
+ *                                     a structured-question dialog in the
+ *                                     renderer and await the user's reply. Wired
+ *                                     by knowclaw.js's `askUserViaRenderer` which
+ *                                     reuses the same IPC roundtrip pattern as
+ *                                     install-confirm. When absent, ask_user
+ *                                     degrades to an error result so the model
+ *                                     can fall back to plain text.
  * @param {boolean} [opts.subAgentEnabled=true]
  *                                     U6: when truthy (the default), register the
  *                                     `delegate_task` customTool so the main agent can
@@ -365,12 +383,29 @@ export async function createSession(opts = {}) {
     log('customTools: no toolDeps provided — running without IPM project tools');
   }
 
-  // --- 8b. Build web tools (Phase 6, no toolDeps required) ---
-  // These have no IPM business dependencies, so we always register them.
+  // --- 8b. Build web tools (Phase 6 + K1 upgrade) ---
+  // - `searchApiKey`: read from state.prefs.searchApi via ipmConfig.getSearchApiConfig().
+  //   When null/unset, search_web is still registered but returns a degraded
+  //   prompt telling the model to ask the user for a URL.
+  // - `fetchWebRendered`: bridge to the main-process F2 BrowserWindow pipeline,
+  //   injected via toolDeps when KnowClaw runs inside Electron. When absent
+  //   (e.g. unit tests, headless smoke runs), fetch_web silently falls back
+  //   to the lightweight Node fetch path.
   try {
-    const webTools = buildWebTools();
+    const searchApiConfig = getSearchApiConfig();
+    const webTools = buildWebTools({
+      searchApiKey: searchApiConfig?.apiKey || null,
+      fetchWebRendered: typeof toolDeps?.fetchWebRendered === 'function'
+        ? toolDeps.fetchWebRendered
+        : null,
+    });
     customTools = customTools.concat(webTools);
-    log(`customTools: ${webTools.length} web tools registered (total ${customTools.length})`);
+    const searchDesc = describeSearchApiConfig(searchApiConfig);
+    log(
+      `customTools: ${webTools.length} web tools registered (total ${customTools.length}); ` +
+      `searchApi=${searchDesc ? searchDesc.provider + '/' + searchDesc.apiKeyPreview : 'none'}; ` +
+      `renderedBridge=${toolDeps?.fetchWebRendered ? 'yes' : 'no'}`,
+    );
   } catch (err) {
     log('buildWebTools failed (continuing without web tools):', err?.message || err);
   }
@@ -444,6 +479,31 @@ export async function createSession(opts = {}) {
     log(`customTools: ${taskTools.length} task tools registered (total ${customTools.length})`);
   } catch (err) {
     log('buildTaskTool failed (continuing without task tracking):', err?.message || err);
+  }
+
+  // --- 8b.4 E.5: ask_user + save_plan tools (Plan mode) ---
+  // ask_user bridges back to the renderer's AskUserCard so the model can
+  // pose structured multiple-choice questions while planning. save_plan
+  // writes the agreed-upon plan to `.knowclaw/plans/` regardless of the
+  // active mode (it bypasses the Plan-mode write block — that's the
+  // point: the model needs ONE way to persist the plan even while
+  // generic write tools are blocked). Both are registered for ALL
+  // sessions so the workflow is uniform; the prompt's mode guidance
+  // tells the model when each is appropriate. Child sub-agents do NOT
+  // inherit them — only the parent talks to the user.
+  try {
+    const askTools = buildAskUserTool({ askUser: opts.askUser });
+    customTools = customTools.concat(askTools);
+    log(`customTools: ${askTools.length} ask_user tools registered (total ${customTools.length})`);
+  } catch (err) {
+    log('buildAskUserTool failed (continuing without ask_user):', err?.message || err);
+  }
+  try {
+    const planTools = buildSavePlanTool({ cwd });
+    customTools = customTools.concat(planTools);
+    log(`customTools: ${planTools.length} save_plan tools registered (total ${customTools.length})`);
+  } catch (err) {
+    log('buildSavePlanTool failed (continuing without save_plan):', err?.message || err);
   }
 
   // --- 8c. Build ResourceLoader with KnowClaw system prompt (Phase 7) ---

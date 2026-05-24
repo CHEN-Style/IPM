@@ -136,3 +136,52 @@ export function describeIpmConfig(cfg) {
     apiKeyPreview: cfg.apiKey ? `${cfg.apiKey.slice(0, 6)}…${cfg.apiKey.slice(-4)}` : '',
   };
 }
+
+/**
+ * @typedef {object} IpmSearchApiConfig
+ * @property {'bocha'} provider
+ * @property {string} apiKey
+ * @property {'state'} source
+ */
+
+/**
+ * K1 — Read the active web-search API configuration.
+ *
+ * Mirrors {@link getIpmLlmConfig} but only consults `state.json prefs.searchApi`
+ * (no env-var fallback yet; can be added later if needed). Returns null when
+ * no API Key has been configured, in which case `buildWebTools` will register
+ * `search_web` in "not configured" mode that returns a degraded prompt
+ * instructing the LLM to ask the user for a URL and call `fetch_web`.
+ *
+ * @returns {IpmSearchApiConfig | null}
+ */
+export function getSearchApiConfig() {
+  const statePath = process.env.IPM_STATE_PATH || '';
+  if (!statePath) return null;
+  try {
+    const raw = fs.readFileSync(statePath, 'utf-8');
+    const state = JSON.parse(raw);
+    const cfg = state?.prefs?.searchApi;
+    if (!cfg || typeof cfg !== 'object') return null;
+    const apiKey = String(cfg.apiKey || '').trim();
+    if (!apiKey) return null;
+    // Only Bocha is supported in K1; coerce any unknown provider value.
+    const provider = cfg.provider === 'bocha' ? 'bocha' : 'bocha';
+    return { provider, apiKey, source: 'state' };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Redact sensitive fields for logging.
+ * @param {IpmSearchApiConfig | null} cfg
+ */
+export function describeSearchApiConfig(cfg) {
+  if (!cfg) return null;
+  return {
+    provider: cfg.provider,
+    source: cfg.source,
+    apiKeyPreview: cfg.apiKey ? `${cfg.apiKey.slice(0, 6)}…${cfg.apiKey.slice(-4)}` : '',
+  };
+}

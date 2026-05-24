@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('ipm', {
     get: () => ipcRenderer.invoke('prefs/get'),
     set: (patch) => ipcRenderer.invoke('prefs/set', { patch }),
     testLlm: (config) => ipcRenderer.invoke('prefs/testLlm', config),
+    testSearchApi: (config) => ipcRenderer.invoke('prefs/testSearchApi', config),
     getDataDir: () => ipcRenderer.invoke('prefs/getDataDir'),
     chooseDataDir: () => ipcRenderer.invoke('prefs/chooseDataDir'),
     setDataDir: (newPath) => ipcRenderer.invoke('prefs/setDataDir', { newPath }),
@@ -297,8 +298,22 @@ contextBridge.exposeInMainWorld('ipm', {
     createWorkspace: (label) => ipcRenderer.invoke('knowclaw:createWorkspace', { label }),
     // Open a workspace folder in the OS file manager. Pass `null` /
     // omit `path` to open the *active* workspace.
+    // K2: also handles file paths (shell.openPath handles both).
     openInExplorer: (folderPath) =>
       ipcRenderer.invoke('knowclaw:openInExplorer', { path: folderPath || null }),
+    // K2: list the active workspace's file tree (flat node list with
+    // depth/size). `path` overrides the active cwd; `depth` defaults
+    // to 3 (capped at 6). Returns `{ ok, cwd, global, entries, truncated }`.
+    listWorkspaceTree: (folderPath, depth) =>
+      ipcRenderer.invoke('knowclaw:listWorkspaceTree', { path: folderPath || null, depth }),
+    // E.7: copy external files (absolute paths from drag-drop) into the
+    // current workspace at `destRelDir` (relative to cwd, '' for root).
+    // Returns `{ ok, uploaded: [{ name, relPath, size, src }], skipped }`.
+    uploadToWorkspace: (filePaths, destRelDir) =>
+      ipcRenderer.invoke('knowclaw:uploadToWorkspace', {
+        filePaths: Array.isArray(filePaths) ? filePaths : [],
+        destRelDir: destRelDir || '',
+      }),
     // U1 hotfix-2: persistent pin / hide of arbitrary workspace
     // paths so the dropdown can act as the user's curated list
     // rather than a derived view of the filesystem.
@@ -307,6 +322,12 @@ contextBridge.exposeInMainWorld('ipm', {
     hideWorkspace: (folderPath) =>
       ipcRenderer.invoke('knowclaw:hideWorkspace', { path: folderPath }),
     getStatus: () => ipcRenderer.invoke('knowclaw:getStatus'),
+    // D.1: cold-start state recovery. Returns the live session's
+    // messages / tasks / streaming flag so the renderer can repaint
+    // the chat after an Electron / devtools reload without making
+    // the user manually `openSession`. No-op (returns
+    // `{ ok: false, hasSession: false }`) when no session is live.
+    rehydrate: () => ipcRenderer.invoke('knowclaw:rehydrate'),
     rescanBash: () => ipcRenderer.invoke('knowclaw:rescanBash'),
     listSessions: () => ipcRenderer.invoke('knowclaw:listSessions'),
     openSession: (sessionFile) => ipcRenderer.invoke('knowclaw:openSession', { sessionFile }),
@@ -331,5 +352,31 @@ contextBridge.exposeInMainWorld('ipm', {
     },
     replyConfirmInstall: (requestId, allow) =>
       ipcRenderer.invoke('knowclaw:confirm-install-reply', { requestId, allow: Boolean(allow) }),
+
+    // ---- E.5: Plan-mode toggle + ask_user roundtrip ----
+    // setPlanMode flips the in-memory flag in main; takes effect on the
+    // very next prompt/steer/followUp via the [MODE: plan] tag injection.
+    setPlanMode: (enabled) =>
+      ipcRenderer.invoke('knowclaw:setPlanMode', Boolean(enabled)),
+    getPlanMode: () => ipcRenderer.invoke('knowclaw:getPlanMode'),
+    // onAskUser: subscribe to the `knowclaw:askUser` push event. Payload:
+    //   { requestId: string,
+    //     questions: Array<{ id, prompt, options: [{id,label}], allow_multiple? }> }
+    // Returns an unsubscribe function.
+    onAskUser: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('knowclaw:askUser', handler);
+      return () => ipcRenderer.removeListener('knowclaw:askUser', handler);
+    },
+    // replyAskUser: send the user's selections back to the waiting tool.
+    // `answers` shape: { [questionId]: optionId | optionId[] }.
+    // Pass `{ cancelled: true }` as the second arg to abandon the prompt.
+    replyAskUser: (requestId, answers, opts) =>
+      ipcRenderer.invoke('knowclaw:askUserReply', {
+        requestId,
+        answers: answers && typeof answers === 'object' ? answers : null,
+        cancelled: Boolean(opts?.cancelled),
+      }),
   },
 });

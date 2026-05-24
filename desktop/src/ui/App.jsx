@@ -14,6 +14,7 @@ import { TourProvider } from './components/tour/TourProvider.jsx';
 import TourOverlay from './components/tour/TourOverlay.jsx';
 import { ToastProvider } from './hooks/useToast.js';
 import { ConfirmDialogProvider } from './hooks/useConfirmDialog.jsx';
+import { KnowClawPersistProvider } from './hooks/useKnowClawPersist.jsx';
 import useUsageTracker from './hooks/useUsageTracker.js';
 import OnboardingScreen from './components/OnboardingScreen.jsx';
 
@@ -226,6 +227,7 @@ const App = () => {
   return (
     <ConfirmDialogProvider>
     <ToastProvider>
+    <KnowClawPersistProvider>
     <TourProvider navigate={setActiveNav} setMyDataSection={setMyDataSection}>
     <div className="flex flex-col h-screen w-full overflow-hidden select-auto antialiased">
       <div className="flex flex-1 min-h-0 w-full overflow-hidden">
@@ -331,6 +333,7 @@ const App = () => {
     </div>
     <TourOverlay />
     </TourProvider>
+    </KnowClawPersistProvider>
     </ToastProvider>
     </ConfirmDialogProvider>
   );

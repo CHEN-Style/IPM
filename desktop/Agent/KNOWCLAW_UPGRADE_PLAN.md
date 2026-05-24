@@ -278,7 +278,46 @@
 
 ### Phase U1.5 — 工作空间文件树侧栏 + 生成过程可视化
 
-**Status:** `PLANNED`
+**Status:** `DONE`（2026-05-23，与 `IPM_FEATURE_UPGRADE_PLAN.md` K2 合流交付）
+
+**落地摘要**：
+
+- 主进程 `knowclaw:listWorkspaceTree` 已实现：`maxDepth=3` / `maxEntries=500`、
+  排除 `node_modules` `.git` `dist` `__pycache__` `.vite` 等噪音、全局模式直接
+  返回 `{ global: true, entries: [] }` 由前端渲染引导文案
+- `WorkspaceFileTree.jsx`（新建）：嵌套树渲染 + 折叠（top-level dir 首次自动展开）+
+  按扩展名图标（`md/txt/log` → FileText；`js/ts/py/...` → FileCode；
+  `xlsx/csv` → FileSpreadsheet；`png/jpg/...` → ImageIcon；归档 → FileArchive）
+  + 文件大小尾标 + 截断脚注
+- `recentTouchedFiles` 触发点：`tool_execution_start` 解析 `write`/`edit` 的
+  `args.path`，以及 `bash` 命令中的 `touch/mkdir/cp/mv/>` 句段；5s 内显示
+  `bg-emerald-50`（new）/ `bg-amber-50`（edited）+ 末尾 1.5px 圆点；hook 每秒
+  prune 一次过期项实现自然渐退
+- 文件点击复用 `knowclaw:openInExplorer`（`shell.openPath` 原生支持文件）
+- **块 B（生成过程可视化）**：`HeartbeatStrip` + 30s idle 倒计时已落地
+  - 状态条颜色：thinking (amber) / writing (emerald) / tool (sky) / idle (slate)
+  - idle ≥ 30s → 切换为「等待模型响应中…(已 N秒)」amber 横条
+  - `ToolCallCard` 增加 "工具名 + 参数摘要"（`write` → `写入 path`，`search_web` →
+    `搜索: query`，`fetch_web` → `渲染抓取: hostname`，`bash` → 命令前 80 字，
+    `task_manager` → 任务数 等），完成后右侧显示 `endTime - startTime` 耗时
+
+**风险回顾（实际表现）**：
+
+- R-U1.5.1（大目录卡 UI）：通过 IPC 上限 + 排除清单解决，未观察到卡顿
+- R-U1.5.2（工具命名约定）：pi 工具实际命名为 `write`/`edit`/`read`/`bash`（无
+  `_file` 后缀），已在 `extractTouchedFilesFromEvent` 中对齐
+- R-U1.5.3（fs.watch 留 backlog）：本次仍未启用 fs.watch；`agent_end` 250ms 后
+  延迟刷新已能覆盖 Windows 上 pi 子进程最后一次 flush 的时序问题
+
+**状态字段最终命名**：`workspaceTree` / `treeLoading` / `treeTruncated` /
+`recentTouchedFiles`（Map<relPath, { action, ts }>）/ `streamingPhase` /
+`activeToolName` / `streamingIdleSeconds` / `loadWorkspaceTree`
+
+---
+
+#### U1.5 原始设计（保留供回溯）
+
+**Status (原设计):** `PLANNED`
 
 **目标**：补齐 U1 之后用户反馈最强烈的两个体验缺口 —— 让用户「看得见」工作空间里有什么文件，以及 AI 生成 / 编辑文件的过程，避免误判为卡死或断连。
 
@@ -1051,7 +1090,7 @@ flowchart TD
 | U0 — Thinking 解锁与可视化 | DONE | 2026-05-14 | 首版 + revised |
 | U0.5 — 切换到 OpenAI Responses API | DONE | 2026-05-14 | 默认 `apiMode: 'responses'`，可回退 `'chat'` |
 | U1 — 动态工作空间 | DONE | 2026-05-15 | 首版 + 用户反馈 hotfix（见下方 Changelog） |
-| U1.5 — 工作空间文件树侧栏 + 生成过程可视化 | PLANNED | | 用户反馈：找不到生成的文件 / 看不到 AI 工作过程 |
+| U1.5 — 工作空间文件树侧栏 + 生成过程可视化 | DONE | 2026-05-23 | 与 `IPM_FEATURE_UPGRADE_PLAN.md` K2 合流交付：右侧文件树 + 高亮 + heartbeat + 30s 倒计时 |
 | U2 — Skill 生态引入 | DONE (U2a) | 2026-05-15 | 6/6 skills 加载（skill-builder + pdf/docx/xlsx/pptx/web-artifacts-builder）；U2b 5 个 prompt-only skill 待续 |
 | U3 — 依赖管理与脚本执行 | DONE | 2026-05-15 | beforeToolCall 拦截派 + check_environment + 实时 stdout + Git Bash banner |
 | U4 — Steer / FollowUp | DONE | 2026-05-15 | 默认 followUp + abort 自动 clearQueue（与原计划关键偏离，见 U4 章节变更日志） |

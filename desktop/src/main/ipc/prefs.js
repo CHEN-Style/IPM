@@ -1,4 +1,5 @@
 import { ChatOpenAI } from '@langchain/openai';
+import { testBochaApiKey } from '../../../Agent/services/searchService.js';
 
 function sanitizeLlm(llm) {
   if (!llm || typeof llm !== 'object') return undefined;
@@ -17,12 +18,28 @@ const DEFAULT_LLM = {
   summaryModel: 'gpt-5.4-nano',
 };
 
+// K1 — Search API persisted config. Currently we only support 博查 (Bocha);
+// `provider` is reserved for future expansion (Tavily / Brave / SearXNG / ...).
+const DEFAULT_SEARCH_API = {
+  provider: 'bocha',
+  apiKey: '',
+};
+
+function sanitizeSearchApi(cfg) {
+  if (!cfg || typeof cfg !== 'object') return undefined;
+  const provider = cfg.provider === 'bocha' ? 'bocha' : 'bocha';
+  const apiKey = typeof cfg.apiKey === 'string' ? cfg.apiKey.trim() : '';
+  return { provider, apiKey };
+}
+
 function buildPrefsResponse(prefs, normalizeFloatingUploadMode) {
   const llm = sanitizeLlm(prefs.llm);
   const hasLlm = llm && (llm.apiKey || llm.baseURL || llm.model);
+  const searchApi = sanitizeSearchApi(prefs.searchApi) || { ...DEFAULT_SEARCH_API };
   return {
     floatingUploadMode: normalizeFloatingUploadMode(prefs.floatingUploadMode || 'auto'),
     llm: hasLlm ? llm : { ...DEFAULT_LLM },
+    searchApi,
     onboardingDone: Boolean(prefs.onboardingDone),
     userName: typeof prefs.userName === 'string' ? prefs.userName : '',
   };
@@ -46,6 +63,9 @@ export function registerPrefsIpc({ ipcMain, readState, writeState, normalizeFloa
     }
     if (Object.prototype.hasOwnProperty.call(patch, 'llm')) {
       state.prefs.llm = sanitizeLlm(patch.llm);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'searchApi')) {
+      state.prefs.searchApi = sanitizeSearchApi(patch.searchApi);
     }
     if (Object.prototype.hasOwnProperty.call(patch, 'onboardingDone')) {
       state.prefs.onboardingDone = Boolean(patch.onboardingDone);
@@ -77,6 +97,20 @@ export function registerPrefsIpc({ ipcMain, readState, writeState, normalizeFloa
       return { ok: false, error: err?.message || String(err) };
     }
   });
-}
 
+  // K1 — Search API connectivity test. Currently dispatches to Bocha;
+  // future providers can branch on `config.provider`.
+  ipcMain.handle('prefs/testSearchApi', async (_evt, config) => {
+    const cfg = sanitizeSearchApi(config);
+    if (!cfg?.apiKey) {
+      return { ok: false, error: '请先填写搜索 API Key' };
+    }
+    try {
+      const res = await testBochaApiKey(cfg.apiKey);
+      return res;
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+}
 

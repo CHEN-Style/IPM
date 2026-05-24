@@ -1,0 +1,203 @@
+// desktop/src/ui/components/knowclaw-v2/FileChangePreview.jsx
+//
+// E.2: Cursor-style live preview for file-mutator tools.
+//
+// Routes `tool.args` to one of two compact views:
+//   - WritePreview  → renders `args.content` as a fenced code block
+//                     with line-count / char-count meta + tail-aware
+//                     truncation so 10k-line dumps don't kill the DOM.
+//   - EditPreview   → renders `args.edits[]` as a minimal "old block
+//                     above, new block below" pair per replacement,
+//                     colour-coded red/green like a one-glance diff
+//                     without pulling in a real diff library.
+//
+// Both run while the tool is still executing (KnowClaw used to lock
+// expansion to !busy). The data is already on `tool.args` thanks to
+// `useKnowClawPersist` stashing it at `tool_execution_start`; no new
+// IPC, no LLM streaming work for v1.
+//
+// Pi-runtime tool name + arg conventions:
+//   write: { path: string, content: string }
+//   edit:  { path: string, edits: { oldText, newText }[] }
+//          (legacy fallback: top-level oldText/newText, or `edits`
+//          serialised as JSON string)
+
+import React, { useMemo } from 'react';
+import { FilePlus, FilePenLine } from 'lucide-react';
+
+const MAX_LINES = 800;
+const HEAD_LINES = 200;
+const TAIL_LINES = 200;
+const MAX_EDIT_TEXT_LINES = 200;
+
+// E.2: pretty path → strip the workspace prefix if the args path is
+// absolute and lives inside a typical user-data root. Keeps the
+// header readable on long absolute paths without losing meaning.
+function shortenPath(p) {
+  if (!p) return '';
+  const norm = String(p).replace(/\\/g, '/');
+  // Show last 2 segments if path is very long.
+  if (norm.length <= 60) return norm;
+  const parts = norm.split('/').filter(Boolean);
+  if (parts.length <= 3) return norm;
+  return `…/${parts.slice(-3).join('/')}`;
+}
+
+function countLines(s) {
+  if (!s) return 0;
+  const t = String(s);
+  // Treat trailing newline as not adding an extra line.
+  const trimmed = t.endsWith('\n') ? t.slice(0, -1) : t;
+  if (trimmed === '') return 0;
+  return trimmed.split(/\r?\n/).length;
+}
+
+// E.2: keep huge `write` blobs from melting the renderer. We snip
+// the middle but keep first 200 / last 200 lines so the user still
+// has both endpoints to inspect.
+function truncateForDisplay(content) {
+  const lines = String(content ?? '').split(/\r?\n/);
+  if (lines.length <= MAX_LINES) {
+    return { text: lines.join('\n'), truncated: false, hidden: 0 };
+  }
+  const hidden = lines.length - HEAD_LINES - TAIL_LINES;
+  const head = lines.slice(0, HEAD_LINES).join('\n');
+  const tail = lines.slice(-TAIL_LINES).join('\n');
+  return {
+    text: `${head}\n\n… (省略中间 ${hidden} 行) …\n\n${tail}`,
+    truncated: true,
+    hidden,
+  };
+}
+
+// E.2: snip individual oldText/newText so a single mega-edit doesn't
+// scroll forever; full diff is still on disk and can be inspected
+// via the underlying file once the tool finishes.
+function truncateEditText(text) {
+  const lines = String(text ?? '').split(/\r?\n/);
+  if (lines.length <= MAX_EDIT_TEXT_LINES) return String(text ?? '');
+  const half = Math.floor(MAX_EDIT_TEXT_LINES / 2);
+  const hidden = lines.length - half * 2;
+  return [
+    lines.slice(0, half).join('\n'),
+    `… (省略中间 ${hidden} 行) …`,
+    lines.slice(-half).join('\n'),
+  ].join('\n');
+}
+
+// E.2: pi `edit` schema is `{ path, edits: [{ oldText, newText }] }`
+// but earlier turns sometimes hand the LLM legacy shapes:
+//   - top-level oldText/newText (one replacement)
+//   - `edits` serialised as a JSON string
+// `prepareEditArguments` on the pi side already normalises these,
+// but `tool_execution_start` emits the *raw* args before that step,
+// so we mirror the same tolerance on the renderer side.
+function normalizeEdits(args) {
+  if (!args || typeof args !== 'object') return [];
+  let edits = args.edits;
+  if (typeof edits === 'string') {
+    try { edits = JSON.parse(edits); } catch { edits = null; }
+  }
+  if (Array.isArray(edits)) {
+    return edits
+      .filter((e) => e && typeof e === 'object')
+      .map((e) => ({
+        oldText: String(e.oldText ?? e.old_string ?? ''),
+        newText: String(e.newText ?? e.new_string ?? ''),
+      }));
+  }
+  if (typeof args.oldText === 'string' && typeof args.newText === 'string') {
+    return [{ oldText: args.oldText, newText: args.newText }];
+  }
+  if (typeof args.old_string === 'string' && typeof args.new_string === 'string') {
+    return [{ oldText: args.old_string, newText: args.new_string }];
+  }
+  return [];
+}
+
+function PreviewHeader({ Icon, path, meta }) {
+  return (
+    <div className="flex items-center gap-2 px-3.5 py-2 border-b border-gray-100 bg-gray-50/60">
+      <Icon size={13} className="text-gray-500 shrink-0" strokeWidth={2} />
+      <span className="text-[11.5px] font-mono text-gray-700 truncate flex-1" title={path}>
+        {shortenPath(path) || '(无路径)'}
+      </span>
+      {meta && (
+        <span className="text-[10px] text-gray-400 shrink-0">{meta}</span>
+      )}
+    </div>
+  );
+}
+
+function WritePreview({ args }) {
+  const path = String(args?.path || '');
+  const content = String(args?.content ?? '');
+  const { text, truncated, hidden } = useMemo(() => truncateForDisplay(content), [content]);
+  const lineCount = useMemo(() => countLines(content), [content]);
+  const charCount = content.length;
+  const meta = lineCount > 0
+    ? `${lineCount} 行 · ${charCount.toLocaleString()} 字符`
+    : `${charCount.toLocaleString()} 字符`;
+
+  return (
+    <div className="bg-white">
+      <PreviewHeader Icon={FilePlus} path={path} meta={meta} />
+      <pre className="text-[11px] leading-relaxed text-gray-700 font-mono whitespace-pre overflow-x-auto overflow-y-auto max-h-96 px-3.5 py-2.5 m-0">
+        {text}
+      </pre>
+      {truncated && (
+        <div className="px-3.5 py-1.5 text-[10px] text-amber-600 bg-amber-50 border-t border-amber-100">
+          内容较长，已截断中间 {hidden} 行（仅显示首 {HEAD_LINES} + 尾 {TAIL_LINES} 行）
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EditChunk({ index, total, edit }) {
+  const oldDisplay = useMemo(() => truncateEditText(edit.oldText), [edit.oldText]);
+  const newDisplay = useMemo(() => truncateEditText(edit.newText), [edit.newText]);
+  return (
+    <div className="px-3.5 py-2 border-t border-gray-100 first:border-t-0">
+      {total > 1 && (
+        <div className="text-[10px] text-gray-400 mb-1.5">修改 {index + 1} / {total}</div>
+      )}
+      <pre className="text-[11px] leading-relaxed font-mono whitespace-pre overflow-x-auto max-h-48 overflow-y-auto px-2.5 py-1.5 m-0 mb-1 rounded-md bg-rose-50 border-l-2 border-rose-300 text-rose-700">
+        {oldDisplay || '(空)'}
+      </pre>
+      <pre className="text-[11px] leading-relaxed font-mono whitespace-pre overflow-x-auto max-h-48 overflow-y-auto px-2.5 py-1.5 m-0 rounded-md bg-emerald-50 border-l-2 border-emerald-300 text-emerald-700">
+        {newDisplay || '(空)'}
+      </pre>
+    </div>
+  );
+}
+
+function EditPreview({ args }) {
+  const path = String(args?.path || '');
+  const edits = useMemo(() => normalizeEdits(args), [args]);
+  if (edits.length === 0) {
+    return (
+      <div className="bg-white">
+        <PreviewHeader Icon={FilePenLine} path={path} meta="无可识别的修改" />
+      </div>
+    );
+  }
+  const meta = `${edits.length} 处修改`;
+  return (
+    <div className="bg-white">
+      <PreviewHeader Icon={FilePenLine} path={path} meta={meta} />
+      <div className="max-h-96 overflow-y-auto">
+        {edits.map((e, i) => (
+          <EditChunk key={i} index={i} total={edits.length} edit={e} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function FileChangePreview({ tool }) {
+  if (!tool || !tool.args || typeof tool.args !== 'object') return null;
+  if (tool.name === 'write') return <WritePreview args={tool.args} />;
+  if (tool.name === 'edit') return <EditPreview args={tool.args} />;
+  return null;
+}

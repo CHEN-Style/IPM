@@ -2,10 +2,15 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   ChevronDown, ChevronRight, Wrench, Loader2,
   Check, X, Undo2, Sparkles, Zap, MessageSquare,
+  Brain, PenLine, Cog, Clock, AlertCircle,
 } from 'lucide-react';
 import { marked } from 'marked';
 
-import TaskCard from '../knowclaw-v2/TaskCard.jsx';
+import TaskCard, { TaskCardSummary } from '../knowclaw-v2/TaskCard.jsx';
+import AskUserCard from '../knowclaw-v2/AskUserCard.jsx';
+import FileChangePreview from '../knowclaw-v2/FileChangePreview.jsx';
+import DelegateTaskResult from '../knowclaw-v2/DelegateTaskResult.jsx';
+import { summarizeToolArgs } from '../knowclaw-v2/useKnowClawV2Chat.js';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -107,9 +112,33 @@ function ThinkingBlock({ thinking, isStreaming }) {
         <span className="italic">{label}</span>
       </button>
       {expanded && (
-        <div className="mt-1.5 pl-3 border-l-2 border-slate-200 text-xs text-slate-400 leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto font-mono">
-          {thinking}
-        </div>
+        isStreaming ? (
+          <div className="mt-1.5 flex">
+            <div
+              className="shrink-0 w-0.5 rounded-full"
+              style={{
+                background:
+                  'linear-gradient(180deg, #cbd5e1 0%, #f1f5f9 50%, #cbd5e1 100%)',
+                backgroundSize: '100% 200%',
+                animation: 'thinkShimmer 1.8s linear infinite',
+              }}
+            />
+            <div className="pl-3 flex-1 min-w-0 text-xs text-slate-400 leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto font-mono">
+              {thinking}
+              <span className="inline-block w-px h-3.5 bg-slate-400 animate-pulse ml-0.5 align-text-bottom" />
+            </div>
+            <style>{`
+              @keyframes thinkShimmer {
+                0%   { background-position: 0% 0%; }
+                100% { background-position: 0% 200%; }
+              }
+            `}</style>
+          </div>
+        ) : (
+          <div className="mt-1.5 pl-3 border-l-2 border-slate-200 text-xs text-slate-400 leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto font-mono">
+            {thinking}
+          </div>
+        )
       )}
     </div>
   );
@@ -123,7 +152,22 @@ const STATUS_CONFIG = {
   confirmed:   { icon: Loader2, spin: true,  color: 'text-blue-500',  label: '执行中...' },
   cancelled:   { icon: X,       spin: false, color: 'text-gray-400',  label: '已取消' },
   done:        { icon: Check,   spin: false, color: 'text-emerald-500', label: null },
+  error:       { icon: AlertCircle, spin: false, color: 'text-rose-500', label: '执行失败' },
 };
+
+// K2: render a tool's elapsed wall-clock time. `start` is set when
+// `tool_execution_start` arrives; `end` lands with the matching
+// `tool_execution_end`. We display whole seconds for anything under a
+// minute and `m:ss` above.
+function formatElapsedMs(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return '';
+  if (ms < 1000) return `${ms} ms`;
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec} s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m ${String(s).padStart(2, '0')}s`;
+}
 
 /* ── Tool call card ── */
 
@@ -152,10 +196,50 @@ const ToolCallCard = ({ tool, projectName, domain }) => {
   const cfg = STATUS_CONFIG[tool.status] || STATUS_CONFIG.done;
   const Icon = cfg.icon || Wrench;
   const isBusy = tool.status === 'running' || tool.status === 'interrupted' || tool.status === 'confirmed';
-  const canExpand = !isBusy && tool.result;
+  // E.2: file-mutator tools (write / edit) get a live preview panel
+  // that's rendered straight from `tool.args` — no need to wait for
+  // `tool.result`. This bypasses the "wait until done to expand"
+  // rule that gates regular tools and lets users watch the LLM
+  // commit content in real-ish time.
+  const isFileMutator = tool.name === 'write' || tool.name === 'edit';
+  const hasPreviewableArgs = isFileMutator && tool.args && typeof tool.args === 'object';
+  const isDelegateTask = tool.name === 'delegate_task';
+  const canExpand = hasPreviewableArgs || (!isBusy && !!tool.result);
   const showUndo = tool.undoActionId && tool.status === 'done' && undoState !== 'done';
   const streamingStdout = isBusy ? (tool.streamingStdout || '') : '';
   const streamLineCount = streamingStdout ? streamingStdout.split(/\r?\n/).length : 0;
+
+  // E.2: auto-expand the moment a write/edit tool starts so users
+  // see the content/diff without having to hunt for a toggle. We
+  // only fire when `hasPreviewableArgs` first becomes true and the
+  // card is still collapsed; once the user has interacted with it,
+  // their preference is respected (including collapsing it back).
+  const autoExpandedRef = useRef(false);
+  useEffect(() => {
+    if (hasPreviewableArgs && !autoExpandedRef.current) {
+      autoExpandedRef.current = true;
+      setExpanded(true);
+    }
+  }, [hasPreviewableArgs]);
+
+  // K2: friendly parameter summary. Prefer the value stashed by the
+  // hook (`tool.summary` — written at `tool_execution_start`) but
+  // fall back to re-deriving it from args so historic bubbles loaded
+  // from JSONL still get a nice label.
+  const summary = useMemo(() => {
+    if (tool.summary) return tool.summary;
+    if (tool.args && typeof tool.args === 'object') {
+      try { return summarizeToolArgs(tool.name, tool.args); } catch { /* ignore */ }
+    }
+    return '';
+  }, [tool.summary, tool.name, tool.args]);
+
+  const elapsed = useMemo(() => {
+    if (tool.startTime && tool.endTime && tool.endTime >= tool.startTime) {
+      return formatElapsedMs(tool.endTime - tool.startTime);
+    }
+    return '';
+  }, [tool.startTime, tool.endTime]);
 
   const handleUndo = async (e) => {
     e.stopPropagation();
@@ -188,13 +272,30 @@ const ToolCallCard = ({ tool, projectName, domain }) => {
           size={13}
           className={`${cfg.color}${cfg.spin ? ' animate-spin' : ''} shrink-0`}
         />
-        <span className="font-mono text-gray-500 uppercase tracking-wider text-[11px]">
+        <span className="font-mono text-gray-500 uppercase tracking-wider text-[11px] shrink-0">
           {tool.name}
         </span>
+        {/* K2: friendly parameter summary. We render it as a regular
+            (non-mono) span so it visually separates from the tool
+            name and stays readable when paths are long. */}
+        {summary && (
+          <span
+            className="text-gray-600 truncate min-w-0"
+            title={summary}
+          >
+            {summary}
+          </span>
+        )}
         {cfg.label && (
-          <span className={`${cfg.color} text-[10px] font-medium`}>{cfg.label}</span>
+          <span className={`${cfg.color} text-[10px] font-medium shrink-0`}>{cfg.label}</span>
         )}
         <span className="flex-1" />
+        {/* K2: elapsed wall-clock time once the tool finishes. */}
+        {elapsed && !isBusy && (
+          <span className="text-[10px] text-gray-400 font-mono shrink-0">
+            {elapsed}
+          </span>
+        )}
         {canExpand && (
           expanded
             ? <ChevronDown size={12} className="text-gray-400" />
@@ -202,12 +303,36 @@ const ToolCallCard = ({ tool, projectName, domain }) => {
         )}
       </button>
 
-      {expanded && tool.result && (
-        <div className="px-3.5 py-2.5 border-t border-gray-100 bg-white">
-          <pre className="text-[11px] text-gray-600 whitespace-pre-wrap break-words max-h-48 overflow-y-auto leading-relaxed font-mono">
-            {tool.result.length > 800 ? tool.result.slice(0, 800) + '...' : tool.result}
-          </pre>
+      {/* E.2: file-mutator preview takes priority over the generic
+          result panel. We render the args-driven view (write content
+          / edit diff) on top, and tuck the SDK's terse confirmation
+          string (e.g. "Successfully wrote 1234 bytes to ...") into a
+          single muted footer line so users still know the call
+          finished and what it returned. For non-file tools we fall
+          back to the historic result <pre>. */}
+      {expanded && hasPreviewableArgs && (
+        <div className="border-t border-gray-100">
+          <FileChangePreview tool={tool} />
+          {!isBusy && tool.result && (
+            <div className="px-3.5 py-1.5 text-[10.5px] text-gray-400 border-t border-gray-100 bg-gray-50/60 font-mono truncate" title={tool.result}>
+              {tool.result.length > 200 ? tool.result.slice(0, 200) + '…' : tool.result}
+            </div>
+          )}
         </div>
+      )}
+
+      {expanded && !hasPreviewableArgs && tool.result && (
+        isDelegateTask ? (
+          <div className="border-t border-gray-100">
+            <DelegateTaskResult result={tool.result} args={tool.args} />
+          </div>
+        ) : (
+          <div className="px-3.5 py-2.5 border-t border-gray-100 bg-white">
+            <pre className="text-[11px] text-gray-600 whitespace-pre-wrap break-words max-h-48 overflow-y-auto leading-relaxed font-mono">
+              {tool.result.length > 800 ? tool.result.slice(0, 800) + '...' : tool.result}
+            </pre>
+          </div>
+        )
       )}
 
       {/* U3: live stdout/stderr while bash (and similar long-running
@@ -324,18 +449,119 @@ function UserAttachments({ attachments }) {
   );
 }
 
+/* ── K2: heartbeat strip + idle countdown ── */
+//
+// Rendered at the top of the *active* assistant bubble while pi is
+// streaming. Two responsibilities:
+//   1. Surface a coarse-grain status (`thinking` / `writing` / `tool`)
+//      so users see *something is happening* even when text/thinking
+//      deltas come in burst-y or a long tool is mid-execution.
+//   2. After 30s of silence (no events at all) flip the strip to an
+//      "等待模型响应中…（已 N秒）" warning so users understand the
+//      app isn't frozen — usually means the upstream provider is slow
+//      or the network path stalled.
+
+const PHASE_META = {
+  thinking: {
+    Icon: Brain,
+    color: 'text-amber-600',
+    bg: 'bg-amber-50',
+    border: 'border-amber-100',
+    label: '思考中…',
+  },
+  writing: {
+    Icon: PenLine,
+    color: 'text-emerald-600',
+    bg: 'bg-emerald-50',
+    border: 'border-emerald-100',
+    label: '正在回复…',
+  },
+  tool: {
+    Icon: Cog,
+    color: 'text-sky-600',
+    bg: 'bg-sky-50',
+    border: 'border-sky-100',
+    label: '正在调用工具…',
+  },
+  idle: {
+    Icon: Clock,
+    color: 'text-slate-500',
+    bg: 'bg-slate-50',
+    border: 'border-slate-100',
+    label: '等待中…',
+  },
+};
+
+function HeartbeatStrip({ phase, activeToolName, idleSeconds }) {
+  // After 30s of dead air we switch to the explicit "等待响应中"
+  // warning regardless of the current phase — that's a much more
+  // useful signal than the stale phase label at that point.
+  const STALE_THRESHOLD = 30;
+  const isStale = typeof idleSeconds === 'number' && idleSeconds >= STALE_THRESHOLD;
+
+  if (isStale) {
+    return (
+      <div className="mb-2 inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] border border-amber-200 bg-amber-50 text-amber-700">
+        <Loader2 size={11} className="animate-spin" />
+        <span>等待模型响应中… (已 {idleSeconds}s)</span>
+      </div>
+    );
+  }
+
+  const meta = PHASE_META[phase] || PHASE_META.idle;
+  const { Icon } = meta;
+  const label = phase === 'tool' && activeToolName
+    ? `正在执行 ${activeToolName}…`
+    : meta.label;
+
+  return (
+    <div
+      className={`mb-2 inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] border ${meta.bg} ${meta.border} ${meta.color}`}
+    >
+      <Icon size={11} className={phase === 'tool' || phase === 'thinking' ? 'animate-pulse' : ''} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
 /* ── Message bubble ── */
 
-const MessageBubble = ({ message, projectName, domain }) => {
+const MessageBubble = ({ message, projectName, domain, streamingPhase, activeToolName, idleSeconds, isLatestTasksBubble, onAskUserReply, onAskUserCancel }) => {
   // U7: highest-priority branch — `kind:'tasks'` system bubbles are
   // rendered as a checklist card, not as a normal text/system bubble.
   // We bail out BEFORE any other branch (including the system-text
   // pill below) so an empty `message.content` doesn't render a stray
   // grey pill alongside the card.
+  // D.5: only the LATEST tasks bubble renders the full TaskCard; older
+  // snapshots collapse into a single summary line so stale `in_progress`
+  // rows no longer keep spinning after a newer snapshot supersedes them.
   if (message.kind === 'tasks') {
+    if (isLatestTasksBubble) {
+      return (
+        <div className="mb-4">
+          <TaskCard tasks={message.tasks} ts={message.ts} />
+        </div>
+      );
+    }
     return (
-      <div className="mb-4">
-        <TaskCard tasks={message.tasks} ts={message.ts} />
+      <div className="mb-2">
+        <TaskCardSummary tasks={message.tasks} ts={message.ts} />
+      </div>
+    );
+  }
+
+  // E.5: structured ask_user prompt bubble. Routed before the system
+  // branch because ask_user bubbles have no `role` field — they're
+  // identified solely by `kind`. The card handles its own answered /
+  // cancelled state.
+  if (message.kind === 'ask_user') {
+    return (
+      <div className="mb-3">
+        <AskUserCard
+          message={message}
+          onReply={onAskUserReply}
+          onCancel={onAskUserCancel}
+        />
       </div>
     );
   }
@@ -403,6 +629,18 @@ const MessageBubble = ({ message, projectName, domain }) => {
           <Sparkles size={14} className="text-gray-500" strokeWidth={1.5} />
         </div>
         <div className="flex-1 min-w-0">
+          {/* K2: heartbeat strip — only rendered while this bubble is
+              actively streaming AND the page handed down a phase. The
+              KnowClawV2Page only passes phase data to the last
+              streaming assistant bubble, so older bubbles never see
+              this strip. */}
+          {message.streaming && streamingPhase && (
+            <HeartbeatStrip
+              phase={streamingPhase}
+              activeToolName={activeToolName}
+              idleSeconds={idleSeconds}
+            />
+          )}
           {/* U0: thinking stream sits above the final answer so the
               user can watch reasoning unfold before content arrives. */}
           {message.thinking && (

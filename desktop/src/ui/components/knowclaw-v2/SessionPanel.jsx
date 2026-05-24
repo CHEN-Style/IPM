@@ -75,6 +75,7 @@ const SessionRow = ({
   onOpen,
   onFork,
   onDelete,
+  disabled = false,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
@@ -88,33 +89,46 @@ const SessionRow = ({
     return () => window.removeEventListener('mousedown', onClickOutside);
   }, [menuOpen]);
 
+  // D.1: when a turn is in flight on the active session, lock the
+  // entire row — opening / forking would tear down the live session
+  // and discard the streaming response. Delete is locked too;
+  // deleting the in-flight session is destructive and there's no
+  // recovery path. The active row itself stays visually active
+  // (amber highlight) so the user can still tell where they are.
   const preview = session.firstMessage
     ? truncate(session.firstMessage, 56)
     : '(无内容)';
   const relTime = formatRelative(session.modified);
 
   const handleRowClick = () => {
+    if (disabled) return;
     if (isActive) return;
     onOpen(session);
   };
 
+  const lockTitle = '当前有对话正在进行，请先等待结束或中止';
+
   return (
     <div
       role="button"
-      tabIndex={0}
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled || undefined}
       onClick={handleRowClick}
       onKeyDown={(e) => {
+        if (disabled) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           handleRowClick();
         }
       }}
-      className={`group relative px-3 py-2.5 mx-2 rounded-lg cursor-pointer transition-colors ${
-        isActive
-          ? 'bg-amber-50 border border-amber-200'
-          : 'hover:bg-slate-50 border border-transparent'
+      className={`group relative px-3 py-2.5 mx-2 rounded-lg transition-colors ${
+        disabled && !isActive
+          ? 'cursor-not-allowed opacity-50 border border-transparent'
+          : isActive
+            ? 'cursor-default bg-amber-50 border border-amber-200'
+            : 'cursor-pointer hover:bg-slate-50 border border-transparent'
       }`}
-      title={preview}
+      title={disabled ? lockTitle : preview}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
@@ -135,20 +149,24 @@ const SessionRow = ({
         <div className="relative" ref={menuRef}>
           <button
             type="button"
+            disabled={disabled}
             onClick={(e) => {
               e.stopPropagation();
+              if (disabled) return;
               setMenuOpen((v) => !v);
             }}
             className={`p-1 rounded transition-colors ${
-              menuOpen
-                ? 'bg-slate-200 text-slate-700'
-                : 'text-slate-400 opacity-0 group-hover:opacity-100 hover:bg-slate-200 hover:text-slate-700'
+              disabled
+                ? 'text-slate-300 opacity-0 group-hover:opacity-100 cursor-not-allowed'
+                : menuOpen
+                  ? 'bg-slate-200 text-slate-700'
+                  : 'text-slate-400 opacity-0 group-hover:opacity-100 hover:bg-slate-200 hover:text-slate-700'
             }`}
-            title="操作"
+            title={disabled ? lockTitle : '操作'}
           >
             <MoreHorizontal size={12} />
           </button>
-          {menuOpen && (
+          {menuOpen && !disabled && (
             <div className="absolute right-0 top-full mt-1 w-32 bg-white border border-slate-200 rounded-lg shadow-xl z-50 py-1">
               <button
                 type="button"
@@ -204,9 +222,14 @@ const SessionPanel = ({
   onDelete,
   onRefresh,
   onNewSession,
+  // D.1: when true (turn in flight on the active session), disable
+  // controls that would tear down the current session — opening,
+  // forking, deleting, or creating-new. Refresh + search stay live.
+  disabled = false,
 }) => {
   const [query, setQuery] = useState('');
   const [pendingDelete, setPendingDelete] = useState(null);
+  const lockTitle = '当前有对话正在进行，请先等待结束或中止';
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -259,8 +282,9 @@ const SessionPanel = ({
             <button
               type="button"
               onClick={onNewSession}
-              className="p-1 rounded text-slate-400 hover:text-amber-600 hover:bg-amber-50"
-              title="新建会话"
+              disabled={disabled}
+              className="p-1 rounded text-slate-400 hover:text-amber-600 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-slate-400 disabled:hover:bg-transparent"
+              title={disabled ? lockTitle : '新建会话'}
             >
               <Plus size={14} />
             </button>
@@ -297,6 +321,7 @@ const SessionPanel = ({
                 onOpen={(s) => onOpen(s.path)}
                 onFork={handleFork}
                 onDelete={handleDeleteRequest}
+                disabled={disabled}
               />
             ))}
           </div>

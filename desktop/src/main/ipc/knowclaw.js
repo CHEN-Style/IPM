@@ -57,6 +57,7 @@ import { buildProjectRegistry } from '../../../Agent/shared/projectRegistry.js';
 import { getProjectDb } from '../../../Agent/db/index.js';
 import { listEvents } from '../../../Agent/db/events.js';
 import { listLogs } from '../../../Agent/db/activityLog.js';
+import { fetchWeb } from '../../../Agent/services/webFetch.js';
 
 const EVENT_CHANNEL = 'knowclaw:event';
 
@@ -241,7 +242,12 @@ function mapPiMessagesForRenderer(piMessages) {
       // out entirely (the legacy check used `if (!text) continue`).
       const images = extractImagesFromContent(msg.content);
       if (!text && images.length === 0) continue;
-      const bubble = { role: 'user', content: text || '', ts };
+      // E.5: strip the `[MODE: plan]\n` / `[MODE: agent]\n` prefix that
+      // knowclaw:send / steer / followUp inject for the model's benefit.
+      // The user typed `text` without the tag; rehydrating bubbles with
+      // the tag would be confusing.
+      const cleanText = (text || '').replace(/^\[MODE: (?:plan|agent)\]\n/, '');
+      const bubble = { role: 'user', content: cleanText, ts };
       if (images.length > 0) bubble.attachments = images;
       bubbles.push(bubble);
       continue;
@@ -255,10 +261,18 @@ function mapPiMessagesForRenderer(piMessages) {
           if (!block || typeof block !== 'object') continue;
           if (block.type === 'toolCall') {
             const toolCallId = String(block.id || `${block.name || 'tool'}-${tools.length}`);
+            // E.2: carry the original LLM `arguments` over to the
+            // renderer so historic write/edit bubbles can render
+            // their content/diff preview just like live ones do.
+            // Without this, reopening a past session showed every
+            // file-mutator as a bare "WRITE 写入 path" header with
+            // no way to see what was actually written.
+            const argsObj = (block.arguments && typeof block.arguments === 'object') ? block.arguments : null;
             tools.push({
               name: String(block.name || 'tool'),
               toolCallId,
               status: 'running', // overwritten when matching toolResult arrives
+              ...(argsObj ? { args: argsObj } : {}),
             });
           }
         }
@@ -666,6 +680,19 @@ export function registerKnowClawIpc({
   let currentThinkingLevel = 'medium';
 
   /**
+   * E.5: in-memory Plan-mode flag. When true:
+   *   - knowclaw:send prepends `[MODE: plan]\n` to the user message so the
+   *     model can switch behaviour per-turn without rebuilding system prompt
+   *   - knowclawBeforeToolCall blocks `write` / `edit` / `bash` and
+   *     `delegate_task(kind=edit)` as a safety net regardless of what the
+   *     model decides to do
+   * Same lifetime as `currentThinkingLevel`: in-memory only, resets to
+   * `false` on next Electron launch.
+   * @type {boolean}
+   */
+  let currentPlanMode = false;
+
+  /**
    * U1: in-memory dynamic workspace.
    *
    *   null  → "global" mode — cwd falls back to `getUserFileRoot()`
@@ -705,6 +732,59 @@ export function registerKnowClawIpc({
   /** @type {Map<string, { resolve: (allow: boolean) => void, timer: NodeJS.Timeout | null, onSignalAbort?: () => void, signal?: AbortSignal }>} */
   const pendingConfirmations = new Map();
 
+  // ---- E.5: pending ask_user requests (Plan mode structured questions) ----
+  // Same shape as pendingConfirmations but resolves with an answers object
+  // (`{ [questionId]: optionId | optionId[] }`) instead of a boolean. The
+  // ask_user tool returns this object to the model as its tool result.
+  // 5 minute timeout: long enough for thoughtful answers, short enough that
+  // a forgotten dialog doesn't pin a session indefinitely.
+  /** @type {Map<string, { resolve: (answers: any) => void, timer: NodeJS.Timeout | null, onSignalAbort?: () => void, signal?: AbortSignal }>} */
+  const pendingAskUser = new Map();
+
+  async function askUserViaRenderer(questions, signal) {
+    const sender = activeSender;
+    if (!sender || sender.isDestroyed?.()) {
+      return { error: 'no_active_renderer', message: '当前没有活动的前端会话，无法向用户提问' };
+    }
+    const requestId = nodeRandomUUID();
+    return new Promise((resolve) => {
+      const finish = (value) => {
+        const entry = pendingAskUser.get(requestId);
+        if (!entry) return;
+        pendingAskUser.delete(requestId);
+        if (entry.timer) clearTimeout(entry.timer);
+        if (entry.signal && entry.onSignalAbort) {
+          try { entry.signal.removeEventListener('abort', entry.onSignalAbort); } catch { /* ignore */ }
+        }
+        resolve(value);
+      };
+
+      const timer = setTimeout(() => finish({ timeout: true, message: '用户未在 5 分钟内回复' }), 5 * 60 * 1000);
+      const onSignalAbort = () => finish({ aborted: true });
+      pendingAskUser.set(requestId, {
+        resolve: (answers) => finish(answers),
+        timer,
+        signal,
+        onSignalAbort,
+      });
+      if (signal) {
+        if (signal.aborted) {
+          finish({ aborted: true });
+          return;
+        }
+        try { signal.addEventListener('abort', onSignalAbort, { once: true }); } catch { /* older Node */ }
+      }
+
+      try {
+        sender.send('knowclaw:askUser', { requestId, questions });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[KnowClaw] failed to send ask_user IPC:', err?.message || err);
+        finish({ error: 'send_failed', message: String(err?.message || err) });
+      }
+    });
+  }
+
   /**
    * U3: beforeToolCall hook. Invoked by pi BEFORE every tool call.
    * Returns:
@@ -727,6 +807,37 @@ export function registerKnowClawIpc({
    * surface its own AbortError.
    */
   async function knowclawBeforeToolCall(event, signal) {
+    // E.5: Plan-mode safety net. The system prompt already instructs the
+    // model to avoid write tools in plan mode, but we enforce hard-block
+    // here so prompt drift / jailbreaks can't accidentally mutate user
+    // files. The reason text is returned to the model as a tool error
+    // result so it can recover gracefully (typically by switching to
+    // ask_user / save_plan instead).
+    if (currentPlanMode && event?.toolCall?.name) {
+      const name = event.toolCall.name;
+      // Cover both possible pi builtin names (write vs write_file). Today
+      // only `write`/`edit` are emitted, but legacy aliases may exist.
+      const BLOCKED_IN_PLAN = new Set(['write', 'write_file', 'edit', 'edit_file', 'bash']);
+      if (BLOCKED_IN_PLAN.has(name)) {
+        return {
+          block: true,
+          reason:
+            '当前为 Plan 模式，禁止执行写入/编辑/Shell 命令。请用只读工具（read/list_files/grep 等）继续收集信息，' +
+            '用 ask_user 向用户确认细节，用 save_plan 保存方案。规划完成后由用户点击「开始执行」切换到 Agent 模式。',
+        };
+      }
+      if (name === 'delegate_task') {
+        const kind = event?.args?.kind || 'research';
+        if (kind === 'edit') {
+          return {
+            block: true,
+            reason:
+              '当前为 Plan 模式，不允许启动 kind="edit" 的写入类子代理。可以改用 kind="research" 的只读子代理收集信息。',
+          };
+        }
+      }
+    }
+
     if (!event || event.toolCall?.name !== 'bash') return undefined;
     const command = String(event.args?.command || '').trim();
     if (!command) return undefined;
@@ -924,6 +1035,12 @@ export function registerKnowClawIpc({
           getProjectDb,
           listEvents,
           listLogs,
+          // K1: bridge to main-process F2 webFetch.fetchWeb so the pi-runtime
+          // `fetch_web` tool can run pages through Electron's BrowserWindow
+          // for JS-heavy SPAs (rendered: true) and return Markdown bodies.
+          fetchWebRendered: async (url, opts = {}) => {
+            return fetchWeb(url, { mode: 'auto', screenshot: false, ...(opts || {}) });
+          },
         }
       : undefined;
 
@@ -953,6 +1070,11 @@ export function registerKnowClawIpc({
       noContextFiles: shouldDisableContextFiles(),
       beforeToolCall: knowclawBeforeToolCall,
       subAgentEnabled,
+      // E.5: thread the ask_user IPC bridge into the runtime so the
+      // ask_user customTool can pause execution and await the renderer
+      // reply. Same lifetime as the session — the closure captures the
+      // bound `activeSender` via askUserViaRenderer.
+      askUser: askUserViaRenderer,
     });
     if (!result.session) {
       return {
@@ -993,7 +1115,18 @@ export function registerKnowClawIpc({
       return { ok: false, error: 'empty message' };
     }
 
-    const ensured = await ensureSession(evt.sender);
+    // D.2: defensive default. The renderer side now eagerly creates
+    // a session on workspace switch / cold start / model change, so
+    // `activeSession` is normally non-null when we get here and the
+    // mode parameter is irrelevant (the first branch of
+    // ensureSession returns `{ reused: true }`). However if any of
+    // those eager-creation paths failed silently (network blip,
+    // hot-reload race) we don't want the first user message to
+    // walk through `continueRecent` and silently resurrect an
+    // unrelated old JSONL — that's the exact pathology D.2 is
+    // closing. Default to `'new'` so the fallback is a fresh
+    // session, not a surprise resume.
+    const ensured = await ensureSession(evt.sender, 'new');
     if (!ensured.ok) {
       return ensured;
     }
@@ -1006,8 +1139,13 @@ export function registerKnowClawIpc({
     // Fire and forget: do not block the IPC handle on the LLM turn.
     // The renderer consumes the turn via the `knowclaw:event` channel.
     const promptOptions = validImages.length > 0 ? { images: validImages } : undefined;
+    // E.5: tag the prompt with the current mode so the model can switch
+    // behaviour per-turn without a session rebuild. The renderer strips
+    // this prefix back out in mapPiMessagesForRenderer so the user
+    // bubble shows the original text on rehydrate.
+    const taggedMessage = currentPlanMode ? `[MODE: plan]\n${message}` : message;
     Promise.resolve()
-      .then(() => activeSession.prompt(message, promptOptions))
+      .then(() => activeSession.prompt(taggedMessage, promptOptions))
       .catch((err) => {
         pushEvent(activeSender, activeSession?.sessionId, {
           type: 'error',
@@ -1074,7 +1212,11 @@ export function registerKnowClawIpc({
     }
     try {
       const opts = validImages.length > 0 ? { images: validImages } : undefined;
-      await activeSession.steer(message, opts);
+      // E.5: tag steer/followUp with the current mode too — otherwise a
+      // followUp during plan mode would arrive un-tagged and the model
+      // could revert to agent behaviour mid-turn.
+      const tagged = currentPlanMode ? `[MODE: plan]\n${message}` : message;
+      await activeSession.steer(tagged, opts);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err?.message || err) };
@@ -1091,7 +1233,8 @@ export function registerKnowClawIpc({
     }
     try {
       const opts = validImages.length > 0 ? { images: validImages } : undefined;
-      await activeSession.followUp(message, opts);
+      const tagged = currentPlanMode ? `[MODE: plan]\n${message}` : message;
+      await activeSession.followUp(tagged, opts);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err?.message || err) };
@@ -1516,6 +1659,10 @@ export function registerKnowClawIpc({
   // the UI's "打开文件夹" button can be a single-click affordance.
   // Returns `{ ok, path }` with the absolute path that was opened so
   // the renderer can show a confirmation toast.
+  //
+  // K2: also used to open *files* clicked in the WorkspaceFileTree.
+  // `shell.openPath` handles both directories and files natively, so
+  // we only need to relax the error wording.
   ipcMain.handle('knowclaw:openInExplorer', async (_evt, payload) => {
     let target = payload?.path ? String(payload.path).trim() : '';
     if (!target) target = getEffectiveCwd();
@@ -1524,7 +1671,7 @@ export function registerKnowClawIpc({
       return { ok: false, error: `invalid path: ${err?.message || err}` };
     }
     if (!fs.existsSync(resolved)) {
-      return { ok: false, error: `目录不存在: ${resolved}` };
+      return { ok: false, error: `路径不存在: ${resolved}` };
     }
     try {
       // shell.openPath returns '' on success, or an error message
@@ -1535,6 +1682,273 @@ export function registerKnowClawIpc({
     } catch (err) {
       return { ok: false, error: String(err?.message || err) };
     }
+  });
+
+  // E.7 — drop external files into the current workspace.
+  //
+  // Inputs:
+  //   filePaths:   array of absolute source paths (from the renderer's
+  //                `dataTransfer.files[i].path` — Electron exposes that
+  //                non-standard property, plain Web doesn't)
+  //   destRelDir?: target directory relative to the workspace cwd; '' or
+  //                missing = workspace root.
+  //
+  // Output:
+  //   { ok, uploaded: [{ name, relPath, size, src }], skipped: [{ src, reason }] }
+  //
+  // Safety:
+  //   - cwd must be a real workspace folder (not global mode)
+  //   - destAbsDir must resolve INSIDE cwd (defeats `../` traversal)
+  //   - per-file size cap = 100 MB (way over the typical office doc size,
+  //     under enough to avoid surprise OOM on `copyFileSync` of giant blobs)
+  //   - name collision policy: `name (1).ext`, `name (2).ext`, ... never
+  //     overwrites existing files. This matches Finder / Explorer when
+  //     you drop into a folder that already contains a same-named file.
+  //   - directories in `filePaths` are skipped with a reason. We don't
+  //     try to recurse — the user can drag the parent's contents instead.
+  ipcMain.handle('knowclaw:uploadToWorkspace', async (_evt, payload) => {
+    const MAX_BYTES = 100 * 1024 * 1024; // 100 MB / file
+    const filePaths = Array.isArray(payload?.filePaths) ? payload.filePaths : [];
+    if (filePaths.length === 0) {
+      return { ok: false, error: 'no files supplied', uploaded: [], skipped: [] };
+    }
+
+    // Global mode has no real cwd, just the user file root which is
+    // shared across projects/cases/etc. Refuse to copy there — the
+    // user must pick or create a workspace first.
+    if (!currentCwd) {
+      return {
+        ok: false,
+        error: '请先选择一个工作空间，再上传文件。',
+        uploaded: [], skipped: [],
+      };
+    }
+
+    const cwd = getEffectiveCwd();
+    const rawDest = typeof payload?.destRelDir === 'string' ? payload.destRelDir : '';
+    let destAbsDir;
+    try {
+      destAbsDir = path.resolve(cwd, rawDest);
+    } catch (err) {
+      return { ok: false, error: `invalid destRelDir: ${err?.message || err}`, uploaded: [], skipped: [] };
+    }
+    // Containment check — destAbsDir must be at or under cwd.
+    const cwdReal = path.resolve(cwd);
+    const destReal = path.resolve(destAbsDir);
+    const rel = path.relative(cwdReal, destReal);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      return { ok: false, error: '目标目录必须在工作空间内', uploaded: [], skipped: [] };
+    }
+    if (!fs.existsSync(destReal)) {
+      // The caller may legitimately request a subfolder that exists in
+      // the tree snapshot. If it's been deleted between hover and drop
+      // we surface a clear error instead of silently creating it.
+      return { ok: false, error: `目标目录不存在: ${destReal}`, uploaded: [], skipped: [] };
+    }
+    let destStat;
+    try { destStat = fs.statSync(destReal); } catch (err) {
+      return { ok: false, error: `无法读取目标目录: ${err?.message || err}`, uploaded: [], skipped: [] };
+    }
+    if (!destStat.isDirectory()) {
+      return { ok: false, error: '目标必须是目录', uploaded: [], skipped: [] };
+    }
+
+    const uploaded = [];
+    const skipped = [];
+
+    for (const raw of filePaths) {
+      const src = typeof raw === 'string' ? raw.trim() : '';
+      if (!src) { skipped.push({ src: String(raw), reason: 'empty path' }); continue; }
+      let srcStat;
+      try { srcStat = fs.statSync(src); } catch (err) {
+        skipped.push({ src, reason: `无法访问: ${err?.code || err?.message || err}` });
+        continue;
+      }
+      if (srcStat.isDirectory()) {
+        skipped.push({ src, reason: '不支持上传目录' });
+        continue;
+      }
+      if (!srcStat.isFile()) {
+        skipped.push({ src, reason: '不是普通文件' });
+        continue;
+      }
+      if (srcStat.size > MAX_BYTES) {
+        skipped.push({ src, reason: `文件超出 ${Math.round(MAX_BYTES / 1024 / 1024)}MB 上限` });
+        continue;
+      }
+      const base = path.basename(src);
+      const finalName = nextAvailableName(destReal, base);
+      const destFile = path.join(destReal, finalName);
+      try {
+        // copyFile, not rename: the source may live on a different
+        // volume, and we never want to remove the user's original.
+        fs.copyFileSync(src, destFile);
+      } catch (err) {
+        skipped.push({ src, reason: `复制失败: ${err?.message || err}` });
+        continue;
+      }
+      const finalRel = path
+        .relative(cwdReal, destFile)
+        .split(path.sep)
+        .join('/'); // normalise for renderer display + LLM read_file usage
+      uploaded.push({
+        name: finalName,
+        relPath: finalRel,
+        size: srcStat.size,
+        src,
+      });
+    }
+
+    return {
+      ok: uploaded.length > 0 || skipped.length === 0,
+      uploaded,
+      skipped,
+    };
+  });
+
+  // Helper for uploadToWorkspace name-collision resolution. Returns
+  // the original name if it's free, otherwise `base (1).ext` /
+  // `base (2).ext` / ... up to a generous 999 to avoid runaway loops
+  // on a pathological directory.
+  function nextAvailableName(dir, name) {
+    const full = path.join(dir, name);
+    if (!fs.existsSync(full)) return name;
+    const ext = path.extname(name);
+    const stem = ext ? name.slice(0, -ext.length) : name;
+    for (let i = 1; i < 1000; i++) {
+      const candidate = `${stem} (${i})${ext}`;
+      if (!fs.existsSync(path.join(dir, candidate))) return candidate;
+    }
+    // Pathological: fall back to a timestamp suffix so we don't loop forever.
+    return `${stem} (${Date.now()})${ext}`;
+  }
+
+  // K2 — list the workspace file tree as a flat node array.
+  //
+  // Inputs:
+  //   path?:  override the active cwd (used by callers that want to
+  //           preview a workspace before switching to it). Defaults to
+  //           `getEffectiveCwd()`.
+  //   depth?: max recursion depth (1..6). Defaults to 3, hard-capped
+  //           at 6 to keep responses small.
+  //
+  // Output (always shaped like this so the renderer doesn't have to
+  // branch on missing fields):
+  //   {
+  //     ok: boolean,
+  //     cwd: string,                 // absolute, resolved
+  //     global: boolean,             // true when cwd === getUserFileRoot()
+  //     entries: TreeEntry[],        // flat list; [] for the global case
+  //     truncated: boolean,          // true if MAX_ENTRIES hit
+  //     error?: string,
+  //   }
+  //
+  // TreeEntry shape: { name, path, relPath, type, depth, size? }
+  //
+  // Design choices:
+  //   * Sync `readdirSync` for now — workspace trees are small (capped
+  //     at 500 entries) and synchronous code keeps the listing in a
+  //     consistent point-in-time snapshot.
+  //   * Excludes the well-known "noise" folders so the tree mirrors
+  //     what a human would scan, not what the dev tools care about.
+  //   * Global mode (cwd = userFileRoot) returns `entries: []` so the
+  //     renderer can render its own guidance message instead of
+  //     drowning the user in projects/cases/study/...
+  ipcMain.handle('knowclaw:listWorkspaceTree', async (_evt, payload) => {
+    const EXCLUDED_DIRS = new Set([
+      'node_modules', '.git', '.svn', '.hg',
+      'dist', 'build', '.vite', '.next', '.cache',
+      '__pycache__', '.venv', 'venv', '.pytest_cache',
+      '.DS_Store', '.idea', '.vscode',
+    ]);
+    const MAX_ENTRIES = 500;
+    const DEFAULT_DEPTH = 3;
+    const MAX_DEPTH = 6;
+
+    let target = payload?.path ? String(payload.path).trim() : '';
+    if (!target) target = getEffectiveCwd();
+    let resolved;
+    try { resolved = path.resolve(target); } catch (err) {
+      return { ok: false, error: `invalid path: ${err?.message || err}` };
+    }
+    if (!fs.existsSync(resolved)) {
+      return { ok: false, error: `路径不存在: ${resolved}` };
+    }
+
+    let stat;
+    try { stat = fs.statSync(resolved); } catch (err) {
+      return { ok: false, error: `stat 失败: ${err?.message || err}` };
+    }
+    if (!stat.isDirectory()) {
+      return { ok: false, error: `非目录: ${resolved}` };
+    }
+
+    const globalMode = path.resolve(resolved) === path.resolve(getUserFileRoot());
+    if (globalMode) {
+      return { ok: true, cwd: resolved, global: true, entries: [], truncated: false };
+    }
+
+    let maxDepth = Number.isFinite(payload?.depth) ? Math.floor(payload.depth) : DEFAULT_DEPTH;
+    if (maxDepth < 1) maxDepth = 1;
+    if (maxDepth > MAX_DEPTH) maxDepth = MAX_DEPTH;
+
+    const entries = [];
+    let truncated = false;
+
+    function walk(dirAbs, depth) {
+      if (truncated) return;
+      if (depth > maxDepth) return;
+      let dirents;
+      try {
+        dirents = fs.readdirSync(dirAbs, { withFileTypes: true });
+      } catch {
+        return; // permission denied / vanished mid-walk → skip silently
+      }
+      // Directories first, then files; alpha within each group.
+      dirents.sort((a, b) => {
+        const aDir = a.isDirectory() ? 0 : 1;
+        const bDir = b.isDirectory() ? 0 : 1;
+        if (aDir !== bDir) return aDir - bDir;
+        return a.name.localeCompare(b.name, 'zh-CN');
+      });
+      for (const dirent of dirents) {
+        if (truncated) return;
+        if (EXCLUDED_DIRS.has(dirent.name)) continue;
+        if (dirent.name.startsWith('.') && depth === 1) {
+          // Top-level dotfiles are noise (e.g. .ipm-app-state) but
+          // a dotfile nested inside a project may matter.
+          continue;
+        }
+        const childAbs = path.join(dirAbs, dirent.name);
+        const relPath = path.relative(resolved, childAbs).split(path.sep).join('/');
+        const isDir = dirent.isDirectory();
+        let size;
+        if (!isDir) {
+          try { size = fs.statSync(childAbs).size; } catch { /* ignore */ }
+        }
+        if (entries.length >= MAX_ENTRIES) {
+          truncated = true;
+          return;
+        }
+        entries.push({
+          name: dirent.name,
+          path: childAbs,
+          relPath,
+          type: isDir ? 'directory' : 'file',
+          depth,
+          ...(typeof size === 'number' ? { size } : {}),
+        });
+        if (isDir) walk(childAbs, depth + 1);
+      }
+    }
+
+    try {
+      walk(resolved, 1);
+    } catch (err) {
+      return { ok: false, error: `扫描失败: ${err?.message || err}` };
+    }
+
+    return { ok: true, cwd: resolved, global: false, entries, truncated };
   });
 
   // U1: one-click "new workspace" — create a fresh, timestamped
@@ -1613,6 +2027,35 @@ export function registerKnowClawIpc({
     } catch (err) {
       return { ok: false, error: String(err?.message || err), enabled: true };
     }
+  });
+
+  // ---- E.5: Plan-mode IPC handlers ----
+  ipcMain.handle('knowclaw:setPlanMode', async (_evt, payload) => {
+    const enabled = typeof payload === 'boolean' ? payload : Boolean(payload?.enabled);
+    currentPlanMode = enabled;
+    return { ok: true, planMode: currentPlanMode };
+  });
+
+  ipcMain.handle('knowclaw:getPlanMode', async () => ({ ok: true, planMode: currentPlanMode }));
+
+  // Renderer's reply to a `knowclaw:askUser` request. payload:
+  //   { requestId: string, answers: { [questionId]: string | string[] } }
+  // The renderer may also send `{ cancelled: true }` to abandon the
+  // dialog; the resolver receives that object verbatim and the model
+  // sees the cancellation as its tool result.
+  ipcMain.handle('knowclaw:askUserReply', async (_evt, payload) => {
+    const requestId = String(payload?.requestId || '').trim();
+    if (!requestId) return { ok: false, error: 'requestId is required' };
+    const entry = pendingAskUser.get(requestId);
+    if (!entry) return { ok: true, matched: false };
+    try {
+      entry.resolve(
+        payload?.cancelled
+          ? { cancelled: true }
+          : (payload?.answers && typeof payload.answers === 'object' ? payload.answers : {}),
+      );
+    } catch { /* finish() already removed entry */ }
+    return { ok: true, matched: true };
   });
 
   ipcMain.handle('knowclaw:setSubAgentEnabled', async (_evt, payload) => {
@@ -1769,6 +2212,85 @@ export function registerKnowClawIpc({
         try { return readKnowClawState().subAgentEnabled !== false; }
         catch { return true; }
       })(),
+      // E.5: surface the in-memory Plan-mode flag so the renderer can
+      // hydrate its PlanModeToggle on mount / after refresh.
+      planMode: currentPlanMode,
+    };
+  });
+
+  // -------- D.1: rehydrate (App-level state recovery) --------
+  //
+  // Returned to renderer on cold start (Electron reload, devtools
+  // reload, dev hot module replacement) so the App-level
+  // KnowClawPersistProvider can repopulate `messages` / `streaming` /
+  // `tasks` / `sessionStats` / `contextUsage` without the user
+  // having to manually `openSession`.
+  //
+  // Page-level (KnowClawV2Page mount/unmount) does NOT need this — the
+  // Provider keeps the live state in memory across nav. This handler
+  // is purely for the "I refreshed Electron and want my chat back"
+  // case.
+  //
+  // Also rebinds `activeSender` to the calling renderer so any
+  // subsequent push events land in the new window without waiting
+  // for the next `knowclaw:send`.
+  ipcMain.handle('knowclaw:rehydrate', async (evt) => {
+    if (!activeSession) {
+      return { ok: false, hasSession: false };
+    }
+    // Rebind sender — same fix that ensureSession() does on its
+    // reuse path. Without this, a hot-reloaded renderer would never
+    // see the live stream's continuation events.
+    activeSender = evt?.sender || activeSender;
+
+    // Resolve the live JSONL path (may be null for in-memory sessions,
+    // but pi's default mode is persistent so this is rarely null).
+    let sessionFile = null;
+    try {
+      const sm = activeSession?.sessionManager;
+      if (sm && typeof sm.getSessionFile === 'function') {
+        sessionFile = sm.getSessionFile() || null;
+      }
+    } catch { /* ignore */ }
+
+    const historyEvent = buildHistoryLoadedEvent(activeSession, sessionFile);
+
+    // Mirror the per-field defensive try/catch from `knowclaw:getStatus`
+    // so a single field failing never breaks the whole rehydrate.
+    const contextUsage = (() => {
+      try { return activeSession?.getContextUsage?.() ?? null; }
+      catch { return null; }
+    })();
+    const sessionStats = (() => {
+      try {
+        const s = activeSession?.getSessionStats?.();
+        if (!s) return null;
+        return {
+          tokens: s.tokens,
+          userMessages: s.userMessages,
+          assistantMessages: s.assistantMessages,
+          toolCalls: s.toolCalls,
+          toolResults: s.toolResults,
+          totalMessages: s.totalMessages,
+        };
+      } catch { return null; }
+    })();
+
+    return {
+      ok: true,
+      hasSession: true,
+      sessionId: activeSession.sessionId || null,
+      sessionFile,
+      messages: historyEvent.messages,
+      tasks: historyEvent.tasks,
+      promptInFlight,
+      // Convenience alias for the renderer's `streaming` state.
+      streaming: promptInFlight,
+      contextUsage,
+      sessionStats,
+      isCompacting: Boolean(activeSession?.isCompacting),
+      cwd: getEffectiveCwd(),
+      isGlobal: !currentCwd,
     };
   });
 
@@ -1848,6 +2370,12 @@ export function registerKnowClawIpc({
           getProjectDb,
           listEvents,
           listLogs,
+          // K1: bridge to main-process F2 webFetch.fetchWeb so the pi-runtime
+          // `fetch_web` tool can run pages through Electron's BrowserWindow
+          // for JS-heavy SPAs (rendered: true) and return Markdown bodies.
+          fetchWebRendered: async (url, opts = {}) => {
+            return fetchWeb(url, { mode: 'auto', screenshot: false, ...(opts || {}) });
+          },
         }
       : undefined;
 
@@ -1874,6 +2402,7 @@ export function registerKnowClawIpc({
         noContextFiles: shouldDisableContextFiles(),
         beforeToolCall: knowclawBeforeToolCall,
         subAgentEnabled,
+        askUser: askUserViaRenderer,
       });
     } catch (err) {
       return { ok: false, error: String(err?.message || err) };
@@ -1907,7 +2436,7 @@ export function registerKnowClawIpc({
     };
   });
 
-  ipcMain.handle('knowclaw:deleteSession', async (_evt, payload) => {
+  ipcMain.handle('knowclaw:deleteSession', async (evt, payload) => {
     const sessionFile = String(payload?.sessionFile || '').trim();
     const pathError = validateSessionFilePath(sessionFile);
     if (pathError) return { ok: false, error: pathError };
@@ -1924,14 +2453,55 @@ export function registerKnowClawIpc({
       }
     } catch { /* ignore */ }
 
+    let unlinkError = null;
     try {
       if (fs.existsSync(sessionFile)) {
         fs.unlinkSync(sessionFile);
       }
-      return { ok: true, wasActive };
     } catch (err) {
-      return { ok: false, error: String(err?.message || err), wasActive };
+      unlinkError = String(err?.message || err);
     }
+
+    // D.2: when the user just nuked the currently active session,
+    // `activeSession` is now `null`. The next `knowclaw:send` would
+    // route through `ensureSession('new')` (post-D.2 default), but
+    // that means the header sessionId pill stays empty until the user
+    // actually types something. Eagerly create a blank replacement
+    // here so the renderer can update the header immediately from
+    // the IPC response. We rebind `activeSender` to whichever
+    // renderer initiated the delete so subsequent push events land
+    // in the right window.
+    let nextSessionId = null;
+    let nextSessionFile = null;
+    let nextError = null;
+    if (wasActive) {
+      try {
+        const ensured = await ensureSession(evt?.sender, 'new');
+        if (ensured?.ok) {
+          nextSessionId = ensured.sessionId || null;
+          nextSessionFile = ensured.sessionFile || null;
+        } else {
+          nextError = ensured?.error || (ensured?.skipped ? '未配置 LLM 或没有可用模型' : null);
+        }
+      } catch (err) {
+        nextError = String(err?.message || err);
+      }
+    }
+
+    if (unlinkError && !wasActive) {
+      return { ok: false, error: unlinkError, wasActive };
+    }
+    return {
+      ok: true,
+      wasActive,
+      // present only when we auto-created a fresh session
+      nextSessionId,
+      nextSessionFile,
+      nextError,
+      // surface unlink failure as a soft warning so the renderer
+      // can decide whether to toast
+      unlinkError: unlinkError || undefined,
+    };
   });
 
   ipcMain.handle('knowclaw:forkSession', async (evt, payload) => {
@@ -2026,6 +2596,12 @@ export function registerKnowClawIpc({
           getProjectDb,
           listEvents,
           listLogs,
+          // K1: bridge to main-process F2 webFetch.fetchWeb so the pi-runtime
+          // `fetch_web` tool can run pages through Electron's BrowserWindow
+          // for JS-heavy SPAs (rendered: true) and return Markdown bodies.
+          fetchWebRendered: async (url, opts = {}) => {
+            return fetchWeb(url, { mode: 'auto', screenshot: false, ...(opts || {}) });
+          },
         }
       : undefined;
     let prefs = {};
@@ -2051,6 +2627,7 @@ export function registerKnowClawIpc({
         noContextFiles: shouldDisableContextFiles(),
         beforeToolCall: knowclawBeforeToolCall,
         subAgentEnabled,
+        askUser: askUserViaRenderer,
       });
     } catch (err) {
       return { ok: false, error: String(err?.message || err), sessionFile: newPath };

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Brain, Bell, MessageSquare, X } from 'lucide-react';
 import { useToast } from '../hooks/useToast.js';
+import { useKnowClawPersist } from '../hooks/useKnowClawPersist.jsx';
 
 // ─── Variant color dot mapping ──────────────────────────────────────
 
@@ -48,6 +49,13 @@ const KnowClawBubble = ({ onNavigateToKnowClaw }) => {
   const [expanded, setExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState('notifications');
   const panelRef = useRef(null);
+
+  // D.1: live streaming awareness. When the user is on a non-KnowClaw
+  // page and a turn is in flight, decorate the bubble with a pulsing
+  // ring + status text so they know the agent is still working in
+  // the background. Clicking jumps back to the KnowClaw page where
+  // they can interact (abort / steer / followUp).
+  const { streaming, streamingPhase, activeToolName } = useKnowClawPersist();
 
   // Notifications stub — empty list until a new source is wired in.
   const notifications = [];
@@ -178,15 +186,45 @@ const KnowClawBubble = ({ onNavigateToKnowClaw }) => {
 
   // ─── Render: collapsed bubble / morph toast ───────────────────────
 
+  // D.1: derive a short heartbeat label shown next to the bubble
+  // when a turn is in flight on a non-KnowClaw page. We only render
+  // it in the non-morphing state so it never clashes with toasts.
+  const streamingLabel = (() => {
+    if (!streaming) return '';
+    if (streamingPhase === 'tool' && activeToolName) return `正在执行 ${activeToolName}…`;
+    if (streamingPhase === 'writing') return '正在回复…';
+    if (streamingPhase === 'thinking') return '正在思考…';
+    return '对话进行中…';
+  })();
+  const showStreamingPill = streaming && !isMorphing;
+
   if (!expanded) {
     return (
       <div className="fixed bottom-10 right-6 z-50 flex flex-col items-end">
         <div className="relative">
+          {/* D.1: pulsing ring around the bubble while a KnowClaw turn
+              is in flight. Pointer-events-none so it never eats the
+              click. Mounted as a sibling so the ring extends past the
+              bubble's border-radius without resorting to outline. */}
+          {streaming && !isMorphing && (
+            <span
+              aria-hidden="true"
+              className="absolute inset-0 rounded-full pointer-events-none animate-ping"
+              style={{ background: 'rgba(139, 92, 246, 0.35)' }}
+            />
+          )}
           <div
             onClick={(e) => {
               if (e.defaultPrevented) return;
               if (isMorphing) {
                 dismissMorph(isTip);
+                return;
+              }
+              // D.1: while streaming, single click jumps back to the
+              // KnowClaw page instead of opening the bubble — it's
+              // what the user almost always wants.
+              if (streaming) {
+                onNavigateToKnowClaw?.();
                 return;
               }
               setExpanded(true);
@@ -203,12 +241,12 @@ const KnowClawBubble = ({ onNavigateToKnowClaw }) => {
                 : 'w-12 h-12 rounded-full justify-center hover:scale-105',
             ].join(' ')}
             style={isMorphing ? { width: 'auto', maxWidth: 'calc(100vw - 48px)' } : {}}
-            title="KnowClaw — 右键跳转完整界面"
+            title={streaming ? '对话进行中 — 点击返回 KnowClaw' : 'KnowClaw — 右键跳转完整界面'}
           >
             <div className={`flex items-center justify-center transition-all duration-200 ${
               isMorphing ? 'w-0 opacity-0 overflow-hidden' : 'w-full opacity-100'
             }`}>
-              <Brain size={22} className="group-hover:scale-110 transition-transform" />
+              <Brain size={22} className={`group-hover:scale-110 transition-transform ${streaming ? 'animate-pulse' : ''}`} />
             </div>
 
             {isMorphing && (
@@ -241,6 +279,20 @@ const KnowClawBubble = ({ onNavigateToKnowClaw }) => {
             </span>
           )}
         </div>
+        {/* D.1: streaming heartbeat label rendered as a separate pill
+            to the left of the bubble. Mirrors the morph toast shape
+            so the affordance is visually consistent. */}
+        {showStreamingPill && (
+          <button
+            type="button"
+            onClick={() => onNavigateToKnowClaw?.()}
+            className="mt-2 flex items-center gap-2 px-3 h-7 rounded-full text-xs font-medium text-violet-700 bg-white border border-violet-200 shadow-sm hover:bg-violet-50 transition-colors max-w-[260px]"
+            title="点击返回 KnowClaw 对话"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse shrink-0" />
+            <span className="truncate">{streamingLabel}</span>
+          </button>
+        )}
       </div>
     );
   }

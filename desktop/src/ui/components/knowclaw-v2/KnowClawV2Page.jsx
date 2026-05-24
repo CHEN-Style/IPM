@@ -4,7 +4,7 @@
 // runs alongside (does NOT replace) the legacy KnowClaw page so the two
 // stacks can be compared during the migration.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Zap,
   RotateCcw,
@@ -28,11 +28,20 @@ import {
   Loader2,
   RefreshCw,
   Network,
+  PanelRightOpen,
+  PanelRightClose,
+  FolderTree,
+  ClipboardList,
+  PlayCircle,
 } from 'lucide-react';
 import MessageBubble from '../agent-chat/MessageBubble.jsx';
 import ChatInput from '../agent-chat/ChatInput.jsx';
 import useKnowClawV2Chat from './useKnowClawV2Chat.js';
 import SessionPanel from './SessionPanel.jsx';
+import WorkspaceFileTree from './WorkspaceFileTree.jsx';
+import useHeaderTier from './useHeaderTier.js';
+import HeaderOverflowMenu from './HeaderOverflowMenu.jsx';
+import ChatNavTrack from './ChatNavTrack.jsx';
 
 const HINT_PROMPTS = [
   '你好，用一句话告诉我 1+1 等于几',
@@ -93,9 +102,99 @@ const KnowClawV2Page = () => {
     compactSession,
     subAgentEnabled,
     toggleSubAgent,
+    // E.5: Plan-mode state + actions.
+    planMode,
+    setPlanMode,
+    replyAskUser,
+    cancelAskUser,
+    startExecuting,
+    // K2: workspace file tree.
+    workspaceTree,
+    treeLoading,
+    treeTruncated,
+    recentTouchedFiles,
+    loadWorkspaceTree,
+    uploadToWorkspace,
+    // K2 (block B): AI process visibility (consumed by MessageBubble).
+    streamingPhase,
+    activeToolName,
+    streamingIdleSeconds,
+    // D.1: true while a turn is in flight on an existing session.
+    // Used below to lock controls that would otherwise tear down
+    // the active session (new conversation, workspace swap,
+    // historical session open / fork / delete). Equivalent to
+    // `streaming && sessionId != null` — see the provider.
+    isSessionLocked,
   } = useKnowClawV2Chat();
 
   const bottomRef = useRef(null);
+
+  // D.4: scroll lock — respect the user's vertical position.
+  //
+  // Before D.4 the messages container auto-scrolled to bottomRef on
+  // every `messages` update. During streaming, text_delta /
+  // thinking_delta / tool_execution_* events fire dozens of times a
+  // second, so the user could not read earlier output: they'd scroll
+  // up and get yanked back to the bottom within ~100ms. We now track
+  // whether the user has scrolled away from the bottom and suppress
+  // auto-scroll until they return there (manually or via the floating
+  // "回到底部" button). The flag lives in a ref so high-frequency
+  // onScroll events don't trigger re-renders.
+  const scrollContainerRef = useRef(null);
+  const userScrolledUpRef = useRef(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  // E.6: ref + hook for header responsive layout. ResizeObserver
+  // watches the outer header row (full width) and feeds 3 tiers
+  // (wide / medium / compact) to header rendering decisions below.
+  const headerRowRef = useRef(null);
+  const headerTier = useHeaderTier(headerRowRef);
+  // 80px tolerance — small mouse-wheel jitter near the bottom should
+  // not toggle the flag, otherwise the button flickers on streaming
+  // content growth (the bottom edge moves down as new tokens arrive).
+  const SCROLL_BOTTOM_THRESHOLD = 80;
+
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD;
+    userScrolledUpRef.current = !atBottom;
+    setShowScrollButton((prev) => (prev === !atBottom ? prev : !atBottom));
+  }, []);
+
+  const scrollToBottom = useCallback((behavior = 'smooth') => {
+    userScrolledUpRef.current = false;
+    setShowScrollButton(false);
+    // Prefer setting scrollTop directly when we have the container —
+    // it is synchronous and won't fight with smooth animations
+    // mid-stream. Fall back to scrollIntoView when the ref isn't
+    // attached yet (very first render).
+    const el = scrollContainerRef.current;
+    if (el) {
+      if (behavior === 'smooth') {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      } else {
+        el.scrollTop = el.scrollHeight;
+      }
+      return;
+    }
+    bottomRef.current?.scrollIntoView({ behavior });
+  }, []);
+
+  // K2: right-side file tree visibility. Persists across runs via
+  // localStorage so users who keep it open don't have to reopen it
+  // on every IPM launch. Default is collapsed to preserve the
+  // pre-K2 layout for users who don't need the tree.
+  const [showFileTree, setShowFileTree] = useState(() => {
+    try {
+      return window.localStorage?.getItem('knowclaw.v2.showFileTree') === '1';
+    } catch { return false; }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage?.setItem('knowclaw.v2.showFileTree', showFileTree ? '1' : '0');
+    } catch { /* ignore */ }
+  }, [showFileTree]);
 
   // U8b-9: vision UI only when the active model declares `image` input.
   const supportsImages = useMemo(() => {
@@ -103,6 +202,19 @@ const KnowClawV2Page = () => {
     const active = models.find((m) => `${m.provider}/${m.id}` === currentModel);
     return Array.isArray(active?.input) && active.input.includes('image');
   }, [currentModel, models]);
+
+  // D.5: index of the last `kind:'tasks'` bubble in the current
+  // transcript. Only that bubble renders the full TaskCard — earlier
+  // snapshots collapse into a compact summary row (see MessageBubble).
+  // Without this, every prior snapshot keeps any `in_progress` rows
+  // spinning forever, misleading users into thinking a finished step
+  // is still running.
+  const lastTasksIndex = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i]?.kind === 'tasks') return i;
+    }
+    return -1;
+  }, [messages]);
 
   // U3 + bundled-bash: per-session dismiss for the bash banner. We
   // intentionally don't persist the dismiss — every fresh app launch
@@ -136,12 +248,32 @@ const KnowClawV2Page = () => {
     }
   };
 
+  // D.4: conditional auto-scroll. Only follow new content if the
+  // user is already pinned to the bottom; if they've manually
+  // scrolled up to read earlier output, respect that until they
+  // either scroll back themselves or click the floating button.
+  // Using 'auto' (instant) during streaming avoids the smooth-scroll
+  // animation queue piling up and fighting with mouse-wheel input.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (userScrolledUpRef.current) return;
+    const el = scrollContainerRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
   }, [messages]);
 
+  // D.4: sending a new message is an explicit user intent to engage
+  // the latest turn, so we always pin back to the bottom — even if
+  // they were reading older context a second ago.
+  const handleSend = useCallback((text, images) => {
+    scrollToBottom('auto');
+    sendMessage(text, images);
+  }, [sendMessage, scrollToBottom]);
+
   const handleHintClick = (hint) => {
-    if (!streaming) sendMessage(hint);
+    if (!streaming) handleSend(hint);
   };
 
   return (
@@ -159,6 +291,7 @@ const KnowClawV2Page = () => {
             onDelete={deleteSession}
             onRefresh={refreshSessions}
             onNewSession={newSession}
+            disabled={isSessionLocked}
           />
         </div>
       )}
@@ -215,8 +348,16 @@ const KnowClawV2Page = () => {
           </div>
         )}
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-8 py-5 border-b border-slate-100">
+        {/* Header — E.6: outer ref is what useHeaderTier measures.
+            We measure the full header row (≈ window width) rather than
+            the inner right cluster so wide-tier controls' large
+            intrinsic width can't shrink the cluster and feed back into
+            a tier flicker. Thresholds in useHeaderTier.js are tuned
+            against this. */}
+        <div
+          ref={headerRowRef}
+          className="flex items-center justify-between px-8 py-5 border-b border-slate-100"
+        >
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -242,7 +383,10 @@ const KnowClawV2Page = () => {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          {/* E.6: header right cluster. Tier comes from headerRowRef
+              measurement above; this cluster just consumes it to
+              decide which controls render inline vs. inside overflow. */}
+          <div className="flex items-center gap-2 min-w-0">
             <WorkspaceSelector
               currentCwd={currentCwd}
               isGlobal={cwdIsGlobal}
@@ -255,44 +399,113 @@ const KnowClawV2Page = () => {
               onCreateWorkspace={createWorkspace}
               onOpenInExplorer={openInExplorer}
               onHideWorkspace={hideWorkspace}
-              disabled={streaming}
+              disabled={isSessionLocked}
             />
             <ContextPill usage={contextUsage} />
             <TokenPill stats={sessionStats} />
-            <ThinkingLevelSelector
-              level={thinkingLevel}
-              onChange={changeThinkingLevel}
-              hint={thinkingHint}
-              onDismissHint={dismissThinkingHint}
-              disabled={streaming}
-            />
-            <SubAgentToggle
-              enabled={subAgentEnabled}
-              onToggle={toggleSubAgent}
-              disabled={streaming}
-            />
-            <ModelSelector
-              models={models}
-              currentModel={currentModel}
-              onChange={(provider, id) => setModel(provider, id)}
-              disabled={streaming}
-            />
-            <CompactButton
-              onCompact={compactSession}
-              disabled={streaming || compacting}
-              compacting={compacting}
-              visible={Boolean(contextUsage)}
-            />
+            {/* E.6: secondary controls — inline in wide/medium, folded
+                into HeaderOverflowMenu in compact. */}
+            {headerTier !== 'compact' && (
+              <>
+                <ThinkingLevelSelector
+                  level={thinkingLevel}
+                  onChange={changeThinkingLevel}
+                  hint={thinkingHint}
+                  onDismissHint={dismissThinkingHint}
+                  disabled={streaming}
+                  tier={headerTier}
+                />
+                <SubAgentToggle
+                  enabled={subAgentEnabled}
+                  onToggle={toggleSubAgent}
+                  disabled={streaming}
+                  tier={headerTier}
+                />
+                {/* E.5: Plan/Agent mode toggle. Sits next to SubAgentToggle so the
+                     two "what tools is the model allowed to use" controls cluster. */}
+                <PlanModeToggle
+                  planMode={planMode}
+                  onToggle={setPlanMode}
+                  disabled={streaming}
+                  tier={headerTier}
+                />
+                <ModelSelector
+                  models={models}
+                  currentModel={currentModel}
+                  onChange={(provider, id) => setModel(provider, id)}
+                  disabled={streaming}
+                  tier={headerTier}
+                />
+                <CompactButton
+                  onCompact={compactSession}
+                  disabled={streaming || compacting}
+                  compacting={compacting}
+                  visible={Boolean(contextUsage)}
+                />
+              </>
+            )}
+            {/* 新对话 — always inline. In compact tier we drop the label
+                so the icon-only button still fits next to the overflow ... button. */}
             <button
               type="button"
               onClick={newSession}
-              disabled={streaming}
-              className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-xs text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              title="开始新对话"
+              disabled={isSessionLocked}
+              className={`h-8 ${headerTier === 'compact' ? 'px-2' : 'px-3'} flex items-center gap-1.5 rounded-lg text-xs text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed`}
+              title={isSessionLocked ? '当前有对话正在进行，请先等待结束或中止' : '开始新对话'}
             >
               <RotateCcw size={13} />
-              <span>新对话</span>
+              {headerTier !== 'compact' && <span>新对话</span>}
             </button>
+            {/* K2: toggle the right-side workspace file tree panel. Only
+                inline outside compact tier; in compact it lives inside
+                the overflow menu below. */}
+            {headerTier !== 'compact' && (
+              <button
+                type="button"
+                onClick={() => setShowFileTree((v) => !v)}
+                className={`h-8 px-2 flex items-center gap-1.5 rounded-lg text-xs transition-colors ${
+                  showFileTree
+                    ? 'text-amber-600 bg-amber-50 hover:bg-amber-100'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
+                }`}
+                title={showFileTree ? '隐藏文件树' : '显示文件树'}
+              >
+                {showFileTree
+                  ? <PanelRightClose size={14} />
+                  : <PanelRightOpen size={14} />}
+                <FolderTree size={13} />
+              </button>
+            )}
+            {/* E.6: overflow menu — only mounted in compact tier. Carries
+                Model / Thinking / SubAgent / PlanMode / Compact / FileTree. */}
+            {headerTier === 'compact' && (
+              <HeaderOverflowMenu
+                models={models}
+                currentModel={currentModel}
+                onModelChange={(provider, id) => setModel(provider, id)}
+                thinkingLevel={thinkingLevel}
+                onThinkingChange={changeThinkingLevel}
+                thinkingHint={thinkingHint}
+                onDismissThinkingHint={dismissThinkingHint}
+                subAgentEnabled={subAgentEnabled}
+                onToggleSubAgent={toggleSubAgent}
+                planMode={planMode}
+                onTogglePlanMode={setPlanMode}
+                compactSession={compactSession}
+                compacting={compacting}
+                contextUsage={contextUsage}
+                showFileTree={showFileTree}
+                onToggleFileTree={() => setShowFileTree((v) => !v)}
+                streaming={streaming}
+                components={{
+                  ModelSelector,
+                  ThinkingLevelSelector,
+                  SubAgentToggle,
+                  PlanModeToggle,
+                  CompactButton,
+                }}
+              />
+            )}
           </div>
         </div>
 
@@ -308,8 +521,12 @@ const KnowClawV2Page = () => {
         />
 
         {/* Chat body */}
-        <div className="flex-1 min-h-0 flex flex-col">
-          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6">
+        <div className="flex-1 min-h-0 flex flex-col relative">
+          <div
+            ref={scrollContainerRef}
+            onScroll={handleScroll}
+            className="flex-1 min-h-0 overflow-y-auto px-6 py-6"
+          >
             <div className="max-w-3xl mx-auto">
               {messages.length === 0 && (
               <div className="flex items-center justify-center h-full min-h-[400px]">
@@ -337,17 +554,65 @@ const KnowClawV2Page = () => {
               </div>
             )}
 
-            {messages.map((msg, i) => (
-              <MessageBubble
-                key={i}
-                message={msg}
-                projectName="KnowClawV2"
-                domain="knowclaw"
-              />
-            ))}
+            {messages.map((msg, i) => {
+              // K2 (block B): only the last streaming assistant bubble
+              // receives the heartbeat/idle props — older bubbles in
+              // the transcript are static and would render a stale
+              // status strip otherwise.
+              const isLast = i === messages.length - 1;
+              const showHeartbeat = isLast && msg.role === 'assistant' && msg.streaming;
+              // D.5: only the latest tasks snapshot renders full card.
+              const isLatestTasksBubble = msg.kind === 'tasks' && i === lastTasksIndex;
+              // E.1: every bubble gets a `data-msg-index` so the side
+              // nav rail (ChatNavTrack) can locate its DOM node for
+              // marker positioning + click-to-scroll. We tag ALL
+              // messages (not just user) for a flat, stable lookup
+              // even though only user bubbles produce markers.
+              return (
+                <div key={i} data-msg-index={i}>
+                  <MessageBubble
+                    message={msg}
+                    projectName="KnowClawV2"
+                    domain="knowclaw"
+                    streamingPhase={showHeartbeat ? streamingPhase : undefined}
+                    activeToolName={showHeartbeat ? activeToolName : undefined}
+                    idleSeconds={showHeartbeat ? streamingIdleSeconds : 0}
+                    isLatestTasksBubble={isLatestTasksBubble}
+                    onAskUserReply={replyAskUser}
+                    onAskUserCancel={cancelAskUser}
+                  />
+                </div>
+              );
+            })}
 
             <div ref={bottomRef} />
           </div>
+          {/* D.4: floating "回到底部" button. Shown whenever the user
+              has scrolled away from the bottom (any state, ChatGPT /
+              Claude convention). Sits inside the relative-positioned
+              Chat body so it floats above the messages but never
+              covers the input composer. */}
+          {showScrollButton && (
+            <button
+              type="button"
+              onClick={() => scrollToBottom('smooth')}
+              title="回到底部"
+              className="absolute bottom-4 right-6 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs bg-white text-slate-600 border border-slate-200 shadow-md hover:bg-slate-50 hover:text-slate-800 transition-colors"
+            >
+              <ChevronDown size={14} />
+              <span>回到底部</span>
+            </button>
+          )}
+          {/* E.1: DeepSeek-style side nav rail. Renders one marker per
+              user message + a viewport indicator. Sits in the same
+              relative-positioned Chat body container as the "回到底部"
+              button (which is anchored to right-6 — the rail uses
+              right-1 so the two don't overlap). The rail short-circuits
+              to null when there are fewer than 2 user turns. */}
+          <ChatNavTrack
+            messages={messages}
+            scrollContainerRef={scrollContainerRef}
+          />
         </div>
 
         {/* Abort bar (only while streaming).
@@ -374,6 +639,25 @@ const KnowClawV2Page = () => {
           </div>
         )}
 
+          {/* E.5: "开始执行" CTA. Visible only while in Plan mode and
+              between turns — clicking it switches back to Agent mode
+              and sends a structured "按上述方案开始执行" instruction
+              so the model immediately begins executing the plan it
+              just drafted. */}
+          {planMode && !streaming && messages.length > 0 && (
+            <div className="px-6 py-2 flex justify-center border-t border-violet-100 bg-violet-50/40">
+              <button
+                type="button"
+                onClick={startExecuting}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 shadow-sm transition-colors"
+                title="切换到 Agent 模式并开始按上述方案执行"
+              >
+                <PlayCircle size={15} />
+                <span>开始执行</span>
+              </button>
+            </div>
+          )}
+
           {/* Input */}
           <div className="border-t border-slate-100 bg-white">
             <div className="max-w-3xl mx-auto">
@@ -393,15 +677,34 @@ const KnowClawV2Page = () => {
                 />
               )}
               <ChatInput
-                onSend={sendMessage}
+                onSend={handleSend}
                 disabled={false}
                 supportsImages={supportsImages}
                 placeholder={composerPlaceholder(streaming, streamingMode)}
+                onUploadFiles={uploadToWorkspace}
               />
             </div>
           </div>
         </div>
       </div>
+
+      {/* K2: right-side workspace file tree. Visibility is toggled
+          from the header button; collapsed by default to preserve
+          screen real estate for the chat column on smaller windows. */}
+      {showFileTree && (
+        <WorkspaceFileTree
+          entries={workspaceTree}
+          loading={treeLoading}
+          truncated={treeTruncated}
+          isGlobal={cwdIsGlobal}
+          cwd={currentCwd}
+          recentTouchedFiles={recentTouchedFiles}
+          onRefresh={loadWorkspaceTree}
+          onOpenFile={(p) => openInExplorer(p)}
+          onOpenFolder={() => openInExplorer()}
+          onUpload={uploadToWorkspace}
+        />
+      )}
     </div>
   );
 };
@@ -543,7 +846,7 @@ const StreamingComposerToolbar = ({
   );
 };
 
-const ModelSelector = ({ models, currentModel, onChange, disabled }) => {
+const ModelSelector = ({ models, currentModel, onChange, disabled, tier = 'wide' }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -564,7 +867,13 @@ const ModelSelector = ({ models, currentModel, onChange, disabled }) => {
     );
   }
 
-  const displayLabel = currentModel ? currentModel.split('/').slice(-1)[0] : '选择模型';
+  const fullLabel = currentModel ? currentModel.split('/').slice(-1)[0] : '选择模型';
+  // E.6: in medium/compact tier we may not have room for a 30-char
+  // model id; clip to a sensible head fragment. Wide tier keeps the
+  // full name. Title attr always carries the full id for hover-reveal.
+  const displayLabel = tier === 'wide'
+    ? fullLabel
+    : (fullLabel.length > 12 ? `${fullLabel.slice(0, 10)}…` : fullLabel);
 
   return (
     <div className="relative" ref={ref}>
@@ -572,14 +881,14 @@ const ModelSelector = ({ models, currentModel, onChange, disabled }) => {
         type="button"
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
-        className={`h-8 px-3 flex items-center gap-1.5 rounded-lg text-xs transition-colors ${
+        className={`h-8 ${tier === 'wide' ? 'px-3' : 'px-2'} flex items-center gap-1.5 rounded-lg text-xs transition-colors ${
           disabled
             ? 'text-slate-300 cursor-not-allowed'
             : open
               ? 'bg-slate-100 text-slate-700'
               : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
         }`}
-        title="选择模型"
+        title={`选择模型 — 当前: ${fullLabel}`}
       >
         <span className="font-mono">{displayLabel}</span>
         <ChevronDown size={12} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
@@ -1236,7 +1545,7 @@ function CompactionBanner({ compacting, reason, retrying }) {
  * cosmetic anyway (the live session keeps its current tool set),
  * and gating it makes the affordance feel "settled".
  */
-const SubAgentToggle = ({ enabled, onToggle, disabled }) => {
+const SubAgentToggle = ({ enabled, onToggle, disabled, tier = 'wide' }) => {
   const handleClick = () => {
     if (disabled) return;
     onToggle?.(!enabled);
@@ -1244,12 +1553,16 @@ const SubAgentToggle = ({ enabled, onToggle, disabled }) => {
   const title = enabled
     ? '子代理已启用 — 模型可调用 delegate_task 委托独立子任务。点击禁用（下次新对话生效）。'
     : '子代理已禁用 — 当前模型看不到 delegate_task 工具。点击启用（下次新对话生效）。';
+  // E.6: tier === 'wide' shows the text label, otherwise icon-only.
+  // We accept undefined as 'wide' for backward compatibility with
+  // callers that haven't been updated yet.
+  const showLabel = tier === 'wide';
   return (
     <button
       type="button"
       onClick={handleClick}
       disabled={disabled}
-      className={`relative h-8 px-2.5 flex items-center gap-1.5 rounded-lg text-xs transition-colors ${
+      className={`relative h-8 ${showLabel ? 'px-2.5' : 'px-2'} flex items-center gap-1.5 rounded-lg text-xs transition-colors ${
         disabled
           ? 'text-slate-300 cursor-not-allowed'
           : enabled
@@ -1260,13 +1573,48 @@ const SubAgentToggle = ({ enabled, onToggle, disabled }) => {
       aria-pressed={Boolean(enabled)}
     >
       <Network size={13} className="shrink-0" />
-      <span className="hidden md:inline">{enabled ? '子代理' : '子代理 关'}</span>
+      {showLabel && <span>{enabled ? '子代理' : '子代理 关'}</span>}
       {!enabled && (
         <span
           className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-slate-400 ring-2 ring-white"
           aria-hidden="true"
         />
       )}
+    </button>
+  );
+};
+
+// E.5: Plan / Agent mode toggle. Sits in the header next to
+// SubAgentToggle. Disabled mid-stream so mode can't flip while a turn
+// is in flight (the backend enforces this too via knowclaw:setPlanMode
+// but we don't even let the click happen).
+const PlanModeToggle = ({ planMode, onToggle, disabled, tier = 'wide' }) => {
+  const handleClick = () => {
+    if (disabled) return;
+    onToggle?.(!planMode);
+  };
+  const title = planMode
+    ? 'Plan 模式 — 模型只能读取与提问，不会改文件。点击切换到 Agent 模式。'
+    : 'Agent 模式 — 模型可以读写文件、运行命令。点击切换到 Plan 模式（先规划再执行）。';
+  // E.6: same tier convention as SubAgentToggle.
+  const showLabel = tier === 'wide';
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={disabled}
+      className={`relative h-8 ${showLabel ? 'px-2.5' : 'px-2'} flex items-center gap-1.5 rounded-lg text-xs transition-colors ${
+        disabled
+          ? 'text-slate-300 cursor-not-allowed'
+          : planMode
+            ? 'text-violet-600 bg-violet-50 hover:bg-violet-100 ring-1 ring-violet-200'
+            : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+      }`}
+      title={title}
+      aria-pressed={Boolean(planMode)}
+    >
+      <ClipboardList size={13} className="shrink-0" />
+      {showLabel && <span>{planMode ? 'Plan' : 'Agent'}</span>}
     </button>
   );
 };
@@ -1279,7 +1627,7 @@ const THINKING_LEVELS = [
   { value: 'high',    label: '深',   icon: '●', hint: '深度推理（更慢/更贵）' },
 ];
 
-const ThinkingLevelSelector = ({ level, onChange, hint, onDismissHint, disabled }) => {
+const ThinkingLevelSelector = ({ level, onChange, hint, onDismissHint, disabled, tier = 'wide' }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -1319,7 +1667,7 @@ const ThinkingLevelSelector = ({ level, onChange, hint, onDismissHint, disabled 
       >
         <Brain size={13} className="shrink-0" />
         <span className="font-mono">{current.icon}</span>
-        <span className="hidden md:inline">{current.label}</span>
+        {tier === 'wide' && <span>{current.label}</span>}
         <ChevronDown size={12} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
         {showHint && (
           <span

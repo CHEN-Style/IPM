@@ -6,8 +6,8 @@
 > （KnowClaw 引擎迭代 U0–U8 已 DONE，U9+ 规划中）形成三套独立但互相引用的演进
 > 主线。
 >
-> F1/F2/F3/K1/K2 已 `DONE`（K2 落地于 2026-05-23），F4 `DEFERRED`，K3 仍为
-> `PLANNED` / `RESEARCH`。
+> F1/F2/F3/K1/K2 已 `DONE`（K2 落地于 2026-05-23），F4 `DEFERRED`，K3 已完成（2026-05-25，FK0~FK7 全部交付）
+> 架构设计升级为 `PLANNED`（2026-05-24）。
 
 ---
 
@@ -66,7 +66,7 @@
 | F4 | 内置长截屏 | `DEFERRED` | 短期不开发；F3 依赖已解除，后续可按需启动 |
 | K1 | KnowClaw 网页搜索/抓取稳定性 | `DONE` | 2026-05-22 完成。博查 (Bocha) Web Search + F2 渲染抓取桥接 + 设置页 API Key 配置 + LLM 自然降级 |
 | K2 | KnowClaw 工作空间文件树侧栏 + AI 过程可视化 | `DONE` | 2026-05-23 完成。右侧 `WorkspaceFileTree` 面板（树渲染 + 折叠 + 文件点击）、`knowclaw:listWorkspaceTree` IPC、`tool_execution_start` 路径提取 + 5s 新增/修改高亮、heartbeat 状态条（thinking / writing / tool）、30s 空闲倒计时。与 `KNOWCLAW_UPGRADE_PLAN.md` § Phase U1.5 同步交付 |
-| K3 | 悬浮窗 KnowClaw 助手 | `RESEARCH` | Backlog-A 已完成；需先看 Backlog-D（页面切换不丢进度）落地情况 |
+| K3 | 悬浮窗 KnowClaw 助手 | `DONE` (2026-05-25) | FK0~FK7 八阶段全部交付；冒烟清单见 [`FLOATING_KNOWCLAW_SMOKE_TEST.md`](./FLOATING_KNOWCLAW_SMOKE_TEST.md)；详见 [`FLOATING_KNOWCLAW_PLAN.md`](./FLOATING_KNOWCLAW_PLAN.md)；UI 参考 [`k3-floating-knowclaw-demo.html`](./k3-floating-knowclaw-demo.html) |
 
 ---
 
@@ -661,54 +661,383 @@ userfile/projects/<壳名>/
 
 ### Phase K3 — 悬浮窗 KnowClaw 助手
 
-**Status:** `RESEARCH`
+**Status:** `PLANNED`
 
-**目标**：把现有悬浮窗从"剪贴板 + 截图捕获"升级为"可随时唤起的 AI 助手"，
-拥有固定工作空间，对话与产出沉淀在该工作空间，中台模式下可将产物搬到任意
-项目 / 案件。
+**目标**：把现有悬浮窗从"剪贴板 + 截图捕获"的单一工具升级为"随时唤起的
+AI 助手 + 智能截屏助手"，拥有固定工作空间和独特交互体验，对话与产出沉淀
+在该工作空间中，可后续迁移到中台任意项目/案件。
 
-#### K3.1 用户原文（2026-05-21）
+> 📌 **K3 已拆出独立的详细子计划与 UI 参考文档，本节仅保留高层概要。**
+>
+> - **详细分期计划**：[`FLOATING_KNOWCLAW_PLAN.md`](./FLOATING_KNOWCLAW_PLAN.md)
+>   （FK0~FK7 八阶段、双通道架构、UI 形态与回退策略、风险与变更日志）
+> - **UI/UX 静态演示**：[`k3-floating-knowclaw-demo.html`](./k3-floating-knowclaw-demo.html)
+>   （浏览器打开即用；缩略输入控制器 + 外部大气泡 + 展开内部对话；含截屏/OCR/新对话/回到空间/展开等交互）
+> - **本节作用**：保留 K3 的目标、现状锚点、6 项架构决策与风险登记，便于读者在
+>   主计划上下文中快速理解 K3 的边界；阶段细节、工作清单、验收标准等以详细子计
+>   划文档为准。
 
+#### K3.1 用户需求（2026-05-21 + 2026-05-24 补充）
+
+> 原始需求（2026-05-21）：
 > 我们的应用有悬浮窗的模式，这个模式也应该开发对接 KnowClaw，变成一个"可
 > 随时唤起的 AI 助手"，而且这个悬浮窗模式有固定的工作空间，在这个模式下的
-> 对话和产出都会在这个工作空间中，后续可以回到中台模式把产物移到需要的位置，
-> 关于这个悬浮窗模式下的 KnowClaw 功能，我们还需要更多的探索和研讨。
+> 对话和产出都会在这个工作空间中，后续可以回到中台模式把产物移到需要的位置。
 
-#### K3.2 现状锚点
+> 补充需求（2026-05-24）：
+> 1. 给悬浮窗模式接入 KnowClaw，固定使用悬浮窗工作空间，比起在中台模式下
+>    使用 KnowClaw，悬浮窗模式下应具有更好的交互，需要设计独特的 UI/UX 效果，
+>    让 AI 互动适配悬浮窗场景。
+> 2. 利用已有 PaddleOCR 给悬浮窗增加快捷操作：用户浏览网页时信息密集度高
+>    不想自己看 → 一键唤起 → 自动截屏（满屏幕）→ 把图片交给 KnowClaw 自动
+>    总结输出摘要 → 同时走 OCR 记录 raw 信息。
+
+#### K3.2 现状锚点与已完成依赖
 
 | 模块 | 路径 | 现状 |
 |------|------|------|
-| 悬浮窗 UI | `desktop/src/ui/components/floating/FloatingMode.jsx` | 仅剪贴板/截图捕获；Backlog-A 已让切换体验顺畅（2026-05-20 完成 G1.0~G1.2） |
-| 主台 KnowClaw | `desktop/src/ui/components/knowclaw-v2/KnowClawV2Page.jsx` | 完整对话 UI + 工作空间切换 |
-| KnowClaw 引擎 | `desktop/Agent/pi-runtime/` | pi 0.74 + customTools + sessions |
+| 悬浮窗 UI | `src/ui/components/floating/FloatingMode.jsx` | 文件拖拽分类 + 剪贴板/截图捕获；G1.0~G1.2 切换体验已顺畅 |
+| 主台 KnowClaw | `src/ui/components/knowclaw-v2/KnowClawV2Page.jsx` | 完整对话 UI + 工作空间切换 + 文件树 |
+| KnowClaw 引擎 | `Agent/pi-runtime/` | pi 0.74 + customTools + sessions + dual-mode |
+| 工作空间机制 | `src/main/ipc/knowclaw.js` (setCwd/listWorkspaces) | 5 源聚合 + encodeCwd 隔离 + 切换清空 |
+| OCR | `Agent/services/ocrService.js` | PP-OCRv5 mobile + WASM 后端 + Buffer/Path 输入 |
+| 图片→AI | `src/ui/components/agent-chat/imageResize.js` | Canvas 压缩 + Base64 + sanitizeImagesPayload |
+| Vision 模型 | `Agent/pi-runtime/models.js` | inferModelInputs 自动检测 vision 能力 |
+| 截屏 | `src/main.js` (clipboard watcher) | 仅被动监听 clipboard.readImage()，**无主动截屏** |
+| Backlog-D | — | **全部 DONE**（D.1~D.5），K3 前置依赖已清除 |
 
-#### K3.3 设计草案（高度待定）
+#### K3.3 架构设计决策
 
-- 悬浮窗里新增一个"问 AI"标签 / 切换段，输入框 + 简化版消息列表
-- **固定工作空间路径**（候选）：
-  - `userfile/_floating/<时间戳-会话名>/` —— 每次启动新建？
-  - `userfile/_floating/default/` —— 永久单一工作空间，按 session 隔离？
-  - 用户自选 → 持久化偏好
-- 复用 `useKnowClawV2Chat` hook 但折叠掉"工作空间切换 / TaskCard / 子代理"
-  等高级 UI；只保留输入 + 流式回复 + 工具调用最小可见
-- "迁移产物"按钮：点击后弹一个"移动到..."项目/案件选择器，复用 W3a 已经实现
-  的 `pathRemapper` 做安全移动
+##### D-K3-1：双通道 KnowClaw（独立会话）✅
 
-#### K3.4 待回答的问题（多，需进一步研讨）
+**决策：悬浮窗和主台使用独立的 Agent 会话通道。**
 
-- [ ] **D-K3-1**：悬浮窗 KnowClaw 是与主台共享同一个 pi 实例 / 同一会话生命周期，还是独立两套？（涉及到从悬浮窗发起的对话能否在主台继续）
-- [ ] **D-K3-2**：固定工作空间路径策略（见 K3.3）
-- [ ] **D-K3-3**：悬浮窗 KnowClaw 的最小可见 UI 包含哪些（输入 / 历史 / 任务卡片 / 思考块 / 工具调用 ...）？
-- [ ] **D-K3-4**：依赖 Backlog-D.1（页面切换不丢进度）的完成度——如果 D.1 没解决，悬浮窗 ↔ 中台切换将立刻暴露同样问题
-- [ ] **D-K3-5**：模型 / thinking 选择：在悬浮窗里收不收紧到一个默认模型，还是允许完整切换？
-- [ ] **D-K3-6**：成本控制：悬浮窗"随时唤起"非常方便，但也容易触发非预期的 token 消耗，是否要单独限额？
+理由：
+- 悬浮窗和主窗口是两个独立的 BrowserWindow（不同 renderer 进程）
+- 用户可能在主台进行长对话，同时通过悬浮窗发起"快问快答"
+- 强制共享会导致窗口切换时的 cwd/session 冲突
 
-#### K3.5 风险
+实现方案：在 `src/main/ipc/knowclaw.js` 中引入 **channel** 概念：
+```
+mainChannel   = { cwd, session, thinkingLevel, modelId, ... }  → 主窗口
+floatingChannel = { cwd (fixed), session, thinkingLevel, ... }  → 悬浮窗
+```
 
-- RW-K3-1：悬浮窗屏幕空间小，UI 简化与功能完整性之间难平衡
-- RW-K3-2：从悬浮窗产出的文件需要被"中台模式发现并展示"——`refreshProjects`
-  时机、`_floating/` 是否进入项目列表，要确定
-- RW-K3-3：复用 `useKnowClawV2Chat` 会引入 Backlog-D 的所有未修 bug
+IPC 调用增加 `channel` 参数（`'main'` | `'floating'`），默认 `'main'`：
+- `knowclaw:send { channel: 'floating', text, images }`
+- `knowclaw:newSession { channel: 'floating' }`
+- etc.
+
+**跨通道可见性**：悬浮窗的历史会话在主台的 `listSessions` 中可见（因为固
+定 workspace 出现在 `listWorkspaces` 中），用户可在主台打开并继续对话。
+
+##### D-K3-2：固定工作空间路径 ✅
+
+**决策：`userfile/workspaces/_floating/`** — 永久单一目录。
+
+- 不按会话创建子目录（session JSONL 天然隔离历史）
+- 该目录在 `listWorkspaces` 中自动出现，标记为"悬浮助手"
+- 首次启动时自动 `mkdirSync` 创建
+- `floatingChannel.cwd` 硬编码指向此目录，不允许用户在悬浮窗中切换
+
+##### D-K3-3：悬浮窗 AI 交互 UI 设计 ✅
+
+**核心原则：对话为主、信息密度高、操作路径短**
+
+```
+┌──────────────────────────────────────┐  420px
+│ ═══ drag handle (8px) ═══════════════│
+├──────────────────────────────────────┤
+│ [←] KnowClaw ⚡        [⚙] [history]│  Header (36px)
+├──────────────────────────────────────┤
+│                                      │
+│   ┌─ assistant bubble ─────────┐    │
+│   │ 这是一段 AI 回复…          │    │
+│   │ **加粗** `代码` [链接]()   │    │
+│   └────────────────────────────┘    │
+│                                      │
+│   ┌─ user bubble ──────────────┐    │
+│   │ 帮我总结这个截图           │    │
+│   │ [📷 screenshot.png]       │    │
+│   └────────────────────────────┘    │
+│                                      │
+│   ┌─ assistant (streaming) ────┐    │
+│   │ 正在分析图片内容…▊         │    │
+│   │ ┄ [🔧 reading file...] ┄  │    │  工具调用：单行折叠
+│   └────────────────────────────┘    │
+│                                      │
+├──────────────────────────────────────┤
+│ ┌──────────────────────────────────┐│
+│ │ Ask KnowClaw...              [📎]││  Input (auto-expand)
+│ └──────────────────────────────────┘│
+├──────────────────────────────────────┤
+│ [📷 截屏总结] [📋 OCR提取] [▣ 文件]│  Quick Actions (40px)
+└──────────────────────────────────────┘
+```
+
+**与主台 KnowClaw UI 的差异（悬浮窗独特设计）：**
+
+| 元素 | 主台 | 悬浮窗 |
+|------|------|--------|
+| 工作空间选择器 | 下拉多选 | **无**（固定） |
+| 文件树面板 | 右侧可折叠 | **无**（太占空间） |
+| TaskCard（子代理） | 完整展示 | **单行折叠**（"🤖 子代理完成 ✓"）|
+| 思考块 | 可展开 | **隐藏**（仅显示⏳指示器） |
+| 工具调用 | 多行详细 | **单行折叠**（点击可展开） |
+| 模型/思考力切换 | 顶栏直接切换 | **⚙ 齿轮菜单中** |
+| Plan 模式 | 支持 | **v1 不支持**（悬浮窗场景偏向快问快答） |
+| 历史会话 | 侧栏列表 | **弹出式面板** (slide-over) |
+| Quick Actions | 无 | **底部快捷操作栏**（截屏总结/OCR/文件拖入）|
+
+**动态窗口尺寸**：
+- 无对话时：紧凑态 420×280（输入框 + Quick Actions）
+- 有对话时：展开态 420×560（最大可拉伸到 420×720）
+- 通过现有 `ResizeObserver → ui/resizeFloating` 机制实现
+
+##### D-K3-4：前置依赖 ✅
+
+Backlog-D.1~D.5 **全部已完成**。`KnowClawPersistProvider` 保证跨页面
+不丢状态。悬浮窗使用独立 channel 不与主台冲突，切换时无需额外处理。
+
+##### D-K3-5：模型选择 ✅
+
+**决策：沿用用户在主台配置的默认模型，悬浮窗内可通过齿轮菜单切换。**
+
+Quick Actions（截屏总结等自动流程）强制使用 vision 模型（从已配置模型中
+自动选取第一个支持 vision 的模型）。
+
+##### D-K3-6：成本控制 ✅
+
+**决策：不设独立限额，与主台共享 token 池。**
+
+在 Header 右侧显示微型 token 计数器（本次会话累计），让用户有感知。
+Quick Actions 的自动流程在发起前显示预估 token 消耗提示（可关闭）。
+
+#### K3.4 功能规格
+
+##### 模块 A：悬浮窗 KnowClaw 对话（核心）
+
+| 子项 | 描述 |
+|------|------|
+| A.1 | 双通道架构：主进程 `channelMap` 管理两套独立 session context |
+| A.2 | 悬浮窗对话 UI 组件 `FloatingChat.jsx`：简化版消息列表 + 流式渲染 |
+| A.3 | 输入框组件 `FloatingInput.jsx`：自动扩展 textarea + 图片粘贴/拖入 |
+| A.4 | 工具调用折叠：单行 indicator + 点击展开详情 |
+| A.5 | 历史会话 slide-over 面板 |
+| A.6 | 齿轮设置菜单（模型切换 + thinking level） |
+| A.7 | 紧凑/展开动态尺寸（无对话 → 280h；有对话 → 560h） |
+| A.8 | "导出到中台"按钮：将悬浮窗会话产物迁移到指定项目/案件 |
+
+##### 模块 B：智能截屏 + AI 总结（Quick Action #1）
+
+| 子项 | 描述 |
+|------|------|
+| B.1 | 主进程 `desktopCapturer` 全屏截图能力（隐藏悬浮窗 → 截图 → 恢复） |
+| B.2 | 截图预览卡片（缩略图 + "发送给 AI" / "仅 OCR" / "取消"） |
+| B.3 | 自动流程：截图 → imageResize 压缩 → 发送给 KnowClaw（附 prompt "请总结这张截图的核心内容"） |
+| B.4 | 并行 OCR：截图 PNG buffer → ocrService.recognize → raw text 保存到工作空间 |
+| B.5 | AI 摘要 + OCR 原文合并展示（摘要在上，"查看原文"折叠在下） |
+| B.6 | 全局快捷键触发（候选：`Ctrl+Shift+S` 或可自定义） |
+
+##### 模块 C：快捷 OCR 提取（Quick Action #2）
+
+| 子项 | 描述 |
+|------|------|
+| C.1 | 用户按下"OCR 提取" → 区域截屏（desktopCapturer + 用户框选叠加层） |
+| C.2 | 或：直接对剪贴板中的图片执行 OCR（复用现有 clipboard watcher） |
+| C.3 | OCR 结果即时显示在悬浮窗中（可复制、可编辑） |
+| C.4 | "追问 AI"按钮：将 OCR 文本作为上下文发送给 KnowClaw |
+
+##### 模块 D：文件拖入增强（与现有功能融合）
+
+| 子项 | 描述 |
+|------|------|
+| D.1 | 拖入文件时增加"发送给 AI 分析"选项（除了现有的分类上传） |
+| D.2 | 拖入图片时自动提供"OCR + AI 总结"路径 |
+| D.3 | 底部 tab 切换：`[💬 对话]` / `[▣ 文件管理]`（保留现有 TrayWidget） |
+
+#### K3.5 实施分期
+
+##### Phase K3-P0：双通道基础设施 ← **第一步**
+
+**目标**：让悬浮窗能独立发消息给 KnowClaw，不干扰主台会话。
+
+**工作内容**：
+1. `src/main/ipc/knowclaw.js`：将 `currentCwd / currentSession / ...`
+   重构为 `channels = { main: {...}, floating: {...} }` 结构
+2. 所有 `knowclaw:*` handler 读取 payload.channel 分派到对应 channel
+3. `floatingChannel.cwd` 硬编码 `userfile/workspaces/_floating/`，启动时
+   自动创建目录
+4. `preload.js`：新增 `window.ipm.knowclawFloating` 命名空间（或复用现有
+   但自动注入 channel 参数）
+5. 冒烟测试：悬浮窗发送一条消息，主台会话不受影响
+
+**估时**：1.5–2 天
+
+##### Phase K3-P1：悬浮窗对话 UI（模块 A）
+
+**目标**：在悬浮窗中呈现完整的 AI 对话体验。
+
+**工作内容**：
+1. `FloatingMode.jsx` 改造：底部 tab 切换 `对话 / 文件管理`
+2. 新组件 `FloatingChat.jsx`：消息列表 + 流式渲染 + 工具折叠
+3. 新组件 `FloatingInput.jsx`：textarea + 图片粘贴 + 发送按钮
+4. `useFloatingChat.js` hook：封装 IPC 通信（channel='floating'），
+   事件监听（onEvent），消息状态管理
+5. 历史会话 slide-over 面板
+6. 动态窗口尺寸联动
+7. 齿轮菜单（模型 + thinking level）
+
+**估时**：3–4 天
+
+##### Phase K3-P2：智能截屏流程（模块 B）
+
+**目标**：一键全屏截图 → AI 总结 + OCR raw text。
+
+**工作内容**：
+1. 主进程新增 `captureScreen` IPC：
+   - `desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: screenWidth, height: screenHeight } })`
+   - 或 `screen.getPrimaryDisplay()` + `BrowserWindow.capturePage()`
+   - 截图前先 `floatingWindow.hide()`，截完后 `floatingWindow.show()`
+2. Preload 暴露 `window.ipm.capture.fullScreen()`
+3. Quick Action 按钮 `[📷 截屏总结]` 触发流程：
+   - capture → preview card（150ms 显示缩略图）→ 自动发送
+4. 并行管道：`imageResize → KnowClaw (vision)` + `PNG buffer → OCR`
+5. 结果合并展示：AI 摘要 bubble + "原文" 折叠区
+6. 截图 + OCR 原文自动保存到 `_floating/captures/` 目录
+
+**估时**：2–3 天
+
+##### Phase K3-P3：OCR 快捷提取（模块 C）
+
+**目标**：对剪贴板图片 / 区域截图执行 OCR，结果可追问 AI。
+
+**工作内容**：
+1. Quick Action `[📋 OCR提取]`：
+   - 优先读取剪贴板图片（clipboard watcher 最近捕获的）
+   - 若剪贴板无图 → 触发全屏截图（复用 K3-P2）
+2. OCR 结果卡片 UI：文本显示 + 复制按钮 + "追问 AI" 按钮
+3. "追问 AI"：将 OCR 文本注入输入框作为引用上下文
+4. （可选 P2）区域框选截屏：透明全屏窗口叠加层 + 鼠标框选 + crop
+
+**估时**：1.5–2 天
+
+##### Phase K3-P4：融合与打磨（模块 D + 整体 UX）
+
+**目标**：文件拖入增强 + 主台可见性 + 整体动效打磨。
+
+**工作内容**：
+1. 拖入文件时双选项弹窗："分类上传" / "发送给 AI 分析"
+2. 拖入图片自动提供 OCR + AI 路径
+3. `listWorkspaces` 中 `_floating/` 标记为"⚡悬浮助手"
+4. 主台可浏览悬浮 workspace 的会话历史和文件
+5. "导出到中台"按钮：弹出项目/案件选择器 → `pathRemapper` 安全移动
+6. 整体动效：消息气泡入场动画、截图卡片 slide-in、窗口尺寸过渡 ease
+
+**估时**：2–3 天
+
+#### K3.6 技术细节补充
+
+##### 全屏截图方案对比
+
+| 方案 | 优点 | 缺点 | 选择 |
+|------|------|------|------|
+| `desktopCapturer.getSources({types:['screen']})` | 跨平台、可多屏 | 返回 NativeImage thumbnail 尺寸受限 | 备选 |
+| `screen.getPrimaryDisplay()` + 临时隐藏窗口 + `win.capturePage()` | 简单 | 只能截自己的窗口 | ✗ |
+| `PowerShell / screencapture` 系统命令 | 全屏原始分辨率 | 平台特定、子进程开销 | 备选 |
+| **`desktopCapturer` + 设置 thumbnailSize = 屏幕物理分辨率** | 全屏原始像素、纯 Electron API | 需要用户授权（macOS） | **✓ 首选** |
+
+实现伪代码：
+```javascript
+const { desktopCapturer, screen } = require('electron');
+const display = screen.getPrimaryDisplay();
+const { width, height } = display.size;
+const scaleFactor = display.scaleFactor;
+
+// 隐藏悬浮窗避免自身入镜
+floatingWindow.hide();
+await sleep(100); // 等待窗口动画完成
+
+const sources = await desktopCapturer.getSources({
+  types: ['screen'],
+  thumbnailSize: { width: width * scaleFactor, height: height * scaleFactor },
+});
+const primarySource = sources[0];
+const screenshot = primarySource.thumbnail; // NativeImage
+const pngBuffer = screenshot.toPNG();
+
+floatingWindow.show();
+return { pngBuffer, width, height };
+```
+
+##### 双通道 IPC 重构示意
+
+```javascript
+// knowclaw.js — 重构前
+let currentCwd = null;
+let currentSession = null;
+
+// knowclaw.js — 重构后
+const channels = {
+  main: { cwd: null, session: null, thinkingLevel: 'medium', ... },
+  floating: { cwd: FLOATING_WORKSPACE_PATH, session: null, thinkingLevel: 'medium', ... },
+};
+
+function getChannel(payload) {
+  return channels[payload?.channel === 'floating' ? 'floating' : 'main'];
+}
+
+ipcMain.handle('knowclaw:send', async (_evt, payload) => {
+  const ch = getChannel(payload);
+  const session = await ensureSession(ch);
+  // ... 使用 ch.cwd, ch.session 等
+});
+```
+
+#### K3.7 UI/UX 独特设计理念
+
+**核心差异化：悬浮窗不是"缩小版的中台 KnowClaw"，而是"桌面 AI 伴侣"。**
+
+设计原则：
+1. **极短路径**：从唤起到得到答案 ≤ 3 步操作（快捷键→自动截屏→AI回复）
+2. **不打断工作流**：悬浮窗 alwaysOnTop + 透明背景，用户视线不需要切换应用
+3. **信息收敛**：AI 回复默认精炼展示，工具/思考/子代理等细节折叠
+4. **快捷操作优先**：Quick Actions 栏让最高频操作一触即达
+5. **渐进展开**：从 compact 280h → 对话 560h → 详情 720h，按需生长
+
+**与现有 TrayWidget 的融合**：
+- 底部 Tab 切换：`💬 KnowClaw` / `📁 文件管理`
+- 文件管理 tab 保留现有全部 TrayWidget 功能（拖拽分类、剪贴板、截图捕获）
+- KnowClaw tab 为新开发的对话 + Quick Actions 界面
+- 左侧 rail 的三域切换按钮仅在"文件管理" tab 下可见
+
+#### K3.8 风险与缓解
+
+| ID | 风险 | 概率 | 影响 | 缓解 |
+|----|------|------|------|------|
+| RW-K3-1 | 悬浮窗空间受限，对话多时滚动体验差 | 中 | 中 | 消息虚拟滚动 + 动态窗口高度 + 最大高度 720px |
+| RW-K3-2 | `_floating/` 产物在中台"被发现"链路不通 | 中 | 中 | 自动注册为 workspace + "⚡悬浮助手"标记 |
+| RW-K3-3 | desktopCapturer 在 macOS 需要屏幕录制权限 | 中 | 中 | 首次触发时引导用户授权 + 降级提示 |
+| RW-K3-4 | 双通道重构引入回归 bug | 中 | 高 | 渐进式：先加 channel 参数但默认行为不变 → 再加 floating |
+| RW-K3-5 | Quick Action 误触导致不必要的 API 调用 | 低 | 中 | 截图后先展示预览卡片，3s 内可取消 |
+| RW-K3-6 | 两通道同时流式响应时主进程 event loop 压力 | 低 | 中 | pi AgentSession 本身异步非阻塞，观察后优化 |
+
+#### K3.9 总工期估算
+
+| Phase | 工作量 | 累积 |
+|-------|--------|------|
+| K3-P0 双通道基础 | 1.5–2 天 | 2 天 |
+| K3-P1 对话 UI | 3–4 天 | 6 天 |
+| K3-P2 智能截屏 | 2–3 天 | 9 天 |
+| K3-P3 OCR 快捷 | 1.5–2 天 | 11 天 |
+| K3-P4 融合打磨 | 2–3 天 | 14 天 |
+| **总计** | **10–14 天** | — |
+
+#### K3.10 变更日志
+
+| 日期 | 变更 |
+|------|------|
+| 2026-05-24 | 从 RESEARCH 升级为 PLANNED；完成架构决策 D-K3-1~6；制定 P0~P4 分期计划 |
 
 ---
 
@@ -729,9 +1058,12 @@ userfile/projects/<壳名>/
 | RW-F4-1 | 系统级长截屏拼接算法复杂度高 | F4 | 高 | 中 | 首版只做应用内嵌浏览器，方案 B 留 P2 |
 | RW-F4-2 | 长图存储与检索成本 | F4 | 中 | 低 | 默认压缩 / 分段保存 |
 | RW-K1-1 | 外部搜索 API key 泄露 / 成本失控 | K1 | 中 | 中 | API Key 仅保存在本地 `state.prefs.searchApi`；设置页提供连通性测试；错误分类明确（401/402/429）并提示用户自行处理配额 |
-| RW-K3-1 | 悬浮窗 UI 简化与完整性失衡 | K3 | 高 | 中 | 先出设计 mockup 再实现 |
-| RW-K3-2 | 悬浮窗产物的"被中台发现"链路不通 | K3 | 中 | 中 | `_floating/` 默认进项目列表，标记为"草稿"域 |
-| RW-K3-3 | 复用 hook 引入 Backlog-D 未修 bug | K3 | 高 | 高 | **强制依赖**：K3 启动前 Backlog-D.1/D.2/D.4 必须完成 |
+| RW-K3-1 | 悬浮窗空间受限，对话多时滚动体验差 | K3 | 中 | 中 | 消息虚拟滚动 + 动态窗口高度（280→560→720）+ Quick Actions 收敛操作路径 |
+| RW-K3-2 | 悬浮窗产物的"被中台发现"链路不通 | K3 | 中 | 中 | `_floating/` 自动注册为 workspace，标记为"⚡悬浮助手"，主台可浏览 |
+| ~~RW-K3-3~~ | ~~复用 hook 引入 Backlog-D 未修 bug~~ | K3 | — | — | **已消除**：Backlog-D.1~D.5 全部 DONE；悬浮窗使用独立 channel 不共享 hook 实例 |
+| RW-K3-4 | desktopCapturer 在 macOS 需要屏幕录制权限 | K3 | 中 | 中 | 首次触发时引导用户授权 + 降级提示（手动截图粘贴） |
+| RW-K3-5 | 双通道重构引入回归 bug | K3 | 中 | 高 | 渐进式：先加 channel 参数但默认行为不变 → 再加 floating channel |
+| RW-K3-6 | Quick Action 误触导致不必要的 API 调用 | K3 | 低 | 中 | 截图后先展示预览卡片，3s 内可取消 |
 
 ---
 
@@ -745,7 +1077,7 @@ userfile/projects/<壳名>/
 | F4 — 内置长截屏 | **DEFERRED** | | 2026-05-22 用户决策短期不开发 |
 | K1 — KnowClaw 网页搜索/抓取稳定性 | **DONE** | 2026-05-22 | 博查 Web Search + F2 渲染桥接 + 设置页 API Key 配置 + LLM 自然降级 |
 | K2 — KnowClaw 工作空间文件树 + AI 过程可视化 | DONE | 2026-05-23 | 右侧 `WorkspaceFileTree` + `listWorkspaceTree` IPC + `tool_execution_start` 路径提取 + 5s 高亮；heartbeat 状态条 + 30s 倒计时 + 工具参数摘要 / 耗时 |
-| K3 — 悬浮窗 KnowClaw 助手 | RESEARCH | | 依赖 Backlog-D |
+| K3 — 悬浮窗 KnowClaw 助手 | **PLANNED** | — | 架构设计完成；详细分期与 UI 演示已拆出独立文档：[`FLOATING_KNOWCLAW_PLAN.md`](./FLOATING_KNOWCLAW_PLAN.md) / [`k3-floating-knowclaw-demo.html`](./k3-floating-knowclaw-demo.html) |
 
 ---
 
@@ -1228,13 +1560,15 @@ U8 密集测试后采集的第二批优化方向，侧重 UI 品质、交互丰�
   - **完整溢出菜单**：compact 档把 6 个次要项（Model / Thinking / SubAgent / PlanMode / Compact / FileTree）折叠进 `...` popover，主要项（WorkspaceSelector / ContextPill / TokenPill / 新对话）始终常驻。
   - **不动 Pill 内部**：ContextPill / TokenPill 已经够紧凑且承载关键信息，本次只对外层布局做 tier 化；如未来实测仍挤压再单独优化。
 - **响应式阈值与 hysteresis**
-  - `wide >= 1180px`、`medium 880-1180px`、`compact < 880px`。
-  - **30px 滞回带**：避免拖动窗口边到阈值附近时反复抖动；上行需越过 `阈值 + 30px`，下行需越过 `阈值 - 30px`。
+  - 初版：`wide >= 1180px`、`medium 880-1180px`、`compact < 880px`。
+  - 2026-05-25 复修：全屏下同时打开历史会话栏 + 工作空间文件树时，中间聊天列会被两个 `w-72` 侧栏压窄，初版阈值仍会让 header 停在 medium/wide 并发生挤压；阈值上调为 `wide >= 1500px`、`medium 1180-1500px`、`compact < 1180px`。
+  - **40px 滞回带**：避免拖动窗口边到阈值附近时反复抖动；上行需越过 `阈值 + 40px`，下行需越过 `阈值 - 40px`。
 - **新文件**
   - `useHeaderTier.js`：`useHeaderTier(ref)` hook，`ResizeObserver` + `classifyWidth(width, prevTier)`（带 hysteresis），仅 tier 变化时 setState；mount 时 `getBoundingClientRect()` 同步播种避免首帧误判 `wide`；卸载时 disconnect observer。
   - `HeaderOverflowMenu.jsx`：`...` 触发按钮 + popover panel，纵向渲染 `Model / Thinking / SubAgent / PlanMode / Compact / FileTree` 六行（每行左侧 14px 灰色 label + 右侧原组件实例）；`mousedown` outside-click 关闭、Esc 关闭；嵌套的 ModelSelector / ThinkingLevelSelector 自身的下拉因为渲染在 popover DOM 子树内，与 popover 的 outside-click 不冲突；接受 `components={{ ModelSelector, ThinkingLevelSelector, ... }}` 注入避免循环依赖。
 - **改动**
-  - `KnowClawV2Page.jsx`：新增 `headerRightRef` + `const headerTier = useHeaderTier(headerRightRef)`；header 右侧 `<div>` 绑 ref 并加 `min-w-0`；secondary 控件用 `headerTier !== 'compact'` 整体条件渲染，传 `tier={headerTier}` 让组件内部决定 label；compact 档常驻控件保持但「新对话」按钮自动 icon-only 化；compact 档挂载 `<HeaderOverflowMenu>`，把 5 个 toggle + FileTree 转发进去。
+  - `KnowClawV2Page.jsx`：新增 `headerRowRef` + `const headerTier = useHeaderTier(headerRowRef)`；header 外层绑 ref 并加 `min-w-0`；secondary 控件用 `headerTier !== 'compact'` 整体条件渲染，传 `tier={headerTier}` 让组件内部决定 label；compact 档常驻控件保持但「新对话」按钮自动 icon-only 化；compact 档挂载 `<HeaderOverflowMenu>`，把 5 个 toggle + FileTree 转发进去。
+  - 2026-05-25 复修：compact 档 header 改为上下两行（左侧标题/状态一行，右侧工具条一行），左侧标题区增加 `min-w-0` / `truncate`；compact 隐藏 API badge，非 wide 隐藏左侧 workspace badge（右侧 WorkspaceSelector 已承载该状态），避免左右侧栏同时打开时左侧 metadata 与右侧工具条互相挤压。
   - `ModelSelector` / `ThinkingLevelSelector` / `SubAgentToggle` / `PlanModeToggle` 签名增加 `tier = 'wide'` 可选 prop；`tier === 'wide'` 显示文字 label，否则 icon-only；ModelSelector 在非 wide 档下额外截断超过 12 字的 model 名（`首10字…`），完整名进 title 属性。
   - `useKnowClawPersist.jsx::openSession`：成功分支末尾追加 `void refreshStatus()`，修复历史会话切换后 ContextPill/TokenPill 清零、要等下一轮 polling 才回填的 bug；因 `refreshStatus` 在文件中声明在 `openSession` 之后，dep 数组省略并加 `eslint-disable react-hooks/exhaustive-deps` 注释规避 TDZ（与 E.5 `startExecuting` 同一模式，但此处选择不重排序代码）。
 - **风险与坑位**

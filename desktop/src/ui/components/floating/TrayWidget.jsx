@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, CornerDownLeft, GripHorizontal, Maximize2, Minimize2, X, Loader2, CheckCircle2, FileText } from 'lucide-react';
+import { ArrowRight, CornerDownLeft, GripHorizontal, Maximize2, Minimize2, X, Loader2, CheckCircle2, FileText, Sparkles } from 'lucide-react';
 import DropTray, { TrayState } from './DropTray.jsx';
 import ProjectBar from './ProjectBar.jsx';
 
@@ -12,6 +12,14 @@ const TrayWidget = ({
   activeDomain = 'projects',
   disabled = false,
   disabledHint = '',
+  // FK6-5: optional. When provided, the FILE_STAGED confirm zone
+  // renders a second "发送给 AI 分析" button next to "确认并保存".
+  // Receives `{ srcPath, name }` for the currently staged file so
+  // the parent can upload it into `_floating` and inject the
+  // resulting `@relPath` into the KnowClaw input. The handler is
+  // expected to return a promise; while it's pending we keep the
+  // staged file in place so the user can see what's being sent.
+  onSendFilesToAi,
 }) => {
   const [trayState, setTrayState] = useState(TrayState.IDLE);
   const [currentFile, setCurrentFile] = useState(null);
@@ -543,6 +551,38 @@ const TrayWidget = ({
     }
   };
 
+  // FK6-5: "发送给 AI 分析" path. We hand the staged file's
+  // absolute path to the parent callback (which uploads it into
+  // `_floating` and injects `@relPath` into the floating KnowClaw
+  // input) and reset the tray when the upload succeeds. On failure
+  // we restore FILE_STAGED so the user can pick "确认并保存" instead.
+  const handleSendToAi = async () => {
+    if (!currentFile) return;
+    if (typeof onSendFilesToAi !== 'function') return;
+    const srcPath =
+      currentFile.path ||
+      (currentFile.file && window.ipm?.files?.getPathForFile ? window.ipm.files.getPathForFile(currentFile.file) : '');
+    if (!srcPath) {
+      window.alert('未获取到文件路径，请重新拖拽或点击选择文件');
+      return;
+    }
+    const stagedName = currentFile.name || 'file';
+    setTrayState(TrayState.PROCESSING);
+    try {
+      const res = await onSendFilesToAi([{ srcPath, name: stagedName }]);
+      if (res?.ok === false) {
+        window.alert(`发送给 AI 失败：${res?.error || '未知错误'}`);
+        setTrayState(TrayState.FILE_STAGED);
+        return;
+      }
+      handleReset();
+    } catch (e) {
+      console.error(e);
+      window.alert(`发送给 AI 失败：${e?.message || String(e)}`);
+      setTrayState(TrayState.FILE_STAGED);
+    }
+  };
+
   const handleConfirm = async () => {
     if (!currentFile) return;
     if (!hasTarget) return;
@@ -883,6 +923,22 @@ const TrayWidget = ({
               <ArrowRight size={12} className="group-hover:translate-x-1 transition-transform" />
             </button>
           </div>
+
+          {/* FK6-5: "发送给 AI 分析" — secondary action that uploads the
+              staged file to `_floating` and injects `@relPath` into the
+              KnowClaw input instead of classifying it into the active
+              workspace. Only rendered when the parent passes
+              `onSendFilesToAi` (i.e. inside the floating window). */}
+          {typeof onSendFilesToAi === 'function' && trayState === TrayState.FILE_STAGED && (
+            <button
+              onClick={handleSendToAi}
+              className="group w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 hover:border-violet-300 active:scale-95 transition-all duration-150"
+              title="把当前文件上传到悬浮助手工作空间，并在 KnowClaw 输入框插入 @文件引用（不会自动发送）"
+            >
+              <Sparkles size={12} className="text-violet-500" />
+              <span>{isCompact ? '发给 AI' : '发送给 AI 分析'}</span>
+            </button>
+          )}
         </div>
       </div>
 

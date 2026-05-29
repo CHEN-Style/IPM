@@ -28,14 +28,16 @@ import { useEffect, useRef, useState } from 'react';
 // controls have larger intrinsic width than what their own container
 // can hold, which would jitter tier across renders.
 //
-// Budget reasoning (left logo/title ≈ 280px, right cluster ≈ 940px
-// at wide / 580px at medium):
-//   >= 1280px window  → wide   (all labels visible, ~940 right + 280 left + slack)
-//   980-1280px window → medium (all inline, icon-only on toggles)
-//   <  980px window   → compact (overflow menu for 6 secondary)
-// Adjust here if controls are added/removed.
-const WIDE_MIN_PX    = 1280;
-const MEDIUM_MIN_PX  = 980;
+// Budget reasoning after K2/K3: the header can be inside a much
+// narrower chat column even when the app window is fullscreen because
+// SessionPanel (w-72) and WorkspaceFileTree (w-72) can both be open.
+// The old 1280/980 breakpoints were tuned for the no-side-panel case
+// and still allowed the "medium" toolbar to squeeze badly. Be more
+// conservative: below ~1180px the header becomes a two-line compact
+// layout; above that medium keeps all primary controls inline with
+// icon-only secondary controls.
+const WIDE_MIN_PX    = 1500;
+const MEDIUM_MIN_PX  = 1180;
 const HYSTERESIS_PX  = 40;
 
 function classifyWidth(width, prevTier) {

@@ -105,7 +105,7 @@ export function registerPreferencesIpc({ ipcMain, getWorkspaceDirOrThrow, isAtta
     }
 
     const prompt = NL_PARSE_PROMPT.replace('{FOLDERS}', folders.join(', '));
-    const llm = createChatModel();
+    const llm = await createChatModel('preferenceParsing');
     const response = await llm.invoke([
       { role: 'system', content: prompt },
       { role: 'user', content: text },

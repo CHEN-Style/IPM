@@ -63,6 +63,10 @@ const VITE_EXTERNALS = [
   'jsdom',
   '@earendil-works/pi-coding-agent',
   'turndown',
+  '@langchain/anthropic',
+  '@langchain/google-genai',
+  '@anthropic-ai/sdk',
+  '@google/generative-ai',
   // F3 OCR: ppu-paddle-ocr + onnxruntime-node/web + ppu-ocv
   // These are ESM modules that must stay outside Vite's bundle and be copied
   // to the packaged app's node_modules tree by the packageAfterCopy hook.

@@ -1,32 +1,33 @@
 // desktop/Agent/pi-runtime/index.js
 //
-// Public entry point for the new KnowClaw runtime backed by
-// `@earendil-works/pi-coding-agent`. See KNOWCLAW_REBUILD_PLAN.md for
-// the full migration plan.
+// Public entry point for the KnowClaw runtime backed by
+// `@earendil-works/pi-coding-agent`.
 //
-// Public API (stable across phases):
-//   bootstrap()                                  — idempotent init hook
-//   createKnowClawSession({ cwd, prompt, modelId, mode, sessionFile })
-//                                                — Phase-0/1/2 one-shot wrapper
-//   createSession({ cwd, modelId, mode, sessionFile })
-//                                                — Phase-3 long-lived session
-//   disposeSession(session, unsubscribe?)        — safe dispose helper
-//   listAvailableModels()                        — current ipm-openai models
-//   setModel(providerId, modelId)                — choose model for next session
-//   getCurrentModelId()                          — inspect current selection
-//   listSessions(cwd)                            — list persisted JSONL sessions
-//   getSessionDir(cwd)                           — diagnostic path lookup
-//   shutdown()                                   — release resources
+// 升级后变化：
+//   - 支持多 Provider / 多模型注册。
+//   - `listAvailableModels()` 返回所有 KnowClaw 角色分配的模型，并通过
+//     `provider` 字段区分来源（pi 端的 provider id，例如 ipm-openai-xxx）。
+//   - `setModel(providerId, modelId)` 现在校验 (providerId, modelId) 双键。
+//   - `currentModelSelection` 改为 `{ providerId, modelId }`，以前的
+//     `currentModelId` 仍以 getter 形式保留。
 
 import {
   createSession as _createSession,
   disposeSession as _disposeSession,
   runPoc,
 } from './bootstrap.js';
-import { describeIpmConfig, getIpmLlmConfig } from './ipmConfig.js';
-import { applyIpmRuntimeKey, buildAuthStorage, IPM_PROVIDER_ID } from './auth.js';
 import {
-  registerIpmProvider,
+  describeIpmConfig,
+  getIpmLlmConfig,
+  getIpmLlmConfigs,
+} from './ipmConfig.js';
+import {
+  applyIpmRuntimeKeys,
+  buildAuthStorage,
+  IPM_PROVIDER_ID,
+} from './auth.js';
+import {
+  registerIpmProviders,
   buildModelRegistry,
   listIpmModelsAsync,
 } from './models.js';
@@ -37,7 +38,8 @@ import {
 
 let booted = false;
 let bootPromise = null;
-let currentModelId = '';
+/** @type {{providerId: string, modelId: string} | null} */
+let currentSelection = null;
 
 export async function bootstrap() {
   if (booted) return;
@@ -49,119 +51,92 @@ export async function bootstrap() {
 }
 
 /**
- * Create a KnowClaw session. If `modelId` is omitted falls back to the
- * previously set `setModel(...)` value, or to the IPM-configured default
- * model. `mode` controls session storage:
- *   - 'continueRecent' (default): resume most recent session for cwd, or
- *     create a new one if none exists. Persists to JSONL.
- *   - 'new': always create a fresh persistent session.
- *   - 'open': open `opts.sessionFile` (required).
- *   - 'inMemory': no persistence (debug only).
+ * Create a KnowClaw one-shot session.
  *
  * @param {object} opts
- * @param {string} [opts.cwd]
- * @param {string} [opts.prompt]
- * @param {string} [opts.modelId]
- * @param {'new' | 'continueRecent' | 'open' | 'inMemory'} [opts.mode]
- * @param {string} [opts.sessionFile]
  */
 export async function createKnowClawSession(opts = {}) {
   await bootstrap();
-  const effectiveModelId = opts.modelId || currentModelId || '';
-  return runPoc({ ...opts, modelId: effectiveModelId });
+  const effectiveModelId = opts.modelId || currentSelection?.modelId || '';
+  const effectiveProviderId = opts.providerId || currentSelection?.providerId || '';
+  return runPoc({ ...opts, modelId: effectiveModelId, providerId: effectiveProviderId });
 }
 
 /**
- * Create a live KnowClaw `AgentSession` for long-lived use (IPC bridge,
- * future UI). Caller owns the lifecycle — use `disposeSession()` when
- * finished. Does NOT auto-prompt or auto-dispose.
+ * Create a live `AgentSession`.
  *
  * @param {object} opts
- * @param {string} [opts.cwd]
- * @param {string} [opts.modelId]
- * @param {'new' | 'continueRecent' | 'open' | 'inMemory'} [opts.mode]
- * @param {string} [opts.sessionFile]
  */
 export async function createSession(opts = {}) {
   await bootstrap();
-  const effectiveModelId = opts.modelId || currentModelId || '';
-  return _createSession({ ...opts, modelId: effectiveModelId });
+  const effectiveModelId = opts.modelId || currentSelection?.modelId || '';
+  const effectiveProviderId = opts.providerId || currentSelection?.providerId || '';
+  return _createSession({ ...opts, modelId: effectiveModelId, providerId: effectiveProviderId });
 }
 
-/**
- * Safely dispose an AgentSession previously returned by `createSession`.
- * Accepts an optional unsubscribe function from `session.subscribe(...)`.
- *
- * @param {*} session
- * @param {Function} [unsubscribe]
- */
 export function disposeSession(session, unsubscribe) {
   return _disposeSession(session, unsubscribe);
 }
 
-/**
- * List persisted JSONL sessions for the given cwd, newest-first.
- * Returns an empty array if the storage directory does not exist yet.
- *
- * @param {string} cwd
- */
 export async function listSessions(cwd) {
   return _listSessions(cwd);
 }
 
-/**
- * Get the absolute directory where JSONL session files for `cwd` are
- * stored. Mainly a diagnostic helper for Phase-3 IPC.
- *
- * @param {string} cwd
- */
 export function getSessionDir(cwd) {
   return _getSessionDir(cwd);
 }
 
 /**
- * List models registered under `ipm-openai`, marking the one matching
- * the IPM config (or `setModel`) as default.
- *
- * @returns {Promise<Array<{ provider: string, id: string, name: string, isDefault: boolean }>>}
+ * 列出所有 KnowClaw 可用模型。
+ * @returns {Promise<Array<{ provider: string, id: string, name: string, isDefault: boolean, input: string[] }>>}
  */
 export async function listAvailableModels() {
-  const ipmConfig = getIpmLlmConfig();
+  const configs = getIpmLlmConfigs();
   const authStorage = buildAuthStorage();
   const modelRegistry = buildModelRegistry(authStorage);
-  registerIpmProvider(modelRegistry, ipmConfig);
-  applyIpmRuntimeKey(authStorage, ipmConfig);
+  registerIpmProviders(modelRegistry, configs);
+  applyIpmRuntimeKeys(authStorage, configs);
   const models = await listIpmModelsAsync(modelRegistry);
-  const defaultId = currentModelId || (ipmConfig ? ipmConfig.model : '');
-  return models.map((m) => ({ ...m, isDefault: m.id === defaultId }));
+
+  // 默认模型：用户运行时手动选过的优先；否则取第一个配置项。
+  let defaultProviderId = currentSelection?.providerId;
+  let defaultModelId = currentSelection?.modelId;
+  if ((!defaultProviderId || !defaultModelId) && configs.length > 0) {
+    defaultProviderId = configs[0].piProviderId;
+    defaultModelId = configs[0].model;
+  }
+  return models.map((m) => ({
+    ...m,
+    isDefault: m.provider === defaultProviderId && m.id === defaultModelId,
+  }));
 }
 
 /**
- * Choose which model the next `createKnowClawSession()` will use.
- * Validates that the model exists under `ipm-openai`. Persistence /
- * IPC plumbing comes in Phase 3.
- *
- * @param {string} providerId  Only `ipm-openai` is accepted for now.
+ * 选择下一次 createSession 使用的模型。
+ * @param {string} providerId pi 端 provider id，例如 ipm-openai-xxx
  * @param {string} modelId
  */
 export async function setModel(providerId, modelId) {
-  if (providerId !== IPM_PROVIDER_ID) {
-    throw new Error(`unsupported provider: ${providerId}`);
+  if (!providerId || !modelId) {
+    throw new Error('setModel: providerId 与 modelId 均不可为空');
   }
   const models = await listAvailableModels();
-  if (!models.some((m) => m.id === modelId)) {
-    throw new Error(`model not registered under ${IPM_PROVIDER_ID}: ${modelId}`);
+  if (!models.some((m) => m.provider === providerId && m.id === modelId)) {
+    throw new Error(`model not registered: ${providerId}/${modelId}`);
   }
-  currentModelId = modelId;
+  currentSelection = { providerId, modelId };
 }
 
 export function getCurrentModelId() {
-  return currentModelId;
+  return currentSelection?.modelId || '';
+}
+
+export function getCurrentModelSelection() {
+  return currentSelection ? { ...currentSelection } : null;
 }
 
 /**
- * Debug/inspection helper — returns the redacted IPM config currently
- * visible to pi-runtime. Useful for diagnostics IPC in Phase 3.
+ * 调试用：返回当前默认 KnowClaw 配置的脱敏快照。
  */
 export function describeCurrentConfig() {
   return describeIpmConfig(getIpmLlmConfig());
@@ -170,5 +145,7 @@ export function describeCurrentConfig() {
 export async function shutdown() {
   booted = false;
   bootPromise = null;
-  currentModelId = '';
+  currentSelection = null;
 }
+
+export { IPM_PROVIDER_ID };

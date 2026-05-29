@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Brain, Bell, MessageSquare, X } from 'lucide-react';
+import { Bell, MessageSquare, X } from 'lucide-react';
 import { useToast } from '../hooks/useToast.js';
 import { useKnowClawPersist } from '../hooks/useKnowClawPersist.jsx';
+import KnowClawIcon from './knowclaw-v2/KnowClawIcon.jsx';
 
 // ─── Variant color dot mapping ──────────────────────────────────────
 
@@ -246,7 +247,14 @@ const KnowClawBubble = ({ onNavigateToKnowClaw }) => {
             <div className={`flex items-center justify-center transition-all duration-200 ${
               isMorphing ? 'w-0 opacity-0 overflow-hidden' : 'w-full opacity-100'
             }`}>
-              <Brain size={22} className={`group-hover:scale-110 transition-transform ${streaming ? 'animate-pulse' : ''}`} />
+              {/* Brand: bright PNG on the dark violet→indigo bubble.
+                  Old: <Brain size={22}>. PNG includes canvas margin, so
+                  we render a touch larger to match visual weight. */}
+              <KnowClawIcon
+                tone="bright"
+                size={32}
+                className={`group-hover:scale-110 transition-transform ${streaming ? 'animate-pulse' : ''}`}
+              />
             </div>
 
             {isMorphing && (
@@ -304,7 +312,9 @@ const KnowClawBubble = ({ onNavigateToKnowClaw }) => {
       <div className="w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-bubble-expand">
         <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-violet-600 to-indigo-600 text-white">
           <div className="flex items-center gap-2">
-            <Brain size={16} />
+            {/* Brand: bright PNG on the dark gradient panel header.
+                Old: <Brain size={16}>. */}
+            <KnowClawIcon tone="bright" size={20} />
             <span className="text-sm font-medium">KnowClaw</span>
           </div>
           <div className="flex items-center gap-1">

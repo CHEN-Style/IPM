@@ -41,6 +41,27 @@ import { defineTool } from '@earendil-works/pi-coding-agent';
 
 const VALID_STATUSES = ['pending', 'in_progress', 'completed', 'cancelled'];
 
+function normalizeStatus(raw) {
+  const s = String(raw || '').trim().toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/-/g, '_');
+  if (!s) return 'pending';
+  if (VALID_STATUSES.includes(s)) return s;
+  if (['todo', 'to_do', 'not_started', 'notstart', 'open', 'queued', '待办', '未开始'].includes(s)) {
+    return 'pending';
+  }
+  if (['doing', 'inprogress', 'current', 'active', 'started', 'ongoing', 'processing', '进行中', '处理中'].includes(s)) {
+    return 'in_progress';
+  }
+  if (['done', 'complete', 'finished', 'finish', 'success', 'succeeded', '已完成', '完成'].includes(s)) {
+    return 'completed';
+  }
+  if (['canceled', 'cancelled', 'skipped', 'skip', 'abandoned', 'blocked', '作废', '取消', '已取消'].includes(s)) {
+    return 'cancelled';
+  }
+  return 'pending';
+}
+
 /**
  * Build a one-line summary of the task list for the model's
  * tool-result text. Keep it short — the model already has the
@@ -133,19 +154,17 @@ export function buildTaskTool(deps = {}) {
             description:
               '任务唯一标识。跨次调用保持稳定（建议用短英文 slug，如 `step-1` / `analyze-files`）。',
           }),
-          title: Type.String({
-            minLength: 1,
+          title: Type.Optional(Type.String({
             description: '简短的任务标题（一行能写完，给用户看的）。',
+          })),
+          content: Type.Optional(Type.String({
+            description: '兼容 TodoWrite 风格字段；若未提供 title，则用 content 作为任务标题。',
+          })),
+          status: Type.String({
+            description:
+              '任务状态。推荐值：pending / in_progress / completed / cancelled。' +
+              '兼容 todo / doing / done / canceled / 中文状态等常见同义写法，工具会自动归一化。',
           }),
-          status: Type.Union(
-            [
-              Type.Literal('pending'),
-              Type.Literal('in_progress'),
-              Type.Literal('completed'),
-              Type.Literal('cancelled'),
-            ],
-            { description: '任务状态。' },
-          ),
           notes: Type.Optional(
             Type.String({
               description: '可选的简短补充说明，例如卡点、引用的文件路径等。',
@@ -171,10 +190,11 @@ export function buildTaskTool(deps = {}) {
       for (const t of rawTasks) {
         if (!t || typeof t !== 'object') continue;
         const id = typeof t.id === 'string' ? t.id.trim() : '';
-        const title = typeof t.title === 'string' ? t.title.trim() : '';
-        const status = typeof t.status === 'string' ? t.status.trim() : 'pending';
+        const title = typeof t.title === 'string'
+          ? t.title.trim()
+          : (typeof t.content === 'string' ? t.content.trim() : '');
+        const status = normalizeStatus(t.status);
         if (!id || !title) continue;
-        if (!VALID_STATUSES.includes(status)) continue;
         const entry = { id, title, status };
         if (typeof t.notes === 'string' && t.notes.trim()) {
           entry.notes = t.notes.trim();

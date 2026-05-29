@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Clipboard, Mic, Briefcase, FolderKanban, GraduationCap } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Clipboard, Mic, Briefcase, FolderKanban, GraduationCap, Sparkles } from 'lucide-react';
 import TrayWidget from './TrayWidget.jsx';
+import KnowClawFloating from '../floating-knowclaw/KnowClawFloating.jsx';
 
 const MOCK_QUICK_PASTES = [
   {
@@ -65,6 +66,77 @@ const FloatingMode = ({ onBackToMain }) => {
   const [toolPanel, setToolPanel] = useState(''); // '' | 'clipboard'
   const [recording, setRecording] = useState(false);
   const [copiedId, setCopiedId] = useState('');
+  // FK1: top-level mode toggle. 'vault' = existing file-classifier
+  // surface; 'knowclaw' = the new floating KnowClaw assistant.
+  // Switching is purely visual on the renderer side — the main
+  // process keeps `channels.floating` warm regardless, so flipping
+  // back and forth does not destroy the session.
+  const [mode, _setMode] = useState('vault');
+  // FK2: when leaving knowclaw mode, hide the external bubble
+  const setMode = useCallback((v) => {
+    _setMode((prev) => {
+      const next = typeof v === 'function' ? v(prev) : v;
+      if (prev === 'knowclaw' && next !== 'knowclaw') {
+        window.ipm?.bubble?.hide?.();
+      }
+      return next;
+    });
+  }, []);
+
+  // FK6-5: pending text that KnowClawFloating should drop into its
+  // input as soon as it mounts. We set this when the user picks
+  // "发送给 AI 分析" from the Vault staged-file UI and want the
+  // floating KnowClaw to come up with `@relPath` prefilled, waiting
+  // for the user to add their actual question. The hook only consumes
+  // it once and then calls `onInjectionConsumed` to clear it.
+  const [pendingKcInject, setPendingKcInject] = useState('');
+
+  const handleSendFilesToAi = useCallback(async (files) => {
+    const items = Array.isArray(files) ? files.filter((f) => f && f.srcPath) : [];
+    if (items.length === 0) return { ok: false, error: 'no files' };
+    const uploadApi = window.ipm?.knowclawFloating?.uploadToWorkspace;
+    if (typeof uploadApi !== 'function') {
+      return { ok: false, error: 'knowclawFloating.uploadToWorkspace 未就绪' };
+    }
+    const srcPaths = items.map((f) => f.srcPath);
+    try {
+      const res = await uploadApi(srcPaths, '');
+      const uploaded = Array.isArray(res?.uploaded) ? res.uploaded : [];
+      const skipped = Array.isArray(res?.skipped) ? res.skipped : [];
+      if (uploaded.length === 0) {
+        const reason = skipped[0]?.reason || res?.error || '未知错误';
+        return { ok: false, error: `上传到 _floating 失败：${reason}` };
+      }
+      // Format the @ref tokens. Spaces in relPath would break the
+      // KnowClaw `@`-expander regex (which terminates on whitespace
+      // and a few punctuation chars), so we keep names verbatim
+      // here — sanitizeFileName on the main side already strips
+      // the worst offenders.
+      const refLine = uploaded.map((u) => `@${u.relPath}`).join(' ');
+      // Switch into KnowClaw mode first so the panel exists when
+      // we hand it the injection text. setPendingKcInject runs in
+      // the same React batch as setMode, so the panel mounts with
+      // the value already set.
+      setMode('knowclaw');
+      setPendingKcInject(refLine + ' ');
+      if (skipped.length > 0) {
+        // Partial success — just warn via alert (toast provider is
+        // tied to the main window). The successful files still get
+        // injected; the user can decide to retry the rest.
+        const head = skipped[0];
+        const headStr = `${head.src ? head.src.split(/[\\/]/).pop() : '?'}: ${head.reason || '失败'}`;
+        const tail = skipped.length > 1 ? `（另 ${skipped.length - 1} 个）` : '';
+        window.alert(`部分文件未上传 — ${headStr}${tail}`);
+      }
+      return { ok: true, uploaded, skipped };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }, [setMode]);
+
+  const handlePendingInjectionConsumed = useCallback(() => {
+    setPendingKcInject('');
+  }, []);
 
   const domainLabel = activeDomain === 'cases' ? '案件' : activeDomain === 'study' ? '学习' : '项目';
   const projects = useMemo(() => {
@@ -172,13 +244,39 @@ const FloatingMode = ({ onBackToMain }) => {
     }
   };
 
+  // FK7-2: KnowClawFloating registers its own Esc cascade
+  // (bubble → preview → OCR → history/settings → expanded) via
+  // `onRegisterEscHandler`. We call it first and only fall back
+  // to the global cascade (menu → toolPanel → KnowClaw → main)
+  // when nothing internal was closed. Storing in a ref keeps the
+  // outer effect's deps small.
+  const kcEscHandlerRef = useRef(null);
+  const registerKcEscHandler = useCallback((fn) => {
+    kcEscHandlerRef.current = typeof fn === 'function' ? fn : null;
+  }, []);
+
   useEffect(() => {
     const close = () => setMenu((m) => (m.open ? { ...m, open: false } : m));
     const onKeyDown = (e) => {
       if (e.key !== 'Escape') return;
-      // G1.0 Esc 三档升档：先关右键菜单 → 关子面板 → 回中台
+      // Skip the cascade while the user is in the middle of an IME
+      // composition (Chinese / Japanese / Korean) — Esc there is
+      // meant to cancel the composition, not collapse panels.
+      if (e.isComposing || e.nativeEvent?.isComposing) return;
+
+      // 1) Floating context menu always closes first.
       if (menu.open) { close(); return; }
+      // 2) Vault tool panels (clipboard, etc.).
       if (toolPanel) { setToolPanel(''); return; }
+      // 3) FK7-2: KnowClaw-internal cascade (only when active).
+      if (mode === 'knowclaw') {
+        try {
+          if (kcEscHandlerRef.current?.()) return;
+        } catch { /* ignore — fall through to mode swap */ }
+        setMode('vault');
+        return;
+      }
+      // 4) Last resort — back to main.
       onBackToMain?.();
     };
     window.addEventListener('click', close);
@@ -189,7 +287,7 @@ const FloatingMode = ({ onBackToMain }) => {
       window.removeEventListener('blur', close);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [menu.open, toolPanel, onBackToMain]);
+  }, [menu.open, toolPanel, mode, onBackToMain]);
 
   // Keep the floating BrowserWindow content size equal to the widget size,
   // so there is no extra transparent region that blocks clicks outside the widget.
@@ -211,7 +309,10 @@ const FloatingMode = ({ onBackToMain }) => {
     const ro = new ResizeObserver(() => applySize());
     ro.observe(el);
     return () => ro.disconnect();
-  }, [loading, projects.length, activeProjectId, uploadMode, activeDomain]);
+    // FK1: include `mode` so the BrowserWindow resizes when the
+    // user toggles into / out of KnowClaw mode (the panel sizes
+    // differ from the Vault tray).
+  }, [loading, projects.length, activeProjectId, uploadMode, activeDomain, mode]);
 
   return (
     <div
@@ -262,18 +363,27 @@ const FloatingMode = ({ onBackToMain }) => {
                 </button>
                 <div className="w-6 h-px bg-slate-800/60 mb-1" />
 
-                {/* Domain Switcher (top) */}
+                {/* Domain Switcher (top).
+                    FK1: when `mode === 'knowclaw'` we dim the active
+                    domain colour to a neutral slate so the rail
+                    visually communicates "you are in KnowClaw, not
+                    Vault" — yet still remembers which domain was
+                    last chosen, so flipping back to Vault doesn't
+                    reset the user's selection. Clicking any of
+                    these buttons in KnowClaw mode flips `mode` back
+                    to `vault` AND switches the domain in one step. */}
                 <div className="w-full flex flex-col items-center pb-2 mb-2 border-b border-slate-800/60">
                   <button
                     type="button"
                     className={`w-9 h-9 rounded-xl border transition-all flex items-center justify-center mb-1 ${
-                      activeDomain === 'cases'
+                      mode === 'vault' && activeDomain === 'cases'
                         ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
                         : 'bg-slate-950/20 border-slate-800/70 text-slate-300 hover:bg-slate-800/40'
                     }`}
                     title="案件"
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (mode !== 'vault') setMode('vault');
                       void switchDomain('cases');
                     }}
                   >
@@ -282,13 +392,14 @@ const FloatingMode = ({ onBackToMain }) => {
                   <button
                     type="button"
                     className={`w-9 h-9 rounded-xl border transition-all flex items-center justify-center mb-1 ${
-                      activeDomain === 'projects'
+                      mode === 'vault' && activeDomain === 'projects'
                         ? 'bg-indigo-500/15 border-indigo-500/30 text-indigo-300'
                         : 'bg-slate-950/20 border-slate-800/70 text-slate-300 hover:bg-slate-800/40'
                     }`}
                     title="项目"
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (mode !== 'vault') setMode('vault');
                       void switchDomain('projects');
                     }}
                     data-tour="float-domain-projects"
@@ -298,34 +409,83 @@ const FloatingMode = ({ onBackToMain }) => {
                   <button
                     type="button"
                     className={`w-9 h-9 rounded-xl border transition-all flex items-center justify-center ${
-                      activeDomain === 'study'
+                      mode === 'vault' && activeDomain === 'study'
                         ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
                         : 'bg-slate-950/20 border-slate-800/70 text-slate-300 hover:bg-slate-800/40'
                     }`}
                     title="学习"
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (mode !== 'vault') setMode('vault');
                       void switchDomain('study');
                     }}
                   >
                     <GraduationCap size={16} />
                   </button>
                 </div>
+
+                {/* FK1: bottom-of-rail KnowClaw AI toggle. The
+                    `flex-1` spacer pushes it to the absolute bottom
+                    so it sits visually away from the three-domain
+                    cluster — this is the "AI 不是 Vault 的一员"
+                    cue from the user's design feedback. Violet
+                    palette mirrors the demo's accent. */}
+                <div className="flex-1" />
+                <button
+                  type="button"
+                  className={`w-9 h-9 rounded-xl border transition-all flex items-center justify-center mb-1 ${
+                    mode === 'knowclaw'
+                      ? 'bg-violet-500/20 border-violet-500/40 text-violet-200'
+                      : 'bg-slate-950/20 border-slate-800/70 text-slate-300 hover:bg-slate-800/40'
+                  }`}
+                  title="KnowClaw 助手（Esc 收起）"
+                  aria-label="KnowClaw 助手"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMode((m) => (m === 'knowclaw' ? 'vault' : 'knowclaw'));
+                  }}
+                  data-track="float-toggle-knowclaw"
+                >
+                  <Sparkles size={16} />
+                </button>
               </div>
             </div>
 
-            {/* 主体悬浮组件 */}
+            {/* 主体悬浮组件.
+                FK1: switches between the existing Vault tray (file
+                drop / capture) and the new floating KnowClaw panel.
+                Both surfaces stay mounted-on-demand; the unmounted
+                side loses its local state, but the global session
+                state lives in main process `channels.{main,floating}`
+                so flipping back doesn't kill an in-flight turn. */}
             <div className="rounded-br-2xl overflow-hidden">
-              <TrayWidget
-                windowMode
-                projects={projects}
-                activeProjectId={activeProjectId}
-                onSelectProject={selectProject}
-                uploadMode={uploadMode}
-            activeDomain={activeDomain}
-            disabled={!hasActiveTarget}
-            disabledHint={disabledHint}
-              />
+              {/* FK7-1: 120-220ms fade when swapping Vault ↔ KnowClaw
+                  so the transition reads as deliberate. Keyed on
+                  `mode` so React remounts the wrapper and the CSS
+                  animation re-fires; the underlying Vault tray + the
+                  floating channel session stay in main process state
+                  so nothing is lost. */}
+              <div key={mode} className="fk-mode-in">
+                {mode === 'knowclaw' ? (
+                  <KnowClawFloating
+                    pendingInjectText={pendingKcInject}
+                    onPendingInjectionConsumed={handlePendingInjectionConsumed}
+                    onRegisterEscHandler={registerKcEscHandler}
+                  />
+                ) : (
+                  <TrayWidget
+                    windowMode
+                    projects={projects}
+                    activeProjectId={activeProjectId}
+                    onSelectProject={selectProject}
+                    uploadMode={uploadMode}
+                    activeDomain={activeDomain}
+                    disabled={!hasActiveTarget}
+                    disabledHint={disabledHint}
+                    onSendFilesToAi={handleSendFilesToAi}
+                  />
+                )}
+              </div>
             </div>
           </div>
         </div>

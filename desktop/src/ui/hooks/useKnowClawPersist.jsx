@@ -163,6 +163,16 @@ export function KnowClawPersistProvider({ children }) {
   // ----- Sub-agent kill switch -----
   const [subAgentEnabled, setSubAgentEnabledState] = useState(true);
 
+  // ----- SK1: skill management state -----
+  // `skills` is the full SkillInfo[] returned by `knowclaw:listSkills`
+  // (see `src/main/ipc/skills.js`). Loaded lazily the first time the
+  // user opens the skill panel (via `loadSkills()`). Empty array until
+  // then. Like `subAgentEnabled`, changes here take effect on the
+  // NEXT new conversation — pi binds the skill set at session creation
+  // and freezes it for the session's lifetime.
+  const [skills, setSkills] = useState([]);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+
   // ----- E.5: Plan mode toggle (in-memory, mirrors main process flag) -----
   const [planMode, setPlanModeState] = useState(false);
 
@@ -745,15 +755,25 @@ export function KnowClawPersistProvider({ children }) {
     }
   }, []);
 
-  const sendMessage = useCallback(async (text, images) => {
+  const sendMessage = useCallback(async (text, images, pinnedSkills) => {
     const trimmed = String(text || '').trim();
     const imageList = Array.isArray(images) ? images : [];
+    // Skill Selector: normalize the optional pinned-skill names list.
+    // Empty / non-array inputs collapse to `undefined` so downstream
+    // calls keep the same shape as before for unrelated callers.
+    const skillNames = Array.isArray(pinnedSkills)
+      ? pinnedSkills.filter((n) => typeof n === 'string' && n.trim()).map((n) => n.trim())
+      : [];
+    const skillsPayload = skillNames.length > 0 ? skillNames : undefined;
     if (!trimmed && imageList.length === 0) return;
     if (streaming) {
       if (streamingMode === 'steer') {
         // E.7: queue-mode steer/followUp also gets the @ref expansion
         // — the LLM behaves the same way regardless of how the text
-        // was queued.
+        // was queued. Skill pinning is intentionally NOT forwarded to
+        // steer/followUp because the active session's tool surface is
+        // already frozen; injecting SKILL.md mid-turn would surprise
+        // both the user and the model.
         await steerMessage(expandFileRefsForLlm(trimmed), imageList);
       } else {
         await followUpMessage(expandFileRefsForLlm(trimmed), imageList);
@@ -776,17 +796,27 @@ export function KnowClawPersistProvider({ children }) {
         // `@relPath` syntax). The expansion below is appended only to
         // the IPC payload so the LLM sees a structured "read these
         // files" hint without polluting the chat transcript.
+        //
+        // Skill Selector: also record the pinned skill names on the
+        // user message so the bubble can show a small chip strip ("已附带
+        // SKILL.md") next to it. The actual SKILL.md content is injected
+        // server-side and does NOT live on this message object.
         role: 'user',
         content: trimmed,
         ts: Date.now(),
         ...(imageList.length > 0 ? { attachments: imageList } : {}),
+        ...(skillsPayload ? { pinnedSkills: skillsPayload } : {}),
       },
       { role: 'assistant', content: '', thinking: '', streaming: true, tools: [], ts: Date.now() },
     ]);
 
     try {
       const expanded = expandFileRefsForLlm(trimmed);
-      const res = await window.ipm?.knowclaw?.send?.(expanded, imageList.length > 0 ? imageList : undefined);
+      const res = await window.ipm?.knowclaw?.send?.(
+        expanded,
+        imageList.length > 0 ? imageList : undefined,
+        skillsPayload,
+      );
       if (res?.sessionId) setSessionId(res.sessionId);
       if (!res?.ok) {
         const errText = res?.error || '发送失败';
@@ -826,6 +856,20 @@ export function KnowClawPersistProvider({ children }) {
     setPendingSteer([]);
     setPendingFollowUp([]);
     setStreamingMode('followUp');
+    // E.5 stability: when the user clicks Stop while an ask_user is
+    // still pending, the main process's abort-signal listener resolves
+    // the IPC Promise with `{ aborted: true }`, the tool returns a
+    // "被中断" textResult, and the agent loop tears down. But the
+    // AskUserCard on screen would otherwise stay in its pending state
+    // forever — the renderer never gets an explicit reply event,
+    // because there's nothing for it to be the reply *to* anymore.
+    // We freeze every still-pending card as cancelled so the UI
+    // matches reality: the model isn't waiting on it any more.
+    setMessages((prev) => prev.map((m) =>
+      m.kind === 'ask_user' && !m.answered
+        ? { ...m, answered: true, cancelled: true }
+        : m,
+    ));
   }, []);
 
   const refreshSessions = useCallback(async () => {
@@ -1066,7 +1110,9 @@ export function KnowClawPersistProvider({ children }) {
       if (res?.ok && Array.isArray(res.models)) {
         setModels(res.models);
         setCurrentModel((prev) => {
-          if (prev) return prev;
+          if (prev && res.models.some((m) => `${m.provider}/${m.id}` === prev)) {
+            return prev;
+          }
           const def = res.models.find((m) => m.isDefault) || res.models[0];
           return def ? `${def.provider}/${def.id}` : null;
         });
@@ -1150,6 +1196,25 @@ export function KnowClawPersistProvider({ children }) {
     } catch { /* ignore */ }
   }, []);
 
+  // AI 配置保存后无需重启应用：prefs IPC 会广播 prefs:updated，这里重新
+  // 拉取 KnowClaw 可用模型。如果当前选择已经不在新配置中，loadModels()
+  // 会自动落到新默认模型。模型能力（例如图片输入）绑定在 pi 会话创建时，
+  // 因此空闲的既有会话会自动重建；运行中的会话不被强制中断。
+  useEffect(() => {
+    const unsubscribe = window.ipm?.prefs?.onUpdated?.((payload) => {
+      const keys = Array.isArray(payload?.changedKeys) ? payload.changedKeys : [];
+      if (!keys.includes('ai') && !keys.includes('llm')) return;
+      void loadModels();
+      void refreshStatus();
+      if (!streaming && sessionIdRef.current) {
+        void newSession();
+      }
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [loadModels, newSession, refreshStatus, streaming]);
+
   const toggleSubAgent = useCallback(async (enabled) => {
     const next = Boolean(enabled);
     setSubAgentEnabledState(next);
@@ -1225,6 +1290,214 @@ export function KnowClawPersistProvider({ children }) {
     }
   }, []);
 
+  // ---- SK1: skill management actions ----
+  //
+  // All three actions follow the same pattern as `toggleSubAgent`:
+  //   1. Optimistic local-state update so the UI feels instant.
+  //   2. IPC roundtrip to the main process.
+  //   3. On failure: revert the local state + push a system bubble.
+  //   4. On success: push a system bubble explaining the new-session
+  //      semantics (skill changes take effect on the next session,
+  //      identical to the sub-agent kill-switch — see § SK0 in the
+  //      Skill System plan).
+  //
+  // `loadSkills` is a plain refresh (no optimistic update needed).
+  // It's called by the page when the skill panel mounts, and by
+  // the panel's refresh button.
+
+  // SK4: optional `cwd` arg makes the main process include
+  // `<cwd>/.knowclaw/skills/` in the scan, so workspace-scoped skills
+  // show up in the panel. Pass null / undefined / '' for global mode.
+  const loadSkills = useCallback(async (cwd) => {
+    if (!window.ipm?.skills?.list) return { ok: false, error: 'skills IPC unavailable' };
+    setSkillsLoading(true);
+    try {
+      const res = await window.ipm.skills.list({ cwd: cwd || undefined });
+      if (res?.ok) {
+        setSkills(Array.isArray(res.skills) ? res.skills : []);
+      }
+      return res || { ok: false };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    } finally {
+      setSkillsLoading(false);
+    }
+  }, []);
+
+  const toggleSkill = useCallback(async (name, enabled) => {
+    const targetName = String(name || '');
+    if (!targetName) return { ok: false, error: 'name is required' };
+    const next = Boolean(enabled);
+    // Optimistic: flip the entry in-place. Note we do NOT pre-load the
+    // panel if it hasn't been opened yet — callers always come from
+    // the panel, which has already populated `skills` via `loadSkills`.
+    setSkills((prev) => prev.map((s) =>
+      s.name === targetName ? { ...s, enabled: next } : s
+    ));
+    try {
+      const res = await window.ipm?.skills?.toggle?.(targetName, next);
+      if (!res?.ok) {
+        // Revert
+        setSkills((prev) => prev.map((s) =>
+          s.name === targetName ? { ...s, enabled: !next } : s
+        ));
+        setMessages((prev) => [
+          ...prev,
+          { role: 'system', content: `技能开关切换失败: ${res?.error || '未知错误'}`, ts: Date.now() },
+        ]);
+        return res || { ok: false };
+      }
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'system',
+          content: next
+            ? `技能「${targetName}」已启用：下次新对话起，主模型可看到该技能。`
+            : `技能「${targetName}」已禁用：下次新对话起，主模型将不再看到该技能。当前对话不受影响。`,
+          ts: Date.now(),
+        },
+      ]);
+      return res;
+    } catch (err) {
+      setSkills((prev) => prev.map((s) =>
+        s.name === targetName ? { ...s, enabled: !next } : s
+      ));
+      const errText = String(err?.message || err);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'system', content: `技能开关切换失败: ${errText}`, ts: Date.now() },
+      ]);
+      return { ok: false, error: errText };
+    }
+  }, []);
+
+  // SK2: import a skill from an external directory. Mirrors
+  // `deleteSkill` shape — no optimistic update (we don't know the
+  // final skill name until the IPC returns) and we lean on the
+  // returned `skill.name` to push the system bubble.
+  //
+  // The caller (ImportSkillModal) is responsible for the conflict
+  // dance: when the IPC returns `{ ok: false, conflict: 'exists' }`,
+  // the modal shows its three-way picker (overwrite / rename / cancel)
+  // and re-invokes this action with the appropriate `opts`. We do NOT
+  // swallow the conflict response here — we just forward it so the
+  // modal has full control over the UX.
+  const importSkill = useCallback(async (srcDir, opts) => {
+    const dir = typeof srcDir === 'string' ? srcDir : '';
+    if (!dir) return { ok: false, error: 'srcDir is required' };
+    try {
+      const res = await window.ipm?.skills?.import?.(dir, opts);
+      if (!res?.ok) {
+        // Only surface a system bubble for terminal errors. Conflict
+        // responses are NOT errors from the user's POV — they're a
+        // forked path the modal handles inline.
+        if (res && res.conflict) return res;
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'system',
+            content: `技能导入失败: ${res?.error || '未知错误'}`,
+            ts: Date.now(),
+          },
+        ]);
+        return res || { ok: false };
+      }
+      // Success path: refresh the panel list + push a system bubble.
+      // `loadSkills` is awaited so the panel sees the new entry before
+      // the modal closes (avoids a "blink" where the modal goes away
+      // but the list hasn't caught up).
+      //
+      // SK4: forward the caller-supplied cwd so a post-import refresh
+      // doesn't accidentally drop workspace-scoped skills from the
+      // list. Import always lands in the user root, but the refresh
+      // needs to see everything the panel was showing pre-import.
+      await loadSkills(opts?.cwd || undefined);
+      const importedName = res?.skill?.name || '(unknown)';
+      const renameNote = res?.renamed ? '（已重命名）' : '';
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'system',
+          content: `技能「${importedName}」已导入${renameNote}：下次新对话起生效。`,
+          ts: Date.now(),
+        },
+      ]);
+      return res;
+    } catch (err) {
+      const errText = String(err?.message || err);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'system', content: `技能导入失败: ${errText}`, ts: Date.now() },
+      ]);
+      return { ok: false, error: errText };
+    }
+  }, [loadSkills]);
+
+  // SK2: scan external tool roots (Claude Code / Cursor) for importable
+  // skills. Thin passthrough — the modal owns the UI for displaying
+  // results, applying filters, and triggering per-skill imports.
+  const scanExternalSkills = useCallback(async () => {
+    try {
+      const res = await window.ipm?.skills?.scanExternal?.();
+      return res || { ok: false, sources: [], error: 'skills IPC unavailable' };
+    } catch (err) {
+      return { ok: false, sources: [], error: String(err?.message || err) };
+    }
+  }, []);
+
+  // SK2: native folder picker thin passthrough. Returns the parsed
+  // preview straight from main.
+  const chooseSkillDir = useCallback(async () => {
+    try {
+      const res = await window.ipm?.skills?.chooseDir?.();
+      return res || { ok: false, error: 'skills IPC unavailable' };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }, []);
+
+  // SK4: `opts.cwd` lets the main process resolve workspace-root
+  // candidates; `opts.scope` ('workspace' | 'user') pins the deletion
+  // when both copies share a name. Default policy (no scope) is
+  // workspace-wins-if-present. Most callers should pass `scope` derived
+  // from the skill's `source` to be explicit.
+  const deleteSkill = useCallback(async (name, opts) => {
+    const targetName = String(name || '');
+    if (!targetName) return { ok: false, error: 'name is required' };
+    try {
+      const res = await window.ipm?.skills?.delete?.(targetName, {
+        cwd: opts?.cwd || undefined,
+        scope: opts?.scope || undefined,
+      });
+      if (!res?.ok) {
+        setMessages((prev) => [
+          ...prev,
+          { role: 'system', content: `技能删除失败: ${res?.error || '未知错误'}`, ts: Date.now() },
+        ]);
+        return res || { ok: false };
+      }
+      // Drop from local list on success (or if main reports the skill
+      // was already missing — same effect from the user's POV).
+      setSkills((prev) => prev.filter((s) => s.name !== targetName));
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'system',
+          content: `技能「${targetName}」已删除：下次新对话起生效。当前对话不受影响。`,
+          ts: Date.now(),
+        },
+      ]);
+      return res;
+    } catch (err) {
+      const errText = String(err?.message || err);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'system', content: `技能删除失败: ${errText}`, ts: Date.now() },
+      ]);
+      return { ok: false, error: errText };
+    }
+  }, []);
+
   // ---- E.5: ask_user push-event subscription ----
   // When the model calls the ask_user tool, main process pushes
   // `knowclaw:askUser` to the renderer. We inject a special bubble
@@ -1272,6 +1545,26 @@ export function KnowClawPersistProvider({ children }) {
       setMessages((prev) => prev.map((m) =>
         m.kind === 'ask_user' && m.requestId === requestId
           ? { ...m, answered: true, cancelled: true }
+          : m,
+      ));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }, []);
+
+  // Skip: user wants the model to proceed without their input on this
+  // round of questions. Distinct from cancel (which kills the
+  // interaction outright); skip tells the model "use your judgement,
+  // you can ask again later if it matters". Wire payload is
+  // `{ skipped: true }`, freezing the card with a "已跳过" badge.
+  const skipAskUser = useCallback(async (requestId) => {
+    if (!requestId) return { ok: false };
+    try {
+      await window.ipm?.knowclaw?.replyAskUser?.(requestId, null, { skipped: true });
+      setMessages((prev) => prev.map((m) =>
+        m.kind === 'ask_user' && m.requestId === requestId
+          ? { ...m, answered: true, skipped: true }
           : m,
       ));
       return { ok: true };
@@ -1611,6 +1904,8 @@ export function KnowClawPersistProvider({ children }) {
     pendingSteer,
     pendingFollowUp,
     subAgentEnabled,
+    skills,
+    skillsLoading,
     planMode,
     currentCwd,
     cwdIsGlobal,
@@ -1650,9 +1945,16 @@ export function KnowClawPersistProvider({ children }) {
     clearQueue: clearQueueAction,
     compactSession,
     toggleSubAgent,
+    loadSkills,
+    toggleSkill,
+    deleteSkill,
+    importSkill,
+    scanExternalSkills,
+    chooseSkillDir,
     setPlanMode,
     replyAskUser,
     cancelAskUser,
+    skipAskUser,
     startExecuting,
     loadWorkspaceTree,
     uploadToWorkspace,
@@ -1661,7 +1963,8 @@ export function KnowClawPersistProvider({ children }) {
     sessions, sessionsLoading, thinkingLevel, thinkingHint, apiMode,
     bashAvailable, bashSource, sessionStats, contextUsage, compacting,
     compactionReason, retrying, streamingMode, pendingSteer, pendingFollowUp,
-    subAgentEnabled, planMode, currentCwd, cwdIsGlobal, userFileRoot, workspaces,
+    subAgentEnabled, skills, skillsLoading, planMode, currentCwd, cwdIsGlobal,
+    userFileRoot, workspaces,
     workspacesLoading, workspaceTree, treeLoading, treeTruncated,
     recentTouchedFiles, streamingPhase, activeToolName, streamingIdleSeconds,
     isSessionLocked,
@@ -1670,7 +1973,9 @@ export function KnowClawPersistProvider({ children }) {
     dismissThinkingHint, rescanBash, setCwd, loadWorkspaces, chooseDirectory,
     createWorkspace, openInExplorer, hideWorkspace, setStreamingMode,
     steerMessage, followUpMessage, clearQueueAction, compactSession,
-    toggleSubAgent, setPlanMode, replyAskUser, cancelAskUser, startExecuting,
+    toggleSubAgent, loadSkills, toggleSkill, deleteSkill,
+    importSkill, scanExternalSkills, chooseSkillDir,
+    setPlanMode, replyAskUser, cancelAskUser, skipAskUser, startExecuting,
     loadWorkspaceTree, uploadToWorkspace,
   ]);
 

@@ -246,7 +246,15 @@ function mapPiMessagesForRenderer(piMessages) {
       // knowclaw:send / steer / followUp inject for the model's benefit.
       // The user typed `text` without the tag; rehydrating bubbles with
       // the tag would be confusing.
-      const cleanText = (text || '').replace(/^\[MODE: (?:plan|agent)\]\n/, '');
+      //
+      // Skill Selector: also strip any `<pinned_skills>...</pinned_skills>`
+      // block that knowclaw:send prepends when the user pinned one or
+      // more skills. Multiline / dotall match because SKILL.md bodies
+      // contain newlines. We anchor to the start (after the mode prefix)
+      // so it never matches a literal `<pinned_skills>` the user typed.
+      const cleanText = (text || '')
+        .replace(/^\[MODE: (?:plan|agent)\]\n/, '')
+        .replace(/^<pinned_skills>[\s\S]*?<\/pinned_skills>\n+/, '');
       const bubble = { role: 'user', content: cleanText, ts };
       if (images.length > 0) bubble.attachments = images;
       bubbles.push(bubble);
@@ -534,6 +542,120 @@ function detectBashAvailable() {
   return resolveBashShell().available;
 }
 
+// =============================================================================
+// Skill Selector — server-side SKILL.md injection helpers
+// =============================================================================
+//
+// When the renderer pins one or more skills before sending a message, the
+// `knowclaw:send` payload carries `pinnedSkills: string[]`. We resolve each
+// name to its on-disk SKILL.md (searching builtin > workspace > user roots,
+// mirroring `knowclaw:listSkills`'s priority order), read the body, and
+// prepend a `<pinned_skills>` XML block to the user's text. The model thus
+// receives the skill instructions inline and can execute the skill in its
+// first response — without the customary discover-then-Read tool-call
+// roundtrip that costs an extra turn.
+
+/**
+ * Validate a skill name (same rules as pi SDK / skills.js): lowercase
+ * a-z / 0-9 / hyphen, must start with alnum, ≤ 64 chars.
+ */
+function isValidPinnedSkillName(name) {
+  return typeof name === 'string'
+    && /^[a-z0-9][a-z0-9-]{0,63}$/.test(name);
+}
+
+/**
+ * Resolve the candidate `<root>/<name>/SKILL.md` paths for a given skill
+ * name, in priority order (builtin → workspace → user). Returns absolute
+ * paths only — caller filters by fs.existsSync.
+ *
+ * @param {string} name validated skill name
+ * @param {string | null} cwd active workspace directory or null for global
+ */
+function pinnedSkillCandidates(name, cwd) {
+  const candidates = [];
+  const builtinRoot = process.env.KNOWCLAW_SKILLS_DIR;
+  if (builtinRoot && typeof builtinRoot === 'string' && builtinRoot.trim()) {
+    candidates.push({
+      source: 'builtin',
+      filePath: path.join(builtinRoot.trim(), name, 'SKILL.md'),
+    });
+  }
+  if (cwd && typeof cwd === 'string') {
+    try {
+      const wsRoot = path.join(path.resolve(cwd), '.knowclaw', 'skills');
+      candidates.push({
+        source: 'workspace',
+        filePath: path.join(wsRoot, name, 'SKILL.md'),
+      });
+    } catch { /* ignore */ }
+  }
+  const userRoot = process.env.KNOWCLAW_USER_SKILLS_ROOT;
+  if (userRoot && typeof userRoot === 'string' && userRoot.trim()) {
+    candidates.push({
+      source: 'user',
+      filePath: path.join(userRoot.trim(), name, 'SKILL.md'),
+    });
+  }
+  return candidates;
+}
+
+/**
+ * Resolve a list of pinned skill names to their SKILL.md contents.
+ * Skips invalid names and names that aren't found on disk. Cap each
+ * skill at ~20 KB to keep the injected block from blowing the context
+ * window if a pathological SKILL.md somehow slipped through.
+ *
+ * @returns {Array<{ name: string, source: string, body: string }>}
+ */
+function resolvePinnedSkillContents(names, cwd) {
+  if (!Array.isArray(names) || names.length === 0) return [];
+  const out = [];
+  const seen = new Set();
+  const MAX_PER_SKILL = 20_000; // 20 KB hard cap, plenty for any normal SKILL.md
+  for (const raw of names) {
+    const name = typeof raw === 'string' ? raw.trim() : '';
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    if (!isValidPinnedSkillName(name)) continue;
+    const candidates = pinnedSkillCandidates(name, cwd);
+    for (const c of candidates) {
+      try {
+        if (!fs.existsSync(c.filePath)) continue;
+        let body = fs.readFileSync(c.filePath, 'utf-8');
+        if (body.length > MAX_PER_SKILL) {
+          body = body.slice(0, MAX_PER_SKILL) + '\n\n[... SKILL.md truncated to 20KB ...]';
+        }
+        out.push({ name, source: c.source, body });
+        break; // priority: first match wins
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[KnowClaw] failed to read pinned skill', name, '@', c.filePath, ':', err?.message || err);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Format the resolved skill contents into a single XML block ready to
+ * be prepended to the user's message. We deliberately use the same
+ * `<skill>` wrapper element shape as pi SDK's `/skill:name` command
+ * expansion so the model has a familiar surface to match against.
+ */
+function formatPinnedSkillsBlock(items) {
+  if (!Array.isArray(items) || items.length === 0) return '';
+  const parts = ['<pinned_skills>'];
+  parts.push('用户已在下方手动选中以下技能，无需先调用 Read 读取 SKILL.md —— 请直接按其中的指令执行：');
+  for (const it of items) {
+    parts.push(`<skill name="${it.name}" source="${it.source}">`);
+    parts.push(it.body);
+    parts.push('</skill>');
+  }
+  parts.push('</pinned_skills>');
+  return parts.join('\n');
+}
+
 export function registerKnowClawIpc({
   ipcMain,
   getUserFileRoot,
@@ -585,10 +707,19 @@ export function registerKnowClawIpc({
   }
 
   function readKnowClawState() {
-    if (typeof readState !== 'function') return {};
+    if (typeof readState !== 'function') {
+      return { pinned: [], hidden: [], subAgentEnabled: true, skillsDisabled: [] };
+    }
     try {
       const state = readState();
       const kc = state?.knowclaw && typeof state.knowclaw === 'object' ? state.knowclaw : {};
+      // SK0: skill mute-list. Owned by `src/main/ipc/skills.js`; we
+      // only read it here so `ensureSession` can pass the names down
+      // to the pi runtime for `skillsOverride` filtering.
+      const sk = kc.skills && typeof kc.skills === 'object' ? kc.skills : {};
+      const skillsDisabled = Array.isArray(sk.disabled)
+        ? sk.disabled.filter((x) => typeof x === 'string')
+        : [];
       return {
         pinned: Array.isArray(kc.pinnedWorkspaces) ? kc.pinnedWorkspaces.filter((x) => typeof x === 'string') : [],
         hidden: Array.isArray(kc.hiddenWorkspaces) ? kc.hiddenWorkspaces.filter((x) => typeof x === 'string') : [],
@@ -597,9 +728,10 @@ export function registerKnowClawIpc({
         // accept the field being missing on first run and lazily
         // create it the first time the user toggles it off.
         subAgentEnabled: kc.subAgentEnabled === false ? false : true,
+        skillsDisabled,
       };
     } catch {
-      return { pinned: [], hidden: [], subAgentEnabled: true };
+      return { pinned: [], hidden: [], subAgentEnabled: true, skillsDisabled: [] };
     }
   }
 
@@ -663,58 +795,80 @@ export function registerKnowClawIpc({
 
   /** @type {*} */
   let piRuntime = null;
-  /** @type {*} */
-  let activeSession = null;
-  /** @type {Function | null} */
-  let activeUnsub = null;
-  /** @type {*} */
-  let activeSender = null;
-  /** @type {boolean} */
-  let promptInFlight = false;
-  /**
-   * In-memory thinking level preference. Survives across sessions
-   * within the same Electron run but is intentionally NOT persisted
-   * to user prefs in U0 — the next launch resets to 'medium'.
-   * @type {'off' | 'minimal' | 'low' | 'medium' | 'high'}
-   */
-  let currentThinkingLevel = 'medium';
+
+  // ===== FK0: dual-channel session state =====
+  //
+  // Before FK0 the bridge held one global session + one global cwd +
+  // one global thinkingLevel + one global planMode, all as closure
+  // variables. That implicitly assumed a single renderer (the main
+  // window) ever held a KnowClaw session. FK0 introduces a second
+  // independent channel for the floating window so it can run its
+  // own short conversations against a fixed workspace
+  // (`_floating/`) without disturbing whatever the user has
+  // configured in the main KnowClaw page.
+  //
+  // Each channel owns the entire per-session state surface: the pi
+  // AgentSession, the event-unsubscribe handle, the WebContents we
+  // push events to, the in-flight prompt flag, plus the per-channel
+  // preferences (thinkingLevel / planMode / cwd). Each handler
+  // resolves its channel via `getChannel(payload)` and operates on
+  // `ch.*` instead of the old globals — payload-less / pre-FK0
+  // callers (i.e. every existing main-window code path) silently
+  // fall back to the `main` channel so this refactor is a pure
+  // addition for them.
+  //
+  // The floating channel's cwd is hard-locked to FLOATING_WORKSPACE_PATH
+  // (see D-FK-2): `knowclaw:setCwd` rejects writes when `ch.cwdLocked`
+  // is true. Other preferences (thinkingLevel, planMode) are NOT
+  // synchronised between channels — each one remembers its own
+  // setting for the duration of the Electron run.
+  //
+  // Lifetime: same as the old globals — in-memory only, reset on
+  // next launch. The session JSONL files themselves are persistent
+  // (under pi's per-cwd hash directory) so opening a recent session
+  // works as before.
+  const FLOATING_WORKSPACE_PATH = path.join(getUserFileRoot(), 'workspaces', '_floating');
+
+  function createChannelState(overrides = {}) {
+    return {
+      session: null,        // was: activeSession
+      unsub: null,          // was: activeUnsub
+      sender: null,         // was: activeSender (WebContents)
+      promptInFlight: false,
+      thinkingLevel: 'medium', // was: currentThinkingLevel
+      planMode: false,         // was: currentPlanMode
+      cwd: overrides.cwd ?? null, // was: currentCwd; null = global mode
+      cwdLocked: overrides.cwdLocked ?? false,
+    };
+  }
 
   /**
-   * E.5: in-memory Plan-mode flag. When true:
-   *   - knowclaw:send prepends `[MODE: plan]\n` to the user message so the
-   *     model can switch behaviour per-turn without rebuilding system prompt
-   *   - knowclawBeforeToolCall blocks `write` / `edit` / `bash` and
-   *     `delegate_task(kind=edit)` as a safety net regardless of what the
-   *     model decides to do
-   * Same lifetime as `currentThinkingLevel`: in-memory only, resets to
-   * `false` on next Electron launch.
-   * @type {boolean}
+   * Resolve which channel a given IPC payload addresses. Defaults to
+   * `'main'` so any legacy call site that doesn't pass `channel`
+   * continues to behave exactly as before this refactor.
    */
-  let currentPlanMode = false;
+  function getChannel(payload) {
+    return payload?.channel === 'floating' ? channels.floating : channels.main;
+  }
 
-  /**
-   * U1: in-memory dynamic workspace.
-   *
-   *   null  → "global" mode — cwd falls back to `getUserFileRoot()`
-   *           (the historical behaviour). Project context files
-   *           (AGENTS.md / CLAUDE.md) are NOT scanned in this mode
-   *           because pi would otherwise climb into the user's whole
-   *           IPM data root.
-   *   path  → "project" mode — cwd is bound to a specific directory
-   *           (an IPM project/case/study folder, an imported local
-   *           folder, a user-picked custom directory, or a
-   *           freshly-created `userfile/workspaces/...` folder).
-   *           Context files ARE scanned for this directory.
-   *
-   * Set via `knowclaw:setCwd` and auto-restored from session metadata
-   * when the user opens a historical session via `knowclaw:openSession`.
-   * Persists across session creations within the same Electron run
-   * (next launch resets to global), mirroring `currentThinkingLevel`'s
-   * lifecycle.
-   *
-   * @type {string | null}
-   */
-  let currentCwd = null;
+  const channels = {
+    main: createChannelState(),
+    floating: createChannelState({
+      cwd: FLOATING_WORKSPACE_PATH,
+      cwdLocked: true,
+    }),
+  };
+
+  // FK0-4: ensure the fixed floating workspace exists on disk so the
+  // first `knowclawFloating.send(...)` doesn't bomb on a missing
+  // cwd. mkdirSync with recursive is idempotent — safe to call on
+  // every registration. Failures are non-fatal (we'll get a clearer
+  // error from pi later if the directory truly can't be created).
+  try { fs.mkdirSync(FLOATING_WORKSPACE_PATH, { recursive: true }); }
+  catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[KnowClaw] failed to create floating workspace dir:', err?.message || err);
+  }
 
   // ---- U3: pending install-confirmation map ----
   //
@@ -741,48 +895,83 @@ export function registerKnowClawIpc({
   /** @type {Map<string, { resolve: (answers: any) => void, timer: NodeJS.Timeout | null, onSignalAbort?: () => void, signal?: AbortSignal }>} */
   const pendingAskUser = new Map();
 
-  async function askUserViaRenderer(questions, signal) {
-    const sender = activeSender;
-    if (!sender || sender.isDestroyed?.()) {
-      return { error: 'no_active_renderer', message: '当前没有活动的前端会话，无法向用户提问' };
-    }
-    const requestId = nodeRandomUUID();
-    return new Promise((resolve) => {
-      const finish = (value) => {
-        const entry = pendingAskUser.get(requestId);
-        if (!entry) return;
-        pendingAskUser.delete(requestId);
-        if (entry.timer) clearTimeout(entry.timer);
-        if (entry.signal && entry.onSignalAbort) {
-          try { entry.signal.removeEventListener('abort', entry.onSignalAbort); } catch { /* ignore */ }
-        }
-        resolve(value);
-      };
+  // FK0: factory pattern — the pi runtime captures this callback at
+  // createSession time, so each channel needs its own bound closure
+  // that pushes ask_user prompts to the correct renderer (`ch.sender`)
+  // rather than a shared global. The returned function is what gets
+  // passed as `askUser:` to runtime.createSession.
+  //
+  // Lifecycle / failure modes
+  // -------------------------
+  // The returned Promise NEVER hangs forever. It is guaranteed to
+  // resolve via exactly one of:
+  //   1. The renderer calls `knowclaw:askUserReply` with answers /
+  //      cancelled / skipped — the `entry.resolve` closure below runs
+  //      via the `pendingAskUser` Map lookup.
+  //   2. The 5-minute `setTimeout` fires → resolves with
+  //      `{ timeout: true }`.
+  //   3. The pi agent's AbortSignal fires (user clicked Stop, session
+  //      torn down, etc.) → `onSignalAbort` resolves with
+  //      `{ aborted: true }`. The renderer-side cleanup (freezing the
+  //      AskUserCard) lives in useKnowClawPersist's `abort()` handler
+  //      so the UI matches reality, but it's not required to make
+  //      this Promise settle — that's handled here.
+  //   4. The IPC `sender.send` throws on dispatch (sender already
+  //      destroyed, channel torn down) → caught and resolves with
+  //      `{ error: 'send_failed' }`.
+  //
+  // Note that `ch.sender` is only sanity-checked at the moment of
+  // call. If the WebContents is destroyed AFTER the push but BEFORE
+  // the user replies, the Promise hangs until (2) timer fires or
+  // (3) the pi agent abort fires — there is no destroy-event hook
+  // wired in. That's intentional: the next user action (closing the
+  // window) almost always also tears down the pi session, which
+  // triggers signal abort within milliseconds. The 5-minute timer is
+  // the absolute upper bound for "user vanished" scenarios.
+  function makeAskUserViaRenderer(ch) {
+    return async function askUserViaRenderer(questions, signal) {
+      const sender = ch.sender;
+      if (!sender || sender.isDestroyed?.()) {
+        return { error: 'no_active_renderer', message: '当前没有活动的前端会话，无法向用户提问' };
+      }
+      const requestId = nodeRandomUUID();
+      return new Promise((resolve) => {
+        const finish = (value) => {
+          const entry = pendingAskUser.get(requestId);
+          if (!entry) return;  // idempotent: a second finish() is a no-op
+          pendingAskUser.delete(requestId);
+          if (entry.timer) clearTimeout(entry.timer);
+          if (entry.signal && entry.onSignalAbort) {
+            try { entry.signal.removeEventListener('abort', entry.onSignalAbort); } catch { /* ignore */ }
+          }
+          resolve(value);
+        };
 
-      const timer = setTimeout(() => finish({ timeout: true, message: '用户未在 5 分钟内回复' }), 5 * 60 * 1000);
-      const onSignalAbort = () => finish({ aborted: true });
-      pendingAskUser.set(requestId, {
-        resolve: (answers) => finish(answers),
-        timer,
-        signal,
-        onSignalAbort,
+        const timer = setTimeout(() => finish({ timeout: true, message: '用户未在 5 分钟内回复' }), 5 * 60 * 1000);
+        const onSignalAbort = () => finish({ aborted: true });
+        pendingAskUser.set(requestId, {
+          resolve: (answers) => finish(answers),
+          timer,
+          signal,
+          onSignalAbort,
+        });
+        if (signal) {
+          if (signal.aborted) {
+            finish({ aborted: true });
+            return;
+          }
+          try { signal.addEventListener('abort', onSignalAbort, { once: true }); } catch { /* older Node */ }
+        }
+
+        try {
+          sender.send('knowclaw:askUser', { requestId, questions });
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[KnowClaw] failed to send ask_user IPC:', err?.message || err);
+          finish({ error: 'send_failed', message: String(err?.message || err) });
+        }
       });
-      if (signal) {
-        if (signal.aborted) {
-          finish({ aborted: true });
-          return;
-        }
-        try { signal.addEventListener('abort', onSignalAbort, { once: true }); } catch { /* older Node */ }
-      }
-
-      try {
-        sender.send('knowclaw:askUser', { requestId, questions });
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('[KnowClaw] failed to send ask_user IPC:', err?.message || err);
-        finish({ error: 'send_failed', message: String(err?.message || err) });
-      }
-    });
+    };
   }
 
   /**
@@ -806,25 +995,133 @@ export function registerKnowClawIpc({
    * resolve the pending confirmation as `false` and let agent-loop
    * surface its own AbortError.
    */
-  async function knowclawBeforeToolCall(event, signal) {
+  function splitShellSegments(command, separators = ['&&', '||', ';', '|']) {
+    const out = [];
+    let cur = '';
+    let quote = null;
+    for (let i = 0; i < command.length; i++) {
+      const c = command[i];
+      const prev = command[i - 1];
+      if (quote) {
+        cur += c;
+        if (c === quote && prev !== '\\') quote = null;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === '`') {
+        quote = c;
+        cur += c;
+        continue;
+      }
+      const two = command.slice(i, i + 2);
+      if (separators.includes(two)) {
+        out.push(cur);
+        cur = '';
+        i += 1;
+        continue;
+      }
+      if (separators.includes(c)) {
+        out.push(cur);
+        cur = '';
+        continue;
+      }
+      cur += c;
+    }
+    if (cur.trim()) out.push(cur);
+    return out.map((s) => s.trim()).filter(Boolean);
+  }
+
+  function stripLeadingEnvAssignments(segment) {
+    let s = String(segment || '').trim();
+    // Allow simple `FOO=bar BAR=baz rg foo` prefixes.
+    while (/^[A-Za-z_][A-Za-z0-9_]*=("[^"]*"|'[^']*'|[^\s]+)\s+/.test(s)) {
+      s = s.replace(/^[A-Za-z_][A-Za-z0-9_]*=("[^"]*"|'[^']*'|[^\s]+)\s+/, '').trim();
+    }
+    return s;
+  }
+
+  function isReadOnlyPlanBash(command) {
+    const raw = String(command || '').trim();
+    if (!raw) return { ok: true };
+
+    // Expansion/backticks make a command's effect hard to audit with a
+    // lightweight parser. Keep them in Agent mode.
+    if (/`|\$\(/.test(raw)) return { ok: false, reason: '包含命令替换，无法证明为只读。' };
+    if (/(^|[^\\])(?:>>?|<<?)/.test(raw)) return { ok: false, reason: '包含重定向/写入符号。' };
+
+    const banned = /\b(?:touch|mkdir|cp|mv|rm|rmdir|del|erase|tee|truncate|chmod|chown|sed\s+-i|perl\s+-i|python|python3|node|npx|npm|pnpm|yarn|bun|pip|pip3)\b/i;
+    const bannedGit = /\bgit\s+(?:add|commit|checkout|switch|reset|clean|merge|rebase|push|pull|fetch|stash|branch\s+-d|branch\s+-D)\b/i;
+    if (banned.test(raw) || bannedGit.test(raw)) {
+      return { ok: false, reason: '包含可能写入、执行脚本或改变仓库状态的命令。' };
+    }
+
+    const segments = splitShellSegments(raw);
+    const allowedSimple = new Set([
+      'pwd', 'ls', 'dir', 'cd', 'cat', 'head', 'tail', 'wc',
+      'grep', 'rg', 'find', 'sed', 'sort', 'uniq', 'cut',
+      'printf', 'echo',
+    ]);
+    for (const seg0 of segments) {
+      const seg = stripLeadingEnvAssignments(seg0);
+      if (!seg) continue;
+      const cmd = seg.split(/\s+/)[0];
+      if (cmd === 'find' && /\s-(?:delete|exec|execdir|ok|okdir)\b/i.test(seg)) {
+        return { ok: false, reason: '`find` 包含会执行或删除的选项。' };
+      }
+      if (cmd === 'sed' && /\s-i(?:\s|$)/i.test(seg)) {
+        return { ok: false, reason: '`sed -i` 会原地修改文件。' };
+      }
+      if (cmd === 'git') {
+        if (!/\bgit\s+(?:status|diff|log|show|rev-parse|ls-files|grep)\b/i.test(seg)) {
+          return { ok: false, reason: '仅允许只读 git 子命令。' };
+        }
+        continue;
+      }
+      if (!allowedSimple.has(cmd)) {
+        return { ok: false, reason: `命令 \`${cmd}\` 不在 Plan 模式只读 bash 白名单中。` };
+      }
+    }
+    return { ok: true };
+  }
+
+  // FK0: factory — bind a beforeToolCall closure to a specific
+  // channel so per-channel Plan mode + sender are consulted instead
+  // of the old globals. pi captures whichever function we return at
+  // createSession time, so each channel must mint its own bound
+  // instance.
+  function makeKnowclawBeforeToolCall(ch) {
+    return async function knowclawBeforeToolCall(event, signal) {
     // E.5: Plan-mode safety net. The system prompt already instructs the
     // model to avoid write tools in plan mode, but we enforce hard-block
     // here so prompt drift / jailbreaks can't accidentally mutate user
     // files. The reason text is returned to the model as a tool error
     // result so it can recover gracefully (typically by switching to
     // ask_user / save_plan instead).
-    if (currentPlanMode && event?.toolCall?.name) {
+    if (ch.planMode && event?.toolCall?.name) {
       const name = event.toolCall.name;
       // Cover both possible pi builtin names (write vs write_file). Today
       // only `write`/`edit` are emitted, but legacy aliases may exist.
-      const BLOCKED_IN_PLAN = new Set(['write', 'write_file', 'edit', 'edit_file', 'bash']);
-      if (BLOCKED_IN_PLAN.has(name)) {
+      const BLOCKED_WRITE_IN_PLAN = new Set(['write', 'write_file', 'edit', 'edit_file']);
+      if (BLOCKED_WRITE_IN_PLAN.has(name)) {
         return {
           block: true,
           reason:
-            '当前为 Plan 模式，禁止执行写入/编辑/Shell 命令。请用只读工具（read/list_files/grep 等）继续收集信息，' +
-            '用 ask_user 向用户确认细节，用 save_plan 保存方案。规划完成后由用户点击「开始执行」切换到 Agent 模式。',
+            '当前为 Plan 模式，禁止执行写入/编辑工具。请用只读工具（read/list_files/grep 等）继续收集信息，' +
+            '如果要保存规划文档，请调用 save_plan（会写入 .knowclaw/plans/），不要用 write/edit。' +
+            '规划完成后由用户点击「开始执行」切换到 Agent 模式。',
         };
+      }
+      if (name === 'bash') {
+        const command = String(event.args?.command || '').trim();
+        const readOnly = isReadOnlyPlanBash(command);
+        if (!readOnly.ok) {
+          return {
+            block: true,
+            reason:
+              `当前为 Plan 模式，只允许明显只读的 bash 探查命令（如 pwd/ls/rg/grep/find/cat/head/tail/git status）。${readOnly.reason}\n` +
+              '如果你是在尝试保存 plan.md，请改用 save_plan 工具；不要通过 bash 重定向、tee、mkdir/touch 等方式写文件。' +
+              '用 ask_user 向用户确认细节，用 save_plan 保存方案。规划完成后由用户点击「开始执行」切换到 Agent 模式。',
+          };
+        }
       }
       if (name === 'delegate_task') {
         const kind = event?.args?.kind || 'research';
@@ -852,7 +1149,7 @@ export function registerKnowClawIpc({
     }
 
     // install kind: ask the renderer.
-    const sender = activeSender;
+    const sender = ch.sender;
     if (!sender || sender.isDestroyed?.()) {
       return {
         block: true,
@@ -862,7 +1159,7 @@ export function registerKnowClawIpc({
       };
     }
     const requestId = nodeRandomUUID();
-    const cwd = getEffectiveCwd();
+    const cwd = getEffectiveCwd(ch);
 
     const allowed = await new Promise((resolve) => {
       const finish = (value) => {
@@ -916,18 +1213,23 @@ export function registerKnowClawIpc({
         command +
         '\n执行完毕后告诉 KnowClaw 重试即可继续。',
     };
-  }
+    }; // end inner async function
+  } // end makeKnowclawBeforeToolCall
 
   /**
-   * Compute the cwd to hand to pi for the *next* session creation.
-   * Always normalised to an absolute path so pi's session JSONL
-   * encodes the cwd consistently (and `listSessions` can match
-   * sessions back to their workspace).
+   * Compute the cwd to hand to pi for the *next* session creation
+   * for a given channel. Always normalised to an absolute path so
+   * pi's session JSONL encodes the cwd consistently (and
+   * `listSessions` can match sessions back to their workspace).
+   *
+   * FK0: now takes a channel object — null `ch.cwd` means "global
+   * mode" and falls back to the user file root (mirrors pre-FK0
+   * behaviour for the main channel).
    */
-  function getEffectiveCwd() {
-    if (currentCwd) {
+  function getEffectiveCwd(ch) {
+    if (ch && ch.cwd) {
       try {
-        return path.resolve(currentCwd);
+        return path.resolve(ch.cwd);
       } catch {
         return getUserFileRoot();
       }
@@ -941,9 +1243,13 @@ export function registerKnowClawIpc({
    * (i.e. "do scan AGENTS.md/CLAUDE.md") whenever the user has
    * explicitly chosen a workspace; otherwise we keep the legacy
    * `true` to avoid pi climbing the IPM data tree.
+   *
+   * FK0: per-channel — `ch.cwd === null` ⇒ global mode for that
+   * channel. The floating channel always has a non-null cwd so it
+   * always gets context-file scanning on its own workspace.
    */
-  function shouldDisableContextFiles() {
-    return !currentCwd;
+  function shouldDisableContextFiles(ch) {
+    return !ch?.cwd;
   }
 
   async function ensurePiRuntime() {
@@ -983,12 +1289,15 @@ export function registerKnowClawIpc({
     }
   }
 
-  function disposeCurrentSession() {
-    const session = activeSession;
-    const unsub = activeUnsub;
-    activeSession = null;
-    activeUnsub = null;
-    promptInFlight = false;
+  // FK0: per-channel session disposal. Tears down the AgentSession,
+  // its subscription, and clears the in-flight flag for that
+  // specific channel. The other channel is left untouched.
+  function disposeChannelSession(ch) {
+    const session = ch.session;
+    const unsub = ch.unsub;
+    ch.session = null;
+    ch.unsub = null;
+    ch.promptInFlight = false;
     if (piRuntime?.disposeSession) {
       try { piRuntime.disposeSession(session, unsub); } catch { /* ignore */ }
     } else {
@@ -1000,6 +1309,13 @@ export function registerKnowClawIpc({
     // probably aborted them already, but resolve them defensively as
     // "denied" so nothing remains in the map waiting on a renderer
     // reply that will never come.
+    //
+    // FK0 caveat: pendingConfirmations is a shared map across both
+    // channels (the requestId is globally unique). Draining it on
+    // any-channel dispose is overly aggressive in theory but
+    // pragmatically safe — confirmation dialogs are short-lived and
+    // the user can simply retry the install if the other channel had
+    // one open.
     for (const [requestId, entry] of pendingConfirmations) {
       try { entry.resolve(false); }
       catch { /* finish() already removed entry */ }
@@ -1008,24 +1324,27 @@ export function registerKnowClawIpc({
   }
 
   /**
-   * Ensure an `activeSession` exists, creating one in `continueRecent`
-   * mode if not. Returns the created/resumed metadata.
+   * Ensure the given channel has an active session, creating one in
+   * the requested mode if not. Returns the created/resumed metadata.
+   *
+   * FK0: now takes `(ch, sender, mode)` instead of `(sender, mode)`.
+   * Each channel keeps its own session, sender, unsub triplet.
    */
-  async function ensureSession(sender, mode = 'continueRecent') {
-    if (activeSession) {
+  async function ensureSession(ch, sender, mode = 'continueRecent') {
+    if (ch.session) {
       // Rebind sender to the latest invoker so reload-without-newSession
       // still receives events.
-      activeSender = sender;
+      ch.sender = sender;
       return {
         ok: true,
-        sessionId: activeSession.sessionId || null,
+        sessionId: ch.session.sessionId || null,
         resumed: false,
         reused: true,
       };
     }
 
     const runtime = await ensurePiRuntime();
-    const cwd = getEffectiveCwd();
+    const cwd = getEffectiveCwd(ch);
     const toolDeps = haveToolDeps
       ? {
           getWorkspaceDirs,
@@ -1059,22 +1378,30 @@ export function registerKnowClawIpc({
     // `readKnowClawState` defaults the flag to `true` when missing
     // (first run / no state file), so this is safe to call
     // unconditionally even when `readState` is the no-op fallback.
-    const { subAgentEnabled } = readKnowClawState();
+    //
+    // SK0: at the same time grab the persistent skill mute-list. We
+    // pass it to the runtime so the new session's `skillsOverride`
+    // callback filters muted skills out of the system prompt before
+    // pi assembles it. Frozen at session-creation time — toggling
+    // skills during an active session does NOT mutate this list.
+    const { subAgentEnabled, skillsDisabled } = readKnowClawState();
 
     const result = await runtime.createSession({
       cwd,
       mode,
       toolDeps,
       prefs,
-      thinkingLevel: currentThinkingLevel,
-      noContextFiles: shouldDisableContextFiles(),
-      beforeToolCall: knowclawBeforeToolCall,
+      thinkingLevel: ch.thinkingLevel,
+      noContextFiles: shouldDisableContextFiles(ch),
+      beforeToolCall: makeKnowclawBeforeToolCall(ch),
       subAgentEnabled,
+      disabledSkills: skillsDisabled,
       // E.5: thread the ask_user IPC bridge into the runtime so the
       // ask_user customTool can pause execution and await the renderer
-      // reply. Same lifetime as the session — the closure captures the
-      // bound `activeSender` via askUserViaRenderer.
-      askUser: askUserViaRenderer,
+      // reply. FK0: the closure captures `ch.sender` via the
+      // factory, so each channel sends its ask_user prompts to the
+      // window that owns the channel.
+      askUser: makeAskUserViaRenderer(ch),
     });
     if (!result.session) {
       return {
@@ -1086,10 +1413,10 @@ export function registerKnowClawIpc({
       };
     }
 
-    activeSession = result.session;
-    activeSender = sender;
-    activeUnsub = activeSession.subscribe((event) => {
-      pushEvent(activeSender, result.sessionId, event);
+    ch.session = result.session;
+    ch.sender = sender;
+    ch.unsub = ch.session.subscribe((event) => {
+      pushEvent(ch.sender, result.sessionId, event);
     });
 
     return {
@@ -1104,6 +1431,7 @@ export function registerKnowClawIpc({
   // -------- Request/response handlers --------
 
   ipcMain.handle('knowclaw:send', async (evt, payload) => {
+    const ch = getChannel(payload);
     const message = String(payload?.message ?? '').trim();
     // U8b-2: image attachments are optional. An empty message is still
     // refused, but a text-less prompt that carries images is allowed
@@ -1117,7 +1445,7 @@ export function registerKnowClawIpc({
 
     // D.2: defensive default. The renderer side now eagerly creates
     // a session on workspace switch / cold start / model change, so
-    // `activeSession` is normally non-null when we get here and the
+    // `ch.session` is normally non-null when we get here and the
     // mode parameter is irrelevant (the first branch of
     // ensureSession returns `{ reused: true }`). However if any of
     // those eager-creation paths failed silently (network blip,
@@ -1126,42 +1454,63 @@ export function registerKnowClawIpc({
     // unrelated old JSONL — that's the exact pathology D.2 is
     // closing. Default to `'new'` so the fallback is a fresh
     // session, not a surprise resume.
-    const ensured = await ensureSession(evt.sender, 'new');
+    const ensured = await ensureSession(ch, evt.sender, 'new');
     if (!ensured.ok) {
       return ensured;
     }
 
-    if (promptInFlight) {
+    if (ch.promptInFlight) {
       return { ok: false, error: 'a prompt is already in flight; abort first' };
     }
-    promptInFlight = true;
+    ch.promptInFlight = true;
 
     // Fire and forget: do not block the IPC handle on the LLM turn.
     // The renderer consumes the turn via the `knowclaw:event` channel.
     const promptOptions = validImages.length > 0 ? { images: validImages } : undefined;
+
+    // Skill Selector: if the renderer pinned one or more skills, resolve
+    // their SKILL.md contents and prepend a `<pinned_skills>` block to
+    // the message. Doing it server-side (instead of from the renderer)
+    // keeps the user-visible bubble clean (`message` itself never gets
+    // the XML noise) while ensuring the LLM sees the skill instructions
+    // up front.
+    let messageWithSkills = message;
+    if (Array.isArray(payload?.pinnedSkills) && payload.pinnedSkills.length > 0) {
+      const resolved = resolvePinnedSkillContents(payload.pinnedSkills, ch.cwd);
+      if (resolved.length > 0) {
+        messageWithSkills = `${formatPinnedSkillsBlock(resolved)}\n\n${message}`;
+      }
+    }
+
     // E.5: tag the prompt with the current mode so the model can switch
     // behaviour per-turn without a session rebuild. The renderer strips
     // this prefix back out in mapPiMessagesForRenderer so the user
-    // bubble shows the original text on rehydrate.
-    const taggedMessage = currentPlanMode ? `[MODE: plan]\n${message}` : message;
+    // bubble shows the original text on rehydrate. The skill-injection
+    // block lives BELOW the mode tag so the tag remains the first line
+    // (renderer regex anchors to ^).
+    const taggedMessage = ch.planMode
+      ? `[MODE: plan]\n${messageWithSkills}`
+      : messageWithSkills;
+    const sessionForPrompt = ch.session;
     Promise.resolve()
-      .then(() => activeSession.prompt(taggedMessage, promptOptions))
+      .then(() => sessionForPrompt.prompt(taggedMessage, promptOptions))
       .catch((err) => {
-        pushEvent(activeSender, activeSession?.sessionId, {
+        pushEvent(ch.sender, sessionForPrompt?.sessionId, {
           type: 'error',
           source: 'knowclaw-bridge',
           error: String(err?.message || err),
         });
       })
       .finally(() => {
-        promptInFlight = false;
+        ch.promptInFlight = false;
       });
 
     return { ok: true, sessionId: ensured.sessionId };
   });
 
-  ipcMain.handle('knowclaw:abort', async () => {
-    if (!activeSession) return { ok: true, hadSession: false };
+  ipcMain.handle('knowclaw:abort', async (_evt, payload) => {
+    const ch = getChannel(payload);
+    if (!ch.session) return { ok: true, hadSession: false };
     // U4: drain queued steer/followUp messages BEFORE aborting. Default
     // pi behaviour keeps queued messages around, so a subsequent
     // (unrelated) prompt would silently flush them at the next run
@@ -1171,14 +1520,14 @@ export function registerKnowClawIpc({
     // renderer uses to drop its pendingSteer/pendingFollowUp state.
     let queueCleared = false;
     try {
-      if (typeof activeSession.clearQueue === 'function') {
-        activeSession.clearQueue();
+      if (typeof ch.session.clearQueue === 'function') {
+        ch.session.clearQueue();
         queueCleared = true;
       }
     } catch { /* best-effort: never block abort on queue failure */ }
     try {
-      if (typeof activeSession.abort === 'function') {
-        await activeSession.abort();
+      if (typeof ch.session.abort === 'function') {
+        await ch.session.abort();
       }
       return { ok: true, hadSession: true, queueCleared };
     } catch (err) {
@@ -1200,14 +1549,15 @@ export function registerKnowClawIpc({
   //       (they can't be queued, only run synchronously). We catch
   //       and surface that as a structured error too.
   ipcMain.handle('knowclaw:steer', async (_evt, payload) => {
+    const ch = getChannel(payload);
     const message = String(payload?.message ?? '').trim();
     // U8b-2: steer/followUp accept the same `{ images }` second-arg
     // shape that `prompt()` does (see pi-coding-agent AgentSession).
     // Same empty-payload + sanitisation policy as `knowclaw:send`.
     const validImages = sanitizeImagesPayload(payload?.images);
     if (!message && validImages.length === 0) return { ok: false, error: 'empty message' };
-    if (!activeSession) return { ok: false, error: 'no active session' };
-    if (!activeSession.isStreaming) {
+    if (!ch.session) return { ok: false, error: 'no active session' };
+    if (!ch.session.isStreaming) {
       return { ok: false, error: 'session is not streaming' };
     }
     try {
@@ -1215,8 +1565,8 @@ export function registerKnowClawIpc({
       // E.5: tag steer/followUp with the current mode too — otherwise a
       // followUp during plan mode would arrive un-tagged and the model
       // could revert to agent behaviour mid-turn.
-      const tagged = currentPlanMode ? `[MODE: plan]\n${message}` : message;
-      await activeSession.steer(tagged, opts);
+      const tagged = ch.planMode ? `[MODE: plan]\n${message}` : message;
+      await ch.session.steer(tagged, opts);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err?.message || err) };
@@ -1224,28 +1574,30 @@ export function registerKnowClawIpc({
   });
 
   ipcMain.handle('knowclaw:followUp', async (_evt, payload) => {
+    const ch = getChannel(payload);
     const message = String(payload?.message ?? '').trim();
     const validImages = sanitizeImagesPayload(payload?.images);
     if (!message && validImages.length === 0) return { ok: false, error: 'empty message' };
-    if (!activeSession) return { ok: false, error: 'no active session' };
-    if (!activeSession.isStreaming) {
+    if (!ch.session) return { ok: false, error: 'no active session' };
+    if (!ch.session.isStreaming) {
       return { ok: false, error: 'session is not streaming' };
     }
     try {
       const opts = validImages.length > 0 ? { images: validImages } : undefined;
-      const tagged = currentPlanMode ? `[MODE: plan]\n${message}` : message;
-      await activeSession.followUp(tagged, opts);
+      const tagged = ch.planMode ? `[MODE: plan]\n${message}` : message;
+      await ch.session.followUp(tagged, opts);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err?.message || err) };
     }
   });
 
-  ipcMain.handle('knowclaw:clearQueue', async () => {
-    if (!activeSession) return { ok: false, error: 'no active session' };
+  ipcMain.handle('knowclaw:clearQueue', async (_evt, payload) => {
+    const ch = getChannel(payload);
+    if (!ch.session) return { ok: false, error: 'no active session' };
     try {
-      const cleared = typeof activeSession.clearQueue === 'function'
-        ? activeSession.clearQueue()
+      const cleared = typeof ch.session.clearQueue === 'function'
+        ? ch.session.clearQueue()
         : { steering: [], followUp: [] };
       // pi's clearQueue returns `{ steering, followUp }` arrays of the
       // strings that *were* in flight — handy for the UI if it ever
@@ -1276,32 +1628,35 @@ export function registerKnowClawIpc({
   //       event with `aborted=true` / `errorMessage` will also arrive
   //       so the renderer can clear its banner either way.
   ipcMain.handle('knowclaw:compact', async (_evt, payload) => {
-    if (!activeSession) return { ok: false, error: 'no active session' };
-    if (activeSession.isStreaming) {
+    const ch = getChannel(payload);
+    if (!ch.session) return { ok: false, error: 'no active session' };
+    if (ch.session.isStreaming) {
       return { ok: false, error: 'cannot compact while a turn is streaming — abort or wait, then retry' };
     }
-    if (typeof activeSession.compact !== 'function') {
+    if (typeof ch.session.compact !== 'function') {
       return { ok: false, error: 'compact is not supported by this pi version' };
     }
     const customInstructions = typeof payload?.customInstructions === 'string'
       ? payload.customInstructions
       : undefined;
     try {
-      const result = await activeSession.compact(customInstructions);
+      const result = await ch.session.compact(customInstructions);
       return { ok: true, result };
     } catch (err) {
       return { ok: false, error: String(err?.message || err) };
     }
   });
 
-  ipcMain.handle('knowclaw:newSession', async (evt) => {
-    disposeCurrentSession();
-    return ensureSession(evt.sender, 'new');
+  ipcMain.handle('knowclaw:newSession', async (evt, payload) => {
+    const ch = getChannel(payload);
+    disposeChannelSession(ch);
+    return ensureSession(ch, evt.sender, 'new');
   });
 
-  ipcMain.handle('knowclaw:continueRecent', async (evt) => {
-    disposeCurrentSession();
-    return ensureSession(evt.sender, 'continueRecent');
+  ipcMain.handle('knowclaw:continueRecent', async (evt, payload) => {
+    const ch = getChannel(payload);
+    disposeChannelSession(ch);
+    return ensureSession(ch, evt.sender, 'continueRecent');
   });
 
   ipcMain.handle('knowclaw:listModels', async () => {
@@ -1342,6 +1697,7 @@ export function registerKnowClawIpc({
   // at runtime, the renderer will surface a soft hint after the turn
   // ends.
   ipcMain.handle('knowclaw:setThinkingLevel', async (_evt, payload) => {
+    const ch = getChannel(payload);
     const level = String(payload?.level || '').trim();
     const validLevels = ['off', 'minimal', 'low', 'medium', 'high'];
     if (!validLevels.includes(level)) {
@@ -1350,10 +1706,10 @@ export function registerKnowClawIpc({
         error: `invalid level: ${level}. Must be one of: ${validLevels.join(', ')}`,
       };
     }
-    currentThinkingLevel = level;
-    if (activeSession && typeof activeSession.setThinkingLevel === 'function') {
+    ch.thinkingLevel = level;
+    if (ch.session && typeof ch.session.setThinkingLevel === 'function') {
       try {
-        activeSession.setThinkingLevel(level);
+        ch.session.setThinkingLevel(level);
       } catch (err) {
         return { ok: false, error: String(err?.message || err) };
       }
@@ -1378,6 +1734,20 @@ export function registerKnowClawIpc({
   //      session under the workspace's dedicated session directory.
 
   ipcMain.handle('knowclaw:setCwd', async (_evt, payload) => {
+    const ch = getChannel(payload);
+    // FK0: the floating channel has a hard-locked cwd (the fixed
+    // _floating/ workspace). Reject any attempt to change it from
+    // the renderer — the floating window UI does not expose a
+    // workspace switcher, so this guard catches accidental calls
+    // (e.g. a shared hook firing into the wrong channel).
+    if (ch.cwdLocked) {
+      return {
+        ok: false,
+        error: 'this channel has a locked workspace',
+        cwd: getEffectiveCwd(ch),
+        isGlobal: !ch.cwd,
+      };
+    }
     const raw = payload?.cwd;
     let nextCwd = null;
     if (raw !== null && raw !== undefined && String(raw).trim() !== '') {
@@ -1403,28 +1773,34 @@ export function registerKnowClawIpc({
       }
     }
 
-    currentCwd = nextCwd;
+    ch.cwd = nextCwd;
     // The active session is bound to the *old* cwd; tear it down so
     // the next `send` rebuilds with the new workspace.
-    disposeCurrentSession();
+    disposeChannelSession(ch);
 
     return {
       ok: true,
-      cwd: getEffectiveCwd(),
-      isGlobal: !currentCwd,
+      cwd: getEffectiveCwd(ch),
+      isGlobal: !ch.cwd,
     };
   });
 
-  ipcMain.handle('knowclaw:getCwd', async () => {
+  ipcMain.handle('knowclaw:getCwd', async (_evt, payload) => {
+    const ch = getChannel(payload);
     return {
       ok: true,
-      cwd: getEffectiveCwd(),
-      isGlobal: !currentCwd,
+      cwd: getEffectiveCwd(ch),
+      isGlobal: !ch.cwd,
       userFileRoot: getUserFileRoot(),
     };
   });
 
-  ipcMain.handle('knowclaw:listWorkspaces', async () => {
+  ipcMain.handle('knowclaw:listWorkspaces', async (_evt, _payload) => {
+    // FK0: listWorkspaces is intentionally channel-agnostic — both
+    // channels currently see the same workspace catalog. The
+    // floating window's UI doesn't show this list (its cwd is
+    // locked), but we keep the call valid for symmetry / future
+    // cross-channel features.
     /** @type {Array<{name:string, domain:string, path:string, isGlobal?:boolean, status?:string}>} */
     const workspaces = [];
 
@@ -1463,6 +1839,31 @@ export function registerKnowClawIpc({
       path: getUserFileRoot(),
       isGlobal: true,
     });
+
+    // FK6-3: Floating helper workspace. The floating-window KnowClaw
+    // channel hard-binds its cwd to this directory (see
+    // FLOATING_WORKSPACE_PATH above), and FK4/FK5 land screenshots /
+    // OCR notes here. Surface it as its own "floating" group so the
+    // main-window WorkspaceSelector can render it with a distinct
+    // badge — that's how the "回到空间" handoff lands the user on the
+    // exact same folder they were just looking at in the floating
+    // window. Marked `protected: true` so the dropdown hides the
+    // "X" remove button (this is system-managed, not user clutter).
+    {
+      const floatingExists = (() => {
+        try { return fs.existsSync(FLOATING_WORKSPACE_PATH) && fs.statSync(FLOATING_WORKSPACE_PATH).isDirectory(); }
+        catch { return false; }
+      })();
+      if (floatingExists) {
+        tryAdd({
+          name: '悬浮助手',
+          domain: 'floating',
+          path: FLOATING_WORKSPACE_PATH,
+          pinned: true,
+          protected: true,
+        });
+      }
+    }
 
     // 2) IPM project / case / study folders — reuse the same registry
     //    that powers the legacy KnowClaw `list_projects` tool. Skipped
@@ -1664,8 +2065,9 @@ export function registerKnowClawIpc({
   // `shell.openPath` handles both directories and files natively, so
   // we only need to relax the error wording.
   ipcMain.handle('knowclaw:openInExplorer', async (_evt, payload) => {
+    const ch = getChannel(payload);
     let target = payload?.path ? String(payload.path).trim() : '';
-    if (!target) target = getEffectiveCwd();
+    if (!target) target = getEffectiveCwd(ch);
     let resolved;
     try { resolved = path.resolve(target); } catch (err) {
       return { ok: false, error: `invalid path: ${err?.message || err}` };
@@ -1707,6 +2109,7 @@ export function registerKnowClawIpc({
   //   - directories in `filePaths` are skipped with a reason. We don't
   //     try to recurse — the user can drag the parent's contents instead.
   ipcMain.handle('knowclaw:uploadToWorkspace', async (_evt, payload) => {
+    const ch = getChannel(payload);
     const MAX_BYTES = 100 * 1024 * 1024; // 100 MB / file
     const filePaths = Array.isArray(payload?.filePaths) ? payload.filePaths : [];
     if (filePaths.length === 0) {
@@ -1716,7 +2119,7 @@ export function registerKnowClawIpc({
     // Global mode has no real cwd, just the user file root which is
     // shared across projects/cases/etc. Refuse to copy there — the
     // user must pick or create a workspace first.
-    if (!currentCwd) {
+    if (!ch.cwd) {
       return {
         ok: false,
         error: '请先选择一个工作空间，再上传文件。',
@@ -1724,7 +2127,7 @@ export function registerKnowClawIpc({
       };
     }
 
-    const cwd = getEffectiveCwd();
+    const cwd = getEffectiveCwd(ch);
     const rawDest = typeof payload?.destRelDir === 'string' ? payload.destRelDir : '';
     let destAbsDir;
     try {
@@ -1855,6 +2258,7 @@ export function registerKnowClawIpc({
   //     renderer can render its own guidance message instead of
   //     drowning the user in projects/cases/study/...
   ipcMain.handle('knowclaw:listWorkspaceTree', async (_evt, payload) => {
+    const ch = getChannel(payload);
     const EXCLUDED_DIRS = new Set([
       'node_modules', '.git', '.svn', '.hg',
       'dist', 'build', '.vite', '.next', '.cache',
@@ -1866,7 +2270,7 @@ export function registerKnowClawIpc({
     const MAX_DEPTH = 6;
 
     let target = payload?.path ? String(payload.path).trim() : '';
-    if (!target) target = getEffectiveCwd();
+    if (!target) target = getEffectiveCwd(ch);
     let resolved;
     try { resolved = path.resolve(target); } catch (err) {
       return { ok: false, error: `invalid path: ${err?.message || err}` };
@@ -2031,29 +2435,56 @@ export function registerKnowClawIpc({
 
   // ---- E.5: Plan-mode IPC handlers ----
   ipcMain.handle('knowclaw:setPlanMode', async (_evt, payload) => {
-    const enabled = typeof payload === 'boolean' ? payload : Boolean(payload?.enabled);
-    currentPlanMode = enabled;
-    return { ok: true, planMode: currentPlanMode };
+    const ch = getChannel(payload);
+    // The renderer historically called `setPlanMode(true)` with a bare
+    // boolean (no payload wrapper). We preserve that overload but
+    // also accept the new `{ enabled, channel }` object shape that
+    // FK0 introduces for channel routing.
+    let enabled;
+    if (typeof payload === 'boolean') enabled = payload;
+    else enabled = Boolean(payload?.enabled);
+    ch.planMode = enabled;
+    return { ok: true, planMode: ch.planMode };
   });
 
-  ipcMain.handle('knowclaw:getPlanMode', async () => ({ ok: true, planMode: currentPlanMode }));
+  ipcMain.handle('knowclaw:getPlanMode', async (_evt, payload) => {
+    const ch = getChannel(payload);
+    return { ok: true, planMode: ch.planMode };
+  });
 
   // Renderer's reply to a `knowclaw:askUser` request. payload:
-  //   { requestId: string, answers: { [questionId]: string | string[] } }
-  // The renderer may also send `{ cancelled: true }` to abandon the
-  // dialog; the resolver receives that object verbatim and the model
-  // sees the cancellation as its tool result.
+  //   { requestId: string,
+  //     answers: { [questionId]: string | string[] },
+  //     cancelled?: boolean,
+  //     skipped?:   boolean }
+  //
+  // Three dismissal verbs are forwarded verbatim to the tool's awaiting
+  // resolver:
+  //   - `{ cancelled: true }` — user wants to abandon the ask_user entirely
+  //   - `{ skipped:   true }` — user trusts the model to proceed without input
+  //   - normal answers object — user selected options (free-text "其他…"
+  //                             entries arrive as `other:<text>` strings)
+  //
+  // The model-facing wording for each case lives inside askUserTool.js
+  // (textResult branches), so this handler just maps the IPC payload to
+  // the right shape and resolves the promise.
   ipcMain.handle('knowclaw:askUserReply', async (_evt, payload) => {
     const requestId = String(payload?.requestId || '').trim();
     if (!requestId) return { ok: false, error: 'requestId is required' };
     const entry = pendingAskUser.get(requestId);
     if (!entry) return { ok: true, matched: false };
+    let resolveValue;
+    if (payload?.cancelled) {
+      resolveValue = { cancelled: true };
+    } else if (payload?.skipped) {
+      resolveValue = { skipped: true };
+    } else if (payload?.answers && typeof payload.answers === 'object') {
+      resolveValue = payload.answers;
+    } else {
+      resolveValue = {};
+    }
     try {
-      entry.resolve(
-        payload?.cancelled
-          ? { cancelled: true }
-          : (payload?.answers && typeof payload.answers === 'object' ? payload.answers : {}),
-      );
+      entry.resolve(resolveValue);
     } catch { /* finish() already removed entry */ }
     return { ok: true, matched: true };
   });
@@ -2103,7 +2534,8 @@ export function registerKnowClawIpc({
     return { ok: true, available: r.available, source: r.source };
   });
 
-  ipcMain.handle('knowclaw:getStatus', async () => {
+  ipcMain.handle('knowclaw:getStatus', async (_evt, payload) => {
+    const ch = getChannel(payload);
     let config = null;
     try {
       const runtime = await ensurePiRuntime();
@@ -2115,7 +2547,7 @@ export function registerKnowClawIpc({
     // doesn't gate on them anymore, and exposing them would invite
     // future code to reintroduce the "block before trying" UX the
     // user explicitly rejected.
-    const effectiveLevel = currentThinkingLevel || activeSession?.thinkingLevel || 'medium';
+    const effectiveLevel = ch.thinkingLevel || ch.session?.thinkingLevel || 'medium';
     // U0.5: lift `apiMode` to the top level too. It's already in
     // `config.apiMode` (see ipmConfig.describeIpmConfig) but the UI
     // shouldn't have to grovel through a nested object to render a
@@ -2123,17 +2555,17 @@ export function registerKnowClawIpc({
     const apiMode = config?.apiMode || null;
     return {
       ok: true,
-      hasSession: Boolean(activeSession),
-      sessionId: activeSession?.sessionId || null,
-      promptInFlight,
+      hasSession: Boolean(ch.session),
+      sessionId: ch.session?.sessionId || null,
+      promptInFlight: ch.promptInFlight,
       config,
       thinkingLevel: effectiveLevel,
       apiMode,
       // U1: surface the active workspace so the renderer can hydrate
       // `WorkspaceSelector` / `WorkspaceBadge` on mount and after each
       // turn (in case the cwd changed via `openSession`/`forkSession`).
-      cwd: getEffectiveCwd(),
-      isGlobal: !currentCwd,
+      cwd: getEffectiveCwd(ch),
+      isGlobal: !ch.cwd,
       userFileRoot: getUserFileRoot(),
       // U3: bash availability — drives the "install Git for Windows"
       // banner in `KnowClawV2Page`. `available` is false ONLY on Windows
@@ -2165,7 +2597,7 @@ export function registerKnowClawIpc({
       // / failure path collapses to null so the renderer can simply
       // treat null as "no data yet".
       contextUsage: (() => {
-        try { return activeSession?.getContextUsage?.() ?? null; }
+        try { return ch.session?.getContextUsage?.() ?? null; }
         catch { return null; }
       })(),
       // U8a: cumulative session statistics (tokens-only, no cost).
@@ -2186,7 +2618,7 @@ export function registerKnowClawIpc({
       // field plumbing.
       sessionStats: (() => {
         try {
-          const s = activeSession?.getSessionStats?.();
+          const s = ch.session?.getSessionStats?.();
           if (!s) return null;
           return {
             tokens: s.tokens, // { input, output, cacheRead, cacheWrite, total }
@@ -2202,7 +2634,7 @@ export function registerKnowClawIpc({
       // its banner after a hot reload / mount-mid-compaction. Normal
       // operation gets the banner via `compaction_start` events; this
       // is just a safety net for late subscribers.
-      isCompacting: Boolean(activeSession?.isCompacting),
+      isCompacting: Boolean(ch.session?.isCompacting),
       // U6: surface the persistent sub-agent kill-switch so the
       // renderer's toggle can hydrate from the same status snapshot
       // it already polls on mount, without an extra IPC roundtrip.
@@ -2214,7 +2646,7 @@ export function registerKnowClawIpc({
       })(),
       // E.5: surface the in-memory Plan-mode flag so the renderer can
       // hydrate its PlanModeToggle on mount / after refresh.
-      planMode: currentPlanMode,
+      planMode: ch.planMode,
     };
   });
 
@@ -2234,36 +2666,37 @@ export function registerKnowClawIpc({
   // Also rebinds `activeSender` to the calling renderer so any
   // subsequent push events land in the new window without waiting
   // for the next `knowclaw:send`.
-  ipcMain.handle('knowclaw:rehydrate', async (evt) => {
-    if (!activeSession) {
+  ipcMain.handle('knowclaw:rehydrate', async (evt, payload) => {
+    const ch = getChannel(payload);
+    if (!ch.session) {
       return { ok: false, hasSession: false };
     }
     // Rebind sender — same fix that ensureSession() does on its
     // reuse path. Without this, a hot-reloaded renderer would never
     // see the live stream's continuation events.
-    activeSender = evt?.sender || activeSender;
+    ch.sender = evt?.sender || ch.sender;
 
     // Resolve the live JSONL path (may be null for in-memory sessions,
     // but pi's default mode is persistent so this is rarely null).
     let sessionFile = null;
     try {
-      const sm = activeSession?.sessionManager;
+      const sm = ch.session?.sessionManager;
       if (sm && typeof sm.getSessionFile === 'function') {
         sessionFile = sm.getSessionFile() || null;
       }
     } catch { /* ignore */ }
 
-    const historyEvent = buildHistoryLoadedEvent(activeSession, sessionFile);
+    const historyEvent = buildHistoryLoadedEvent(ch.session, sessionFile);
 
     // Mirror the per-field defensive try/catch from `knowclaw:getStatus`
     // so a single field failing never breaks the whole rehydrate.
     const contextUsage = (() => {
-      try { return activeSession?.getContextUsage?.() ?? null; }
+      try { return ch.session?.getContextUsage?.() ?? null; }
       catch { return null; }
     })();
     const sessionStats = (() => {
       try {
-        const s = activeSession?.getSessionStats?.();
+        const s = ch.session?.getSessionStats?.();
         if (!s) return null;
         return {
           tokens: s.tokens,
@@ -2279,24 +2712,25 @@ export function registerKnowClawIpc({
     return {
       ok: true,
       hasSession: true,
-      sessionId: activeSession.sessionId || null,
+      sessionId: ch.session.sessionId || null,
       sessionFile,
       messages: historyEvent.messages,
       tasks: historyEvent.tasks,
-      promptInFlight,
+      promptInFlight: ch.promptInFlight,
       // Convenience alias for the renderer's `streaming` state.
-      streaming: promptInFlight,
+      streaming: ch.promptInFlight,
       contextUsage,
       sessionStats,
-      isCompacting: Boolean(activeSession?.isCompacting),
-      cwd: getEffectiveCwd(),
-      isGlobal: !currentCwd,
+      isCompacting: Boolean(ch.session?.isCompacting),
+      cwd: getEffectiveCwd(ch),
+      isGlobal: !ch.cwd,
     };
   });
 
   // -------- Phase 10: history session UI --------
 
-  ipcMain.handle('knowclaw:listSessions', async () => {
+  ipcMain.handle('knowclaw:listSessions', async (_evt, payload) => {
+    const ch = getChannel(payload);
     try {
       const runtime = await ensurePiRuntime();
       // U1: list sessions belonging to the *current* workspace. pi's
@@ -2305,7 +2739,11 @@ export function registerKnowClawIpc({
       // keeps the SessionPanel naturally scoped to the user's active
       // workspace and reinforces the "one conversation = one folder"
       // mental model.
-      const cwd = getEffectiveCwd();
+      //
+      // FK0: the floating channel surfaces only sessions stored
+      // under `_floating/` — the main channel keeps showing its
+      // user-chosen workspace's sessions exactly as before.
+      const cwd = getEffectiveCwd(ch);
       const sessions = await runtime.listSessions(cwd);
       // Convert Date instances to ms-since-epoch so the renderer can
       // render with `Intl.RelativeTimeFormat` without losing fidelity
@@ -2327,6 +2765,7 @@ export function registerKnowClawIpc({
   });
 
   ipcMain.handle('knowclaw:openSession', async (evt, payload) => {
+    const ch = getChannel(payload);
     const sessionFile = String(payload?.sessionFile || '').trim();
     const pathError = validateSessionFilePath(sessionFile);
     if (pathError) return { ok: false, error: pathError };
@@ -2334,33 +2773,38 @@ export function registerKnowClawIpc({
 
     // Tear down any current session to avoid the `ensureSession` reuse
     // path (which would silently keep the old session alive).
-    disposeCurrentSession();
+    disposeChannelSession(ch);
 
     // U1: a historical session was created in some specific cwd; that
     // cwd is the first record in the JSONL header. We restore
-    // `currentCwd` to it before creating the pi session so the
+    // `ch.cwd` to it before creating the pi session so the
     // newly-spawned AgentSession runs in the *same* workspace the
     // conversation originally belonged to. UI reads this back via
     // `knowclaw:getStatus` (or watches the response below).
+    //
+    // FK0: the floating channel has a locked cwd (`_floating/`), so
+    // we skip the cwd restore there — listSessions already filters
+    // to the floating workspace, so any sessionFile arriving on the
+    // floating channel is by construction inside `_floating/`.
     let restoredCwd = null;
     try {
       const header = readSessionHeader(sessionFile);
       if (header?.cwd && typeof header.cwd === 'string') {
         restoredCwd = path.resolve(header.cwd);
       }
-    } catch { /* fallthrough → keep currentCwd as-is */ }
+    } catch { /* fallthrough → keep ch.cwd as-is */ }
     const userFileRoot = getUserFileRoot();
-    if (restoredCwd) {
+    if (!ch.cwdLocked && restoredCwd) {
       // Sessions originally created in "global" mode have a cwd equal
       // to the user file root. Map those back to `null` so the UI
       // shows "global" rather than a hard-coded path.
-      currentCwd = (path.resolve(restoredCwd) === path.resolve(userFileRoot))
+      ch.cwd = (path.resolve(restoredCwd) === path.resolve(userFileRoot))
         ? null
         : restoredCwd;
     }
 
     const runtime = await ensurePiRuntime();
-    const cwd = getEffectiveCwd();
+    const cwd = getEffectiveCwd(ch);
     const toolDeps = haveToolDeps
       ? {
           getWorkspaceDirs,
@@ -2388,7 +2832,10 @@ export function registerKnowClawIpc({
     }
 
     // U6: respect the user's sub-agent kill-switch on re-opens too.
-    const { subAgentEnabled } = readKnowClawState();
+    // SK0: re-opened sessions also honour the live skill mute-list —
+    // muting a skill, then re-opening a historical session, should
+    // present the same skill surface as a fresh session would.
+    const { subAgentEnabled, skillsDisabled } = readKnowClawState();
 
     let result;
     try {
@@ -2398,11 +2845,12 @@ export function registerKnowClawIpc({
         sessionFile,
         toolDeps,
         prefs,
-        thinkingLevel: currentThinkingLevel,
-        noContextFiles: shouldDisableContextFiles(),
-        beforeToolCall: knowclawBeforeToolCall,
+        thinkingLevel: ch.thinkingLevel,
+        noContextFiles: shouldDisableContextFiles(ch),
+        beforeToolCall: makeKnowclawBeforeToolCall(ch),
         subAgentEnabled,
-        askUser: askUserViaRenderer,
+        disabledSkills: skillsDisabled,
+        askUser: makeAskUserViaRenderer(ch),
       });
     } catch (err) {
       return { ok: false, error: String(err?.message || err) };
@@ -2415,16 +2863,16 @@ export function registerKnowClawIpc({
       };
     }
 
-    activeSession = result.session;
-    activeSender = evt.sender;
-    activeUnsub = activeSession.subscribe((event) => {
-      pushEvent(activeSender, result.sessionId, event);
+    ch.session = result.session;
+    ch.sender = evt.sender;
+    ch.unsub = ch.session.subscribe((event) => {
+      pushEvent(ch.sender, result.sessionId, event);
     });
 
     pushEvent(
-      activeSender,
+      ch.sender,
       result.sessionId,
-      buildHistoryLoadedEvent(activeSession, result.sessionFile),
+      buildHistoryLoadedEvent(ch.session, result.sessionFile),
     );
 
     return {
@@ -2432,11 +2880,12 @@ export function registerKnowClawIpc({
       sessionId: result.sessionId,
       sessionFile: result.sessionFile,
       cwd,
-      isGlobal: !currentCwd,
+      isGlobal: !ch.cwd,
     };
   });
 
   ipcMain.handle('knowclaw:deleteSession', async (evt, payload) => {
+    const ch = getChannel(payload);
     const sessionFile = String(payload?.sessionFile || '').trim();
     const pathError = validateSessionFilePath(sessionFile);
     if (pathError) return { ok: false, error: pathError };
@@ -2445,11 +2894,11 @@ export function registerKnowClawIpc({
     // pi doesn't keep an open file handle on Windows.
     let wasActive = false;
     try {
-      const sm = activeSession?.sessionManager;
+      const sm = ch.session?.sessionManager;
       const currentFile = typeof sm?.getSessionFile === 'function' ? sm.getSessionFile() : null;
       if (currentFile && path.resolve(currentFile) === path.resolve(sessionFile)) {
         wasActive = true;
-        disposeCurrentSession();
+        disposeChannelSession(ch);
       }
     } catch { /* ignore */ }
 
@@ -2463,12 +2912,12 @@ export function registerKnowClawIpc({
     }
 
     // D.2: when the user just nuked the currently active session,
-    // `activeSession` is now `null`. The next `knowclaw:send` would
+    // `ch.session` is now `null`. The next `knowclaw:send` would
     // route through `ensureSession('new')` (post-D.2 default), but
     // that means the header sessionId pill stays empty until the user
     // actually types something. Eagerly create a blank replacement
     // here so the renderer can update the header immediately from
-    // the IPC response. We rebind `activeSender` to whichever
+    // the IPC response. We rebind `ch.sender` to whichever
     // renderer initiated the delete so subsequent push events land
     // in the right window.
     let nextSessionId = null;
@@ -2476,7 +2925,7 @@ export function registerKnowClawIpc({
     let nextError = null;
     if (wasActive) {
       try {
-        const ensured = await ensureSession(evt?.sender, 'new');
+        const ensured = await ensureSession(ch, evt?.sender, 'new');
         if (ensured?.ok) {
           nextSessionId = ensured.sessionId || null;
           nextSessionFile = ensured.sessionFile || null;
@@ -2505,6 +2954,7 @@ export function registerKnowClawIpc({
   });
 
   ipcMain.handle('knowclaw:forkSession', async (evt, payload) => {
+    const ch = getChannel(payload);
     const sessionFile = String(payload?.sessionFile || '').trim();
     const entryIndexRaw = payload?.entryIndex;
     const pathError = validateSessionFilePath(sessionFile);
@@ -2571,22 +3021,26 @@ export function registerKnowClawIpc({
     }
 
     // Open the new session immediately so the renderer flips to it.
-    disposeCurrentSession();
+    disposeChannelSession(ch);
 
     // U1: a forked session inherits the source session's cwd (encoded
-    // in the JSONL header). Restore `currentCwd` to that value before
+    // in the JSONL header). Restore `ch.cwd` to that value before
     // spinning up the pi session so the fork runs in the same
     // workspace as its parent.
+    //
+    // FK0: the floating channel has a locked cwd — skip the restore
+    // there so a fork inherits the channel's fixed workspace
+    // (consistent with openSession's behaviour).
     const userFileRootForFork = getUserFileRoot();
-    if (header?.cwd && typeof header.cwd === 'string') {
+    if (!ch.cwdLocked && header?.cwd && typeof header.cwd === 'string') {
       const resolved = path.resolve(header.cwd);
-      currentCwd = (resolved === path.resolve(userFileRootForFork))
+      ch.cwd = (resolved === path.resolve(userFileRootForFork))
         ? null
         : resolved;
     }
 
     const runtime = await ensurePiRuntime();
-    const cwd = getEffectiveCwd();
+    const cwd = getEffectiveCwd(ch);
     const toolDeps = haveToolDeps
       ? {
           getWorkspaceDirs,
@@ -2613,7 +3067,10 @@ export function registerKnowClawIpc({
     }
 
     // U6: forks honour the same kill-switch as the parent session.
-    const { subAgentEnabled } = readKnowClawState();
+    // SK0: forks also honour the live skill mute-list; the fork is a
+    // brand-new session so it should reflect whatever toggles the user
+    // has applied since the parent was created.
+    const { subAgentEnabled, skillsDisabled } = readKnowClawState();
 
     let result;
     try {
@@ -2623,11 +3080,12 @@ export function registerKnowClawIpc({
         sessionFile: newPath,
         toolDeps,
         prefs,
-        thinkingLevel: currentThinkingLevel,
-        noContextFiles: shouldDisableContextFiles(),
-        beforeToolCall: knowclawBeforeToolCall,
+        thinkingLevel: ch.thinkingLevel,
+        noContextFiles: shouldDisableContextFiles(ch),
+        beforeToolCall: makeKnowclawBeforeToolCall(ch),
         subAgentEnabled,
-        askUser: askUserViaRenderer,
+        disabledSkills: skillsDisabled,
+        askUser: makeAskUserViaRenderer(ch),
       });
     } catch (err) {
       return { ok: false, error: String(err?.message || err), sessionFile: newPath };
@@ -2641,14 +3099,14 @@ export function registerKnowClawIpc({
       };
     }
 
-    activeSession = result.session;
-    activeSender = evt.sender;
-    activeUnsub = activeSession.subscribe((event) => {
-      pushEvent(activeSender, result.sessionId, event);
+    ch.session = result.session;
+    ch.sender = evt.sender;
+    ch.unsub = ch.session.subscribe((event) => {
+      pushEvent(ch.sender, result.sessionId, event);
     });
 
-    pushEvent(activeSender, result.sessionId, {
-      ...buildHistoryLoadedEvent(activeSession, result.sessionFile),
+    pushEvent(ch.sender, result.sessionId, {
+      ...buildHistoryLoadedEvent(ch.session, result.sessionFile),
       forkedFrom: header.id || null,
     });
 

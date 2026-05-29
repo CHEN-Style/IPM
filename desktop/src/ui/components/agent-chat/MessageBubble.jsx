@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   ChevronDown, ChevronRight, Wrench, Loader2,
-  Check, X, Undo2, Sparkles, Zap, MessageSquare,
-  Brain, PenLine, Cog, Clock, AlertCircle,
+  Check, X, Undo2, Zap, MessageSquare,
+  AlertCircle,
 } from 'lucide-react';
 import { marked } from 'marked';
 
@@ -11,6 +11,7 @@ import AskUserCard from '../knowclaw-v2/AskUserCard.jsx';
 import FileChangePreview from '../knowclaw-v2/FileChangePreview.jsx';
 import DelegateTaskResult from '../knowclaw-v2/DelegateTaskResult.jsx';
 import { summarizeToolArgs } from '../knowclaw-v2/useKnowClawV2Chat.js';
+import { renderTextWithFileRefs } from './fileRefRender.jsx';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -19,64 +20,230 @@ function renderMarkdown(text) {
   try { return marked.parse(text); } catch { return text.replace(/\n/g, '<br/>'); }
 }
 
-/* ── Thinking indicator with rotating phrases ── */
+/* ── Agent status loader (SVG + animated dot) ────────────────────
+ *
+ * Single source of truth for the "agent is busy" visual. Replaces both
+ * the old rotating-phrase `ThinkingIndicator` and the lucide-icon
+ * `HeartbeatStrip` pill. The SVG/animation comes from a Uiverse loader
+ * (the "circle + orbiting dot" variant), trimmed to just the circle
+ * shape since that's what we use as the generic spinner. More shapes
+ * (triangle / square / etc.) can be added later as state-specific
+ * icons by extending `KC_LOADER_VARIANTS` and accepting a `variant`
+ * prop on `<AgentStatusLoader/>`.
+ *
+ * The source markup is sized to a 44×44 canvas with hard-coded pixel
+ * positions for the orbiting dot. To embed at an arbitrary `size` we
+ * keep the inner 44×44 element untouched and apply a uniform CSS
+ * `scale()` on it — this preserves the source's pixel math (dot start
+ * position, translate keyframes, stroke width) and lets the browser
+ * downscale to display size. */
 
-const THINKING_PHRASES = [
-  '思考中',
-  '脑子转起来了',
-  '翻箱倒柜找资料中',
-  '正在憋大招',
-  '神经元疯狂放电中',
-  '让我想想...',
-  '灵感快来了',
-  '在知识海洋里冲浪中',
-  '组织语言中',
-  '认真分析中',
-  '推理推理再推理',
-  '大脑超频运转中',
-  '答案正在路上',
-  '整理思路中',
-  '快想到了别催',
-  '深度思考中',
-  '检索记忆中',
-  '马上就好',
-  '构思精妙回答中',
-  '全力运算中',
-];
+const KC_LOADER_STYLE_ID = 'kc-loader-style';
 
-function ThinkingIndicator() {
-  const [idx, setIdx] = useState(() => Math.floor(Math.random() * THINKING_PHRASES.length));
+// Inject the shared keyframes/CSS exactly once into <head>. Doing it
+// at module level (rather than inside the component via a JSX `<style>`
+// tag) avoids React inserting a duplicate style node per render and
+// keeps the markup tree clean for downstream tooling.
+function ensureLoaderStyleInjected() {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(KC_LOADER_STYLE_ID)) return;
+  const el = document.createElement('style');
+  el.id = KC_LOADER_STYLE_ID;
+  el.textContent = `
+    /* ── Shared shell ──────────────────────────────────────── */
+    .kc-loader-shell {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    /* Icon variants inherit color via currentColor from the shell.
+       slate-500 matches the status label so the icon strokes blend
+       into the same muted caption tone. */
+    .kc-loader-shell.kc-loader-icon { color: #64748b; }
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setIdx((prev) => {
-        let next;
-        do { next = Math.floor(Math.random() * THINKING_PHRASES.length); } while (next === prev);
-        return next;
-      });
-    }, 2400);
-    return () => clearInterval(timer);
-  }, []);
+    /* ── Generic spinner (orbiting dot around a stroked ring) ─ */
+    .kc-loader-spinner {
+      /* Path color tracks slate-500 so the ring matches the label
+         text; the orbiting dot keeps the brand blue for accent. */
+      --kc-loader-path: #64748b;
+      --kc-loader-dot: #0052d9;
+      --kc-loader-duration: 3s;
+      width: 44px;
+      height: 44px;
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform-origin: 0 0;
+    }
+    .kc-loader-spinner::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      position: absolute;
+      display: block;
+      background: var(--kc-loader-dot);
+      top: 37px;
+      left: 19px;
+      transform: translate(-18px, -18px);
+      animation: kc-dotRect var(--kc-loader-duration) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
+    }
+    .kc-loader-spinner svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    .kc-loader-spinner svg circle {
+      fill: none;
+      stroke: var(--kc-loader-path);
+      stroke-width: 10px;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+      stroke-dasharray: 150 50 150 50;
+      stroke-dashoffset: 75;
+      animation: kc-pathCircle var(--kc-loader-duration) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
+    }
+    @keyframes kc-pathCircle {
+      25%  { stroke-dashoffset: 125; }
+      50%  { stroke-dashoffset: 175; }
+      75%  { stroke-dashoffset: 225; }
+      100% { stroke-dashoffset: 275; }
+    }
+    @keyframes kc-dotRect {
+      25%  { transform: translate(0, 0); }
+      50%  { transform: translate(18px, -18px); }
+      75%  { transform: translate(0, -36px); }
+      100% { transform: translate(-18px, -18px); }
+    }
 
+    /* ── State icons with twinkling sparkle ─────────────────── */
+    /* The icons are static line drawings (book / edit / terminal /
+       tool). To convey "still working" we pulse just the small blue
+       sparkle accent that lives inside each icon. Pure opacity
+       animation — transform on SVG paths gets weird with multi-
+       subpath stars (they collapse toward the bbox centre). The
+       edit variant splits its 3 stars into separate path nodes
+       so we can stagger them via inline animation-delay. */
+    .kc-loader-spark {
+      animation: kc-sparkle 1.4s ease-in-out infinite;
+      transform-origin: center;
+    }
+    @keyframes kc-sparkle {
+      0%, 100% { opacity: 0.3; }
+      50%      { opacity: 1; }
+    }
+
+    /* ── Status label fade-in on phase change ─────────────── */
+    @keyframes kc-statusFade {
+      0%   { opacity: 0; transform: translateY(2px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    .kc-status-label {
+      animation: kc-statusFade 220ms ease-out both;
+    }
+  `;
+  document.head.appendChild(el);
+}
+
+/* State icons. Each is a small SVG component that:
+ *   - draws its body using `stroke="currentColor"` so the icon picks
+ *     up the slate-500 we set on `.kc-loader-icon`;
+ *   - keeps the original `fill="#bbd3fb"` light-blue fills as-is;
+ *   - tags the blue `#0052d9` accent path(s) with `kc-loader-spark`
+ *     so the shared sparkle keyframe pulses just that path. */
+
+function IconBook({ size }) {
   return (
-    <div className="flex items-center gap-2.5 py-1">
-      <Loader2 size={14} className="text-gray-400 animate-spin shrink-0" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 6.5V22.0002C12 20.3434 9.31371 19.0002 6 19.0002C4.46329 19.0002 3.06151 19.2891 2 19.7641V4.26389C2 4.26389 3 3.5 6 3.5C9.31371 3.5 12 4.84315 12 6.5Z" fill="#bbd3fb" />
+      <path className="kc-loader-spark" d="M19.25 3L19.7697 4.23028L21 4.75L19.7697 5.26972L19.25 6.5L18.7303 5.26972L17.5 4.75L18.7303 4.23028L19.25 3Z" strokeWidth={1.5} stroke="#0052d9" />
+      <path d="M12 22.0002V6.50002M12 22.0002C12 20.3434 14.6863 19.0002 18 19.0002C19.5367 19.0002 20.9385 19.2891 22 19.7641V9.99982M12 22.0002C12 20.3434 9.31371 19.0002 6 19.0002C4.46329 19.0002 3.06151 19.2891 2 19.7641V4.26389C2 4.26389 3 3.5 6 3.5C9.31371 3.5 12 4.84317 12 6.50002M12 6.50002C12 5.88665 12.3682 5.31628 13 4.84113" strokeLinecap="square" strokeWidth={1.5} stroke="currentColor" />
+    </svg>
+  );
+}
+
+function IconEdit({ size }) {
+  // The source icon packs all 3 sparkles into one <path>. We split
+  // them into separate paths so we can stagger animation-delay and
+  // get a sequential twinkle instead of all blinking in lockstep.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M5.50049 12.9995L10.0005 17.4995L21.0005 6.49951L16.5005 1.99951L5.50049 12.9995Z" fill="#bbd3fb" />
+      <path d="M10.0005 17.4995L5.50049 12.9995M10.0005 17.4995L7.58628 19.9139C7.21121 20.289 6.70247 20.4998 6.17201 20.4998H2.49976L2.50035 16.8277C2.50044 16.2974 2.71115 15.7889 3.08614 15.4139L5.50049 12.9995M10.0005 17.4995L21.0005 6.49951L16.5005 1.99951L5.50049 12.9995" strokeWidth={1.5} stroke="currentColor" />
+      <path className="kc-loader-spark" style={{ animationDelay: '0s' }}    d="M5 3 5.33234 3.66766 6 4 5.33234 4.33234 5 5 4.66766 4.33234 4 4 4.66766 3.66766 5 3Z" strokeWidth={1.5} stroke="#0052d9" />
+      <path className="kc-loader-spark" style={{ animationDelay: '0.3s' }}  d="M12.75 20 12.9993 20.5007 13.5 20.75 12.9993 20.9993 12.75 21.5 12.5007 20.9993 12 20.75 12.5007 20.5007 12.75 20Z" strokeWidth={1.5} stroke="#0052d9" />
+      <path className="kc-loader-spark" style={{ animationDelay: '0.6s' }}  d="M19.5 14 20.1223 15.3777 21.5 16 20.1223 16.6223 19.5 18 18.8777 16.6223 17.5 16 18.8777 15.3777 19.5 14Z" strokeWidth={1.5} stroke="#0052d9" />
+    </svg>
+  );
+}
+
+function IconTerminal({ size }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6.33 14.33L8.65686 12L6.33 9.67M13 16H18M22 11V20H2L2 4L12 4" strokeLinecap="square" strokeWidth={1.5} stroke="currentColor" />
+      <path className="kc-loader-spark" d="M19 2.75L19.7 4.29996L21.25 5L19.7 5.70004L19 7.25L18.3 5.70004L16.75 5L18.3 4.29996L19 2.75Z" strokeWidth={1.5} stroke="#0052d9" />
+    </svg>
+  );
+}
+
+function IconTool({ size }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M3 14H10V21H3V14ZM14 14H21V21H14V14ZM3 3H10V10H3V3Z" fill="#bbd3fb" />
+      <path d="M3 14H10V21H3V14ZM14 14H21V21H14V14ZM3 3H10V10H3V3Z" strokeWidth={1.5} stroke="currentColor" />
+      <path className="kc-loader-spark" d="M18 3.75L18.7 5.29996L20.25 6L18.7 6.70004L18 8.25L17.3 6.70004L15.75 6L17.3 5.29996L18 3.75Z" strokeWidth={1.5} stroke="#0052d9" />
+    </svg>
+  );
+}
+
+const ICON_RENDERERS = {
+  book:     IconBook,
+  edit:     IconEdit,
+  terminal: IconTerminal,
+  tool:     IconTool,
+};
+
+function CircleLoader({ size = 22, variant = 'circle' }) {
+  useEffect(() => { ensureLoaderStyleInjected(); }, []);
+
+  // Generic spinner (orbiting dot around a stroked ring). Kept as the
+  // default / fallback so we always render something even if a phase
+  // points at an unknown variant key.
+  if (variant === 'circle' || !ICON_RENDERERS[variant]) {
+    const scale = size / 44;
+    return (
       <span
-        key={idx}
-        className="text-sm text-gray-400 font-medium"
-        style={{ animation: 'thinkFade 2.4s ease-in-out infinite' }}
+        className="kc-loader-shell"
+        style={{ width: size, height: size }}
+        aria-hidden="true"
       >
-        {THINKING_PHRASES[idx]}...
+        <span
+          className="kc-loader-spinner"
+          style={{ transform: `scale(${scale})` }}
+        >
+          <svg viewBox="0 0 80 80">
+            <circle r="32" cy="40" cx="40" />
+          </svg>
+        </span>
       </span>
-      <style>{`
-        @keyframes thinkFade {
-          0%   { opacity: 0; transform: translateY(4px); }
-          12%  { opacity: 1; transform: translateY(0); }
-          88%  { opacity: 1; transform: translateY(0); }
-          100% { opacity: 0; transform: translateY(-4px); }
-        }
-      `}</style>
-    </div>
+    );
+  }
+
+  // State-specific icon variants (book / edit / terminal / tool). The
+  // shell additionally gets `kc-loader-icon` so the icon strokes pick
+  // up the right `currentColor`, and the sparkle path inside the SVG
+  // pulses via the shared kc-sparkle keyframe.
+  const Icon = ICON_RENDERERS[variant];
+  return (
+    <span
+      className="kc-loader-shell kc-loader-icon"
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
+      <Icon size={size} />
+    </span>
   );
 }
 
@@ -449,84 +616,107 @@ function UserAttachments({ attachments }) {
   );
 }
 
-/* ── K2: heartbeat strip + idle countdown ── */
-//
-// Rendered at the top of the *active* assistant bubble while pi is
-// streaming. Two responsibilities:
-//   1. Surface a coarse-grain status (`thinking` / `writing` / `tool`)
-//      so users see *something is happening* even when text/thinking
-//      deltas come in burst-y or a long tool is mid-execution.
-//   2. After 30s of silence (no events at all) flip the strip to an
-//      "等待模型响应中…（已 N秒）" warning so users understand the
-//      app isn't frozen — usually means the upstream provider is slow
-//      or the network path stalled.
+/* ── Agent status indicator (merged heartbeat + thinking) ────────
+ *
+ * Rendered at the top of the active assistant bubble while pi is
+ * streaming. Responsibilities (unchanged from the old K2 strip):
+ *   1. Surface a coarse-grain status — `thinking` / `writing` /
+ *      `tool` / `idle` — so the user sees something is happening
+ *      even when text/thinking deltas come in burst-y or a long
+ *      tool call is mid-execution.
+ *   2. After 30s of silence (no events at all) flip to an explicit
+ *      "等待模型响应中…（已 N秒）" warning so the user knows the
+ *      app isn't frozen — usually means the upstream provider is
+ *      slow or the network path stalled.
+ *
+ * What changed (this commit): the pill UI with lucide icons + coloured
+ * background per phase was replaced with the cleaner spinner-and-grey-
+ * label layout that used to belong to ThinkingIndicator. The icon
+ * itself is now the SVG `CircleLoader` (black orbits + brand-blue
+ * orbiting dot), and ThinkingIndicator was deleted — the status
+ * indicator now covers both early-stream "no content yet" placeholder
+ * and ongoing phase reporting in a single component. Per-state custom
+ * icons can be wired in later by passing a `variant` to CircleLoader. */
 
-const PHASE_META = {
-  thinking: {
-    Icon: Brain,
-    color: 'text-amber-600',
-    bg: 'bg-amber-50',
-    border: 'border-amber-100',
-    label: '思考中…',
-  },
-  writing: {
-    Icon: PenLine,
-    color: 'text-emerald-600',
-    bg: 'bg-emerald-50',
-    border: 'border-emerald-100',
-    label: '正在回复…',
-  },
-  tool: {
-    Icon: Cog,
-    color: 'text-sky-600',
-    bg: 'bg-sky-50',
-    border: 'border-sky-100',
-    label: '正在调用工具…',
-  },
-  idle: {
-    Icon: Clock,
-    color: 'text-slate-500',
-    bg: 'bg-slate-50',
-    border: 'border-slate-100',
-    label: '等待中…',
-  },
+const PHASE_LABEL = {
+  thinking: '思考中…',
+  writing:  '正在回复…',
+  tool:     '正在调用工具…',
+  idle:     '等待中…',
 };
 
+// Coarse phase → loader variant. `thinking` has no dedicated artwork
+// yet, so it falls back to the spinner. `writing` is the model
+// emitting text, which we visualise with the edit-pencil + sparkles
+// icon so it reads as "agent is putting something down on paper".
+const PHASE_LOADER_VARIANT = {
+  thinking: 'circle',
+  writing:  'edit',
+  tool:     'tool',
+  idle:     'circle',
+};
+
+// Fine-grained tool → loader variant. The agent emits the actual
+// tool function name on each call (`read`, `write`, `edit`, `bash`,
+// etc., see knowclawEventReducer.summarizeToolArgs); we map the ones
+// we have dedicated artwork for and fall back to the generic 2×2
+// `tool` icon for everything else (`grep`, `ls`, `find`, `fetch_web`,
+// `task_manager`, `delegate_task`, `ask_user`, `save_plan`, …).
+function toolNameToVariant(name) {
+  switch (name) {
+    case 'read':
+      return 'book';
+    case 'write':
+    case 'edit':
+      return 'edit';
+    case 'bash':
+      return 'terminal';
+    default:
+      return 'tool';
+  }
+}
+
 function HeartbeatStrip({ phase, activeToolName, idleSeconds }) {
-  // After 30s of dead air we switch to the explicit "等待响应中"
-  // warning regardless of the current phase — that's a much more
-  // useful signal than the stale phase label at that point.
   const STALE_THRESHOLD = 30;
   const isStale = typeof idleSeconds === 'number' && idleSeconds >= STALE_THRESHOLD;
 
+  // Resolve label + variant together because the stale branch
+  // overrides the entire phase and `phase === 'tool'` needs to peek
+  // at the actual tool name to pick a specific icon.
+  let label;
+  let variant;
   if (isStale) {
-    return (
-      <div className="mb-2 inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] border border-amber-200 bg-amber-50 text-amber-700">
-        <Loader2 size={11} className="animate-spin" />
-        <span>等待模型响应中… (已 {idleSeconds}s)</span>
-      </div>
-    );
+    label = `等待模型响应中…（已 ${idleSeconds}s）`;
+    variant = 'circle';
+  } else if (phase === 'tool') {
+    label = activeToolName
+      ? `正在执行 ${activeToolName}…`
+      : PHASE_LABEL.tool;
+    variant = toolNameToVariant(activeToolName);
+  } else {
+    label = PHASE_LABEL[phase] || PHASE_LABEL.idle;
+    variant = PHASE_LOADER_VARIANT[phase] || PHASE_LOADER_VARIANT.idle;
   }
 
-  const meta = PHASE_META[phase] || PHASE_META.idle;
-  const { Icon } = meta;
-  const label = phase === 'tool' && activeToolName
-    ? `正在执行 ${activeToolName}…`
-    : meta.label;
-
   return (
-    <div
-      className={`mb-2 inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] border ${meta.bg} ${meta.border} ${meta.color}`}
-    >
-      <Icon size={11} className={phase === 'tool' || phase === 'thinking' ? 'animate-pulse' : ''} />
-      <span>{label}</span>
+    <div className="flex items-center gap-2.5 py-1 mb-1">
+      <CircleLoader size={22} variant={variant} />
+      {/* `key={label}` triggers the fade-in keyframe on every label
+          change so phase transitions look intentional rather than
+          jarring. The label intentionally stays slate-500 even in the
+          stale branch — the loader animation already conveys "still
+          working", and the previous amber warning pill was visually
+          loud out of proportion to its semantic. */}
+      <span key={label} className="text-sm text-slate-500 font-medium kc-status-label">
+        {label}
+      </span>
     </div>
   );
 }
 
 /* ── Message bubble ── */
 
-const MessageBubble = ({ message, projectName, domain, streamingPhase, activeToolName, idleSeconds, isLatestTasksBubble, onAskUserReply, onAskUserCancel }) => {
+const MessageBubble = ({ message, projectName, domain, streamingPhase, activeToolName, idleSeconds, isLatestTasksBubble, onAskUserReply, onAskUserCancel, onAskUserSkip }) => {
   // U7: highest-priority branch — `kind:'tasks'` system bubbles are
   // rendered as a checklist card, not as a normal text/system bubble.
   // We bail out BEFORE any other branch (including the system-text
@@ -561,6 +751,7 @@ const MessageBubble = ({ message, projectName, domain, streamingPhase, activeToo
           message={message}
           onReply={onAskUserReply}
           onCancel={onAskUserCancel}
+          onSkip={onAskUserSkip}
         />
       </div>
     );
@@ -613,8 +804,14 @@ const MessageBubble = ({ message, projectName, domain, streamingPhase, activeToo
             <UserAttachments attachments={message.attachments} />
           )}
           {message.content ? (
-            <div className="px-4 py-3 rounded-2xl rounded-br-sm bg-gray-100 text-gray-800 text-sm leading-relaxed whitespace-pre-wrap">
-              {message.content}
+            // File-ref chips: any `@relPath` token in the user text is
+            // swapped for a coloured chip with the file basename so the
+            // bubble matches the composer's chip styling instead of
+            // showing a raw underline-noisy "@long/path.md". The full
+            // path lives in the chip's tooltip; the bubble content
+            // sent to the LLM is unchanged (see useKnowClawPersist).
+            <div className="px-4 py-3 rounded-2xl rounded-br-sm bg-gray-100 text-gray-800 text-sm leading-relaxed whitespace-pre-wrap break-words">
+              {renderTextWithFileRefs(message.content)}
             </div>
           ) : null}
         </div>
@@ -622,12 +819,14 @@ const MessageBubble = ({ message, projectName, domain, streamingPhase, activeToo
     );
   }
 
+  // Assistant reply: no avatar bubble. The previous gray-circle +
+  // Sparkles glyph created a "chat persona" feel that competed with
+  // the new status indicator and the markdown body. Dropping it
+  // lets the content sit flush with the bubble's left edge for a
+  // cleaner, document-style reply.
   return (
     <div className="mb-6">
-      <div className="flex items-start gap-3">
-        <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
-          <Sparkles size={14} className="text-gray-500" strokeWidth={1.5} />
-        </div>
+      <div className="min-w-0">
         <div className="flex-1 min-w-0">
           {/* K2: heartbeat strip — only rendered while this bubble is
               actively streaming AND the page handed down a phase. The
@@ -660,12 +859,12 @@ const MessageBubble = ({ message, projectName, domain, streamingPhase, activeToo
                 <span className="inline-block w-1.5 h-4 bg-gray-400 animate-pulse rounded-sm ml-0.5 align-text-bottom" />
               )}
             </>
-          ) : message.streaming && !message.thinking ? (
-            // Only show the generic "thinking..." spinner when we have
-            // neither real thinking_delta nor text yet — otherwise the
-            // ThinkingBlock above already conveys progress.
-            <ThinkingIndicator />
           ) : null}
+          {/* No more inline ThinkingIndicator fallback here. The
+              merged AgentStatusIndicator at the top of the bubble
+              (HeartbeatStrip) already covers the "streaming but no
+              content/thinking yet" state, so a second placeholder
+              would just stack two spinners. */}
 
           {message.tools?.length > 0 && (
             <div className="mt-2.5 space-y-1">

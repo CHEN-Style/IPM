@@ -11,7 +11,6 @@ import {
   Layers,
   Pin,
   PinOff,
-  Brain,
   File,
   Folder,
   FolderKanban,
@@ -19,6 +18,45 @@ import {
   CornerDownLeft,
 } from 'lucide-react';
 import appIconUrl from '../../../assets/icon.png';
+
+/**
+ * KnowClaw brand mark, inline SVG version used by the sidebar nav row.
+ *
+ * Renders exactly like a lucide stroke icon so it can sit alongside
+ * `HardDrive` / `BookMarked` at the same `size` and stay pixel-aligned
+ * with their labels. Orbits inherit `currentColor` (we pass `text-white`
+ * from the call site so they show up white on the dark sidebar). The
+ * center dot keeps the brand blue baked into the original asset.
+ */
+const KnowClawSidebarIcon = ({ size = 17, className = '' }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={`shrink-0 text-white ${className}`}
+    aria-hidden="true"
+  >
+    <g>
+      <path
+        d="M15.2438 15.404C10.408 20.2398 4.96332 22.6354 3.08273 20.7549C1.20214 18.8743 3.59781 13.4296 8.43361 8.59377C13.2694 3.75797 18.7141 1.3623 20.5947 3.24289C22.4753 5.12348 20.0796 10.5682 15.2438 15.404Z"
+        strokeWidth="2"
+        stroke="currentColor"
+      />
+      <path
+        d="M8.4341 15.404C13.2699 20.2398 18.7146 22.6354 20.5952 20.7549C22.4758 18.8743 20.0801 13.4296 15.2443 8.59377C10.4085 3.75797 4.96381 1.3623 3.08322 3.24289C1.20263 5.12348 3.5983 10.5682 8.4341 15.404Z"
+        strokeWidth="2"
+        stroke="currentColor"
+      />
+      <path
+        d="M12 12H12.0039V12.0039H12V12Z"
+        strokeWidth="2"
+        stroke="#0052d9"
+      />
+    </g>
+  </svg>
+);
 
 const ACCENT = '#3e4b9c';
 const DEBOUNCE_MS = 300;
@@ -397,7 +435,27 @@ const Sidebar = ({
         <nav className="space-y-0.5">
           <NavItem icon={<HardDrive size={17} />} label="我的资料" active={activeNav === 'mydata'} collapsed={isCollapsed} navDirectWhenCollapsed onClick={() => navSelectDirect('mydata')} dataTour="nav-mydata" dataTrack="nav-mydata" />
           <NavItem icon={<BookMarked size={17} />} label="知识库" active={activeNav === 'knowledge'} collapsed={isCollapsed} navDirectWhenCollapsed onClick={() => navSelectDirect('knowledge')} dataTrack="nav-knowledge" />
-          <NavItem icon={<Brain size={17} />} label="KnowClaw" active={activeNav === 'knowclaw-v2'} collapsed={isCollapsed} navDirectWhenCollapsed onClick={() => navSelectDirect('knowclaw-v2')} dataTrack="nav-knowclaw" />
+          {/* Brand icon for the sidebar: switched from the PNG to an
+              inline SVG because the PNG has too much transparent
+              canvas padding, which made size/alignment matching
+              against the lucide stroke icons (HardDrive / BookMarked
+              at size=17) impossible without ugly compensation. The
+              SVG is rendered the same way lucide does it — width and
+              height set to 17, viewBox 0 0 24 24, currentColor stroke
+              — so it now sits in the same 17×17 box, has the same
+              stroke weight, and aligns with "我的资料"/"知识库"
+              without any wrapper trickery. The orbits use white
+              (`currentColor` via `text-white`), the inner dot keeps
+              the brand blue from the source. */}
+          <NavItem
+            icon={<KnowClawSidebarIcon size={17} />}
+            label="KnowClaw"
+            active={activeNav === 'knowclaw-v2'}
+            collapsed={isCollapsed}
+            navDirectWhenCollapsed
+            onClick={() => navSelectDirect('knowclaw-v2')}
+            dataTrack="nav-knowclaw"
+          />
         </nav>
 
         <div className={isCollapsed ? 'mt-4' : 'mt-7'}>

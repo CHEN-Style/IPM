@@ -77,6 +77,11 @@ const VISION_MODEL_HINTS = [
   'gemini-1.5',
   'gemini-2',
   'vision',
+  'vl',
+  'glm-4v',
+  'qwen-vl',
+  'qwen2.5-vl',
+  'doubao-vision',
 ];
 
 // Reasoning-model ids that explicitly DO support image input.
@@ -86,6 +91,38 @@ const VISION_REASONING_EXACT = [
   'o1', // bare `o1` is the vision-capable flagship
   'o3', // bare `o3` is the vision-capable flagship
 ];
+
+function inferReasoningCapability(modelId, apiMode) {
+  const id = String(modelId || '').toLowerCase();
+  if (!id) return false;
+  if (apiMode === 'responses') {
+    return id.startsWith('gpt-5') || id === 'o1' || id === 'o3' || id === 'o4' || /^o[134]-/.test(id);
+  }
+  // Chat Completions 兼容模型默认不声明 reasoning，避免 pi provider 注入
+  // reasoning_effort 后被非 OpenAI 网关拒绝。后续如需支持 DeepSeek-R1 /
+  // Qwen thinking，可在这里按模型名白名单打开。
+  return false;
+}
+
+function resolveModelInputs(modelId, supportsImages) {
+  if (typeof supportsImages === 'boolean') {
+    return supportsImages ? ['text', 'image'] : ['text'];
+  }
+  return inferModelInputs(modelId);
+}
+
+function buildModelShape(modelId, apiMode, overrides = {}) {
+  const { supportsImages, ...shapeOverrides } = overrides;
+  return {
+    id: modelId,
+    name: modelId,
+    apiMode,
+    ...DEFAULT_MODEL_SHAPE,
+    reasoning: inferReasoningCapability(modelId, apiMode),
+    input: resolveModelInputs(modelId, supportsImages),
+    ...shapeOverrides,
+  };
+}
 
 export function inferModelInputs(modelId) {
   const id = String(modelId || '').toLowerCase();
@@ -98,66 +135,63 @@ export function inferModelInputs(modelId) {
 }
 
 /**
- * Register the `ipm-openai` provider directly on the given
- * ModelRegistry. If `ipmConfig` is null, this is a no-op and no
- * provider/models are added.
+ * 把单个 IPM provider 配置注册到 ModelRegistry 上。
+ *
+ * 多 Provider 升级后，每个 KnowClaw 模型分配都来自一个 provider，多个
+ * 分配可能引用相同的 provider。我们按 `piProviderId` 去重，对同一 pi
+ * provider 只注册一次，但模型列表合并所有分配。
+ *
+ * 当 `ipmConfig` 为 null 或缺少 piProviderId 时本函数为 no-op。
  *
  * @param {*} modelRegistry
  * @param {import('./ipmConfig.js').IpmLlmConfig | null} ipmConfig
  */
 export function registerIpmProvider(modelRegistry, ipmConfig) {
   if (!modelRegistry || !ipmConfig) return;
+  return registerIpmProviders(modelRegistry, [ipmConfig]);
+}
 
-  const models = [
-    {
-      id: ipmConfig.model,
-      name: ipmConfig.model,
-      ...DEFAULT_MODEL_SHAPE,
-      input: inferModelInputs(ipmConfig.model),
-    },
-  ];
+/**
+ * 批量注册多个 KnowClaw provider 配置。
+ *
+ * @param {*} modelRegistry
+ * @param {Array<import('./ipmConfig.js').IpmLlmConfig>} configs
+ */
+export function registerIpmProviders(modelRegistry, configs) {
+  if (!modelRegistry || !Array.isArray(configs) || configs.length === 0) return;
 
-  if (ipmConfig.summaryModel && ipmConfig.summaryModel !== ipmConfig.model) {
-    models.push({
-      id: ipmConfig.summaryModel,
-      name: ipmConfig.summaryModel,
-      ...DEFAULT_MODEL_SHAPE,
-      input: inferModelInputs(ipmConfig.summaryModel),
-      maxTokens: 4096,
-    });
+  // 按 piProviderId 分组，把同一 provider 下被分配的所有模型合并。
+  const grouped = new Map();
+  for (const cfg of configs) {
+    if (!cfg || !cfg.piProviderId) continue;
+    if (!grouped.has(cfg.piProviderId)) {
+      grouped.set(cfg.piProviderId, { base: cfg, models: new Map() });
+    }
+    const bucket = grouped.get(cfg.piProviderId);
+    bucket.models.set(cfg.model, buildModelShape(cfg.model, cfg.apiMode, { supportsImages: cfg.supportsImages }));
+    if (cfg.summaryModel && cfg.summaryModel !== cfg.model) {
+      // summary 角色用同一个 provider 时也把它注册进来，方便 UI 一并显示。
+      if (!bucket.models.has(cfg.summaryModel)) {
+        bucket.models.set(cfg.summaryModel, buildModelShape(cfg.summaryModel, cfg.apiMode, { maxTokens: 4096 }));
+      }
+    }
   }
 
-  // U0.5: pick the OpenAI-compatible endpoint family based on the
-  // user's `apiMode` preference.
-  //
-  // Why this matters:
-  //   - OpenAI's Chat Completions protocol *never* returns the raw
-  //     thinking text from reasoning models. The official docs even
-  //     state that scraping reasoning by other means may violate the
-  //     AUP. Chat models like GPT-4o have no reasoning capability at
-  //     all. → Picking 'chat' means the user almost certainly won't
-  //     see a thinking stream unless their gateway non-standardly
-  //     injects `reasoning_content` deltas (DeepSeek-R1, Qwen3-Thinking,
-  //     self-hosted vLLM, …).
-  //   - The Responses API (`/responses`) emits
-  //     `response.reasoning_summary_text.delta`, which pi-ai already
-  //     translates into our `thinking_delta` stream. Major
-  //     OpenAI-compatible gateways (e.g. CloseAI) advertise full
-  //     Responses support and prefer it for reasoning workloads
-  //     (~20-minute request budget vs. ~5 minutes on Chat).
-  //
-  // We let `apiMode` choose; default is set in ipmConfig.js.
-  const api = ipmConfig.apiMode === 'chat' ? 'openai-completions' : 'openai-responses';
-
-  modelRegistry.registerProvider(IPM_PROVIDER_ID, {
-    name: ipmConfig.apiMode === 'chat'
-      ? 'IPM (OpenAI Chat Completions)'
-      : 'IPM (OpenAI Responses)',
-    baseUrl: ipmConfig.baseURL,
-    apiKey: 'IPM_OPENAI_API_KEY',
-    api,
-    models,
-  });
+  for (const [piProviderId, { base, models }] of grouped) {
+    // U0.5: pick the OpenAI-compatible endpoint family based on the
+    // user's `apiMode` preference. See historical notes in git for why
+    // this matters for reasoning models / thinking streams.
+    const api = base.apiMode === 'chat' ? 'openai-completions' : 'openai-responses';
+    modelRegistry.registerProvider(piProviderId, {
+      name: base.providerName
+        ? `${base.providerName} (${api === 'openai-completions' ? 'Chat' : 'Responses'})`
+        : (api === 'openai-completions' ? 'IPM (OpenAI Chat Completions)' : 'IPM (OpenAI Responses)'),
+      baseUrl: base.baseURL,
+      apiKey: `IPM_OPENAI_API_KEY__${piProviderId}`,
+      api,
+      models: Array.from(models.values()),
+    });
+  }
 }
 
 /**
@@ -175,6 +209,7 @@ function modelShape(m) {
     provider: m.provider,
     id: m.id,
     name: m.name || m.id,
+    apiMode: m.apiMode || null,
     // U8b-1: surface the declared input modalities so the renderer
     // can decide whether to expose image-attachment UI for the
     // currently selected model. Falls back to `['text']` if the
@@ -183,8 +218,16 @@ function modelShape(m) {
   };
 }
 
+// 判断一个 model 的 provider id 是否属于"IPM 自己注册的"那批。
+// 旧版只检查等于 `ipm-openai`；新版用 `ipm-openai-*` 前缀。
+function isIpmProviderId(providerId) {
+  if (!providerId) return false;
+  if (providerId === IPM_PROVIDER_ID) return true;
+  return String(providerId).startsWith(`${IPM_PROVIDER_ID}-`);
+}
+
 /**
- * Get all models registered under the `ipm-openai` provider.
+ * 列出所有由 IPM 注册的 provider 下的模型（同步版，尽力而为）。
  * @param {*} modelRegistry
  */
 export function listIpmModels(modelRegistry) {
@@ -195,15 +238,11 @@ export function listIpmModels(modelRegistry) {
     if (typeof fn !== 'function') continue;
     try {
       const result = fn.call(modelRegistry);
-      const resolve = (value) => {
-        const arr = Array.isArray(value) ? value : [];
-        return arr
-          .filter((m) => m && m.provider === IPM_PROVIDER_ID)
-          .map(modelShape)
-          .filter(Boolean);
-      };
       if (result && typeof result.then === 'function') continue;
-      const arr = resolve(result);
+      const arr = (Array.isArray(result) ? result : [])
+        .filter((m) => m && isIpmProviderId(m.provider))
+        .map(modelShape)
+        .filter(Boolean);
       if (arr.length) return arr;
     } catch {
       // try next candidate
@@ -213,7 +252,7 @@ export function listIpmModels(modelRegistry) {
 }
 
 /**
- * Async variant — uses `getAvailable()` which is the most reliable.
+ * 异步版：列出所有 IPM 注册的模型。
  * @param {*} modelRegistry
  */
 export async function listIpmModelsAsync(modelRegistry) {
@@ -223,7 +262,7 @@ export async function listIpmModelsAsync(modelRegistry) {
   try {
     const all = await modelRegistry.getAvailable();
     return (Array.isArray(all) ? all : [])
-      .filter((m) => m && m.provider === IPM_PROVIDER_ID)
+      .filter((m) => m && isIpmProviderId(m.provider))
       .map(modelShape)
       .filter(Boolean);
   } catch {
@@ -232,29 +271,40 @@ export async function listIpmModelsAsync(modelRegistry) {
 }
 
 /**
- * Locate the Model object for a given id under `ipm-openai`.
+ * 在指定 provider id 下查找特定模型。
+ *   - 当 providerId 未传或为传统的 `ipm-openai` 时，回退到模型清单里
+ *     第一个 id 匹配的实例（保留旧调用方式）。
+ *   - 否则严格按 provider/id 双键匹配，避免不同 provider 同名模型冲突。
+ *
  * @param {*} modelRegistry
  * @param {string} modelId
+ * @param {string} [providerId]
  */
-export function findIpmModel(modelRegistry, modelId) {
+export function findIpmModel(modelRegistry, modelId, providerId) {
   if (!modelRegistry || !modelId) return null;
+  const pid = providerId || IPM_PROVIDER_ID;
   if (typeof modelRegistry.find === 'function') {
     try {
-      const m = modelRegistry.find(IPM_PROVIDER_ID, modelId);
+      const m = modelRegistry.find(pid, modelId);
       if (m) return m;
     } catch {
       // fall through
     }
   }
-  return null;
+  // Fallback：扫描所有 IPM provider 找第一个 id 匹配的。
+  const all = listIpmModels(modelRegistry);
+  if (providerId) {
+    return all.find((m) => m.provider === providerId && m.id === modelId) || null;
+  }
+  return all.find((m) => m.id === modelId) || null;
 }
 
 /**
- * Get the default model — preferred by `ipmConfig.model`.
+ * 默认模型：用 ipmConfig 指明的 piProviderId + model。
  * @param {*} modelRegistry
  * @param {import('./ipmConfig.js').IpmLlmConfig | null} ipmConfig
  */
 export function getDefaultIpmModel(modelRegistry, ipmConfig) {
   if (!ipmConfig) return null;
-  return findIpmModel(modelRegistry, ipmConfig.model);
+  return findIpmModel(modelRegistry, ipmConfig.model, ipmConfig.piProviderId);
 }

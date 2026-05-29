@@ -5,7 +5,7 @@ import { createChatModel, getOpenAIConfig } from '../services/llm.js';
 
 export async function classifyFileOnce(input) {
   const parsed = ClassifyFileInputSchema.parse(input);
-  const model = createChatModel();
+  const model = await createChatModel('classification');
 
   // IMPORTANT: do NOT use PromptTemplate/ChatPromptTemplate here.
   // The JSON candidate list contains `{}` which PromptTemplate treats as variables.
@@ -23,7 +23,15 @@ export async function classifyFileOnce(input) {
     throw new Error(`Agent 输出的 targetRelPath 不在候选列表中：${out.targetRelPath}`);
   }
 
-  const { model: modelName, baseURL } = getOpenAIConfig();
+  let modelName = '';
+  let baseURL = '';
+  try {
+    const cfg = getOpenAIConfig('classification');
+    modelName = cfg.model;
+    baseURL = cfg.baseURL;
+  } catch {
+    // 非 OpenAI 兼容时无法填充这两个字段。
+  }
   return {
     ...out,
     agentMeta: {

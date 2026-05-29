@@ -39,9 +39,14 @@ import ChatInput from '../agent-chat/ChatInput.jsx';
 import useKnowClawV2Chat from './useKnowClawV2Chat.js';
 import SessionPanel from './SessionPanel.jsx';
 import WorkspaceFileTree from './WorkspaceFileTree.jsx';
+import SkillManagerPanel from './SkillManagerPanel.jsx';
+import SkillDetailModal from './SkillDetailModal.jsx';
+import ImportSkillModal from './ImportSkillModal.jsx';
+import SkillSelector from './SkillSelector.jsx';
 import useHeaderTier from './useHeaderTier.js';
 import HeaderOverflowMenu from './HeaderOverflowMenu.jsx';
 import ChatNavTrack from './ChatNavTrack.jsx';
+import KnowClawIcon from './KnowClawIcon.jsx';
 
 const HINT_PROMPTS = [
   '你好，用一句话告诉我 1+1 等于几',
@@ -102,11 +107,22 @@ const KnowClawV2Page = () => {
     compactSession,
     subAgentEnabled,
     toggleSubAgent,
+    // SK1: skill management state + actions.
+    skills,
+    skillsLoading,
+    loadSkills,
+    toggleSkill,
+    deleteSkill,
+    // SK2: skill import actions.
+    importSkill,
+    scanExternalSkills,
+    chooseSkillDir,
     // E.5: Plan-mode state + actions.
     planMode,
     setPlanMode,
     replyAskUser,
     cancelAskUser,
+    skipAskUser,
     startExecuting,
     // K2: workspace file tree.
     workspaceTree,
@@ -181,20 +197,112 @@ const KnowClawV2Page = () => {
     bottomRef.current?.scrollIntoView({ behavior });
   }, []);
 
-  // K2: right-side file tree visibility. Persists across runs via
-  // localStorage so users who keep it open don't have to reopen it
-  // on every IPM launch. Default is collapsed to preserve the
-  // pre-K2 layout for users who don't need the tree.
-  const [showFileTree, setShowFileTree] = useState(() => {
+  // K2 + SK1: right-side panel selector. The right rail is now a
+  // single mutually-exclusive slot — at most one of FileTree / Skills
+  // is visible at any time. Values: 'fileTree' | 'skills' | null.
+  //
+  // We continue to honour the legacy `knowclaw.v2.showFileTree`
+  // localStorage key for users upgrading from pre-SK1 builds (so
+  // their FileTree-open preference survives the upgrade). The new
+  // `knowclaw.v2.rightPanel` key takes precedence when present.
+  const [rightPanel, setRightPanel] = useState(() => {
     try {
-      return window.localStorage?.getItem('knowclaw.v2.showFileTree') === '1';
-    } catch { return false; }
+      const next = window.localStorage?.getItem('knowclaw.v2.rightPanel');
+      if (next === 'fileTree' || next === 'skills') return next;
+      if (next === 'null' || next === null || next === undefined) {
+        // Fall through to legacy migration check below.
+      }
+      const legacy = window.localStorage?.getItem('knowclaw.v2.showFileTree');
+      if (legacy === '1') return 'fileTree';
+      return null;
+    } catch { return null; }
   });
   useEffect(() => {
     try {
-      window.localStorage?.setItem('knowclaw.v2.showFileTree', showFileTree ? '1' : '0');
+      window.localStorage?.setItem(
+        'knowclaw.v2.rightPanel',
+        rightPanel ? String(rightPanel) : 'null',
+      );
+      // Keep the legacy key in sync so any other surface still
+      // reading it sees the migrated value.
+      window.localStorage?.setItem(
+        'knowclaw.v2.showFileTree',
+        rightPanel === 'fileTree' ? '1' : '0',
+      );
     } catch { /* ignore */ }
-  }, [showFileTree]);
+  }, [rightPanel]);
+  const showFileTree = rightPanel === 'fileTree';
+  const showSkillsPanel = rightPanel === 'skills';
+  const toggleFileTree = useCallback(() => {
+    setRightPanel((p) => (p === 'fileTree' ? null : 'fileTree'));
+  }, []);
+  const toggleSkillsPanel = useCallback(() => {
+    setRightPanel((p) => (p === 'skills' ? null : 'skills'));
+  }, []);
+
+  // SK1: skill detail modal target. Click on a skill row sets this;
+  // the modal stays mounted until the user closes it. Null = hidden.
+  const [skillDetailTarget, setSkillDetailTarget] = useState(null);
+
+  // SK2: visibility of the import skill modal. Triggered by the
+  // "+ 导入技能" button at the bottom of SkillManagerPanel.
+  const [showImportModal, setShowImportModal] = useState(false);
+
+  // Skill Selector: names of skills the user has pinned to the next
+  // outgoing message. Cleared after each successful send (see
+  // `handleSend` below). Lives at the page level — not in
+  // `useKnowClawPersist` — because the selection is purely a composer
+  // affordance and shouldn't survive page navigation.
+  const [pinnedSkills, setPinnedSkills] = useState([]);
+  const handlePinnedSkillsChange = useCallback((next) => {
+    setPinnedSkills(Array.isArray(next) ? next : []);
+  }, []);
+  const handlePinnedSkillRemove = useCallback((name) => {
+    setPinnedSkills((prev) => prev.filter((n) => n !== name));
+  }, []);
+
+  // SK1: auto-refresh the skill list whenever the panel becomes
+  // visible. We always re-fetch on open (rather than once-on-mount)
+  // because the skill set can change between opens — e.g. the agent
+  // may have generated a new skill via skill-builder while the panel
+  // was closed. `loadSkills` is idempotent and inexpensive.
+  //
+  // SK4: also re-fetch whenever `currentCwd` changes while the panel
+  // is open — switching workspaces should swap the workspace-scoped
+  // skills in / out of the visible list immediately. Global mode
+  // (currentCwd === null) is included in the dependency array on
+  // purpose so going global → workspaced (or vice versa) also fires.
+  useEffect(() => {
+    if (showSkillsPanel) {
+      void loadSkills?.(currentCwd || undefined);
+    }
+  }, [showSkillsPanel, loadSkills, currentCwd]);
+
+  // Skill Selector eagerly needs `skills` to populate its dropdown the
+  // first time the user opens it, even when the right-side
+  // SkillManagerPanel has never been shown. We refresh once on mount
+  // and then again whenever the workspace changes so workspace-scoped
+  // skills appear in the selector immediately.
+  useEffect(() => {
+    void loadSkills?.(currentCwd || undefined);
+  }, [loadSkills, currentCwd]);
+
+  // Drop any pinned selection whose underlying skill is no longer
+  // available or has been disabled — keeping the chip would lead the
+  // user to think it will run when in fact the injection step will
+  // silently skip it.
+  useEffect(() => {
+    if (pinnedSkills.length === 0) return;
+    const enabledNames = new Set(
+      (Array.isArray(skills) ? skills : [])
+        .filter((s) => s?.enabled)
+        .map((s) => s.name),
+    );
+    const next = pinnedSkills.filter((n) => enabledNames.has(n));
+    if (next.length !== pinnedSkills.length) {
+      setPinnedSkills(next);
+    }
+  }, [skills, pinnedSkills]);
 
   // U8b-9: vision UI only when the active model declares `image` input.
   const supportsImages = useMemo(() => {
@@ -267,10 +375,23 @@ const KnowClawV2Page = () => {
   // D.4: sending a new message is an explicit user intent to engage
   // the latest turn, so we always pin back to the bottom — even if
   // they were reading older context a second ago.
-  const handleSend = useCallback((text, images) => {
+  //
+  // Skill Selector: ChatInput now forwards a snapshot of the pinned
+  // skill names as the third arg. We thread it through to the hook so
+  // the IPC payload carries it, and we eagerly clear the local pin
+  // state so the chips disappear the instant the user hits send (the
+  // next turn shouldn't re-inject the same skills implicitly — that
+  // would silently double-cost every follow-up).
+  const handleSend = useCallback((text, images, pinned) => {
     scrollToBottom('auto');
-    sendMessage(text, images);
-  }, [sendMessage, scrollToBottom]);
+    const pinnedNames = Array.isArray(pinned) && pinned.length > 0
+      ? pinned
+      : (pinnedSkills.length > 0 ? pinnedSkills : undefined);
+    sendMessage(text, images, pinnedNames);
+    if (pinnedSkills.length > 0) {
+      setPinnedSkills([]);
+    }
+  }, [sendMessage, scrollToBottom, pinnedSkills]);
 
   const handleHintClick = (hint) => {
     if (!streaming) handleSend(hint);
@@ -356,51 +477,64 @@ const KnowClawV2Page = () => {
             against this. */}
         <div
           ref={headerRowRef}
-          className="flex items-center justify-between px-8 py-5 border-b border-slate-100"
+          className={`border-b border-slate-100 min-w-0 ${
+            headerTier === 'compact'
+              ? 'flex flex-col items-stretch gap-2 px-4 py-3'
+              : 'flex items-center justify-between gap-4 px-8 py-5'
+          }`}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
               onClick={() => setShowSessionPanel(!showSessionPanel)}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
               title={showSessionPanel ? '隐藏会话列表' : '显示会话列表'}
             >
               {showSessionPanel ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
             </button>
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-200">
-              <Zap size={20} className="text-white" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">KnowClaw v2</h2>
-              <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                <span>pi-coding-agent runtime{sessionId ? ` · ${sessionId.slice(0, 8)}` : ''}</span>
-                {apiMode && <ApiModeBadge mode={apiMode} />}
-                <WorkspaceBadge
-                  cwd={currentCwd}
-                  isGlobal={cwdIsGlobal}
-                  onOpenInExplorer={() => openInExplorer()}
-                />
+            {/* Brand: just the dark PNG, no wrapper. The old amber→orange
+                gradient tile was removed per UI feedback ("去除那个橙色底，
+                放大图标，使用 black"). The icon now sits directly on the
+                header background and is sized noticeably larger to keep
+                presence without the container shape behind it. */}
+            <KnowClawIcon
+              tone="dark"
+              size={headerTier === 'compact' ? 36 : 44}
+              className="shrink-0"
+            />
+            <div className="min-w-0">
+              <h2 className={`${headerTier === 'compact' ? 'text-base' : 'text-lg'} font-semibold text-slate-900 truncate`}>
+                KnowClaw v2
+              </h2>
+              <p className="text-xs text-slate-400 flex items-center gap-1.5 min-w-0 overflow-hidden">
+                {sessionId && (
+                  <span className="truncate">session · {sessionId.slice(0, 8)}</span>
+                )}
+                {apiMode && headerTier !== 'compact' && <ApiModeBadge mode={apiMode} />}
+                {headerTier === 'wide' && (
+                  <WorkspaceBadge
+                    cwd={currentCwd}
+                    isGlobal={cwdIsGlobal}
+                    onOpenInExplorer={() => openInExplorer()}
+                  />
+                )}
               </p>
             </div>
           </div>
           {/* E.6: header right cluster. Tier comes from headerRowRef
               measurement above; this cluster just consumes it to
-              decide which controls render inline vs. inside overflow. */}
-          <div className="flex items-center gap-2 min-w-0">
-            <WorkspaceSelector
-              currentCwd={currentCwd}
-              isGlobal={cwdIsGlobal}
-              userFileRoot={userFileRoot}
-              workspaces={workspaces}
-              loading={workspacesLoading}
-              onSelect={(ws) => setCwd(ws?.isGlobal ? null : ws.path)}
-              onRefresh={loadWorkspaces}
-              onChooseDirectory={chooseDirectory}
-              onCreateWorkspace={createWorkspace}
-              onOpenInExplorer={openInExplorer}
-              onHideWorkspace={hideWorkspace}
-              disabled={isSessionLocked}
-            />
+              decide which controls render inline vs. inside overflow.
+              UI revamp: WorkspaceSelector / PlanModeToggle /
+              ModelSelector and the skill-panel toggle have moved into
+              the composer's bottom toolbar. The header now only
+              carries status read-outs (Context / Token pills) and the
+              broader session-level controls (Thinking / SubAgent /
+              Compact / 新对话 / FileTree). */}
+          <div className={`flex items-center gap-2 min-w-0 ${
+            headerTier === 'compact'
+              ? 'w-full justify-end overflow-visible'
+              : 'justify-end shrink-0'
+          }`}>
             <ContextPill usage={contextUsage} />
             <TokenPill stats={sessionStats} />
             {/* E.6: secondary controls — inline in wide/medium, folded
@@ -418,21 +552,6 @@ const KnowClawV2Page = () => {
                 <SubAgentToggle
                   enabled={subAgentEnabled}
                   onToggle={toggleSubAgent}
-                  disabled={streaming}
-                  tier={headerTier}
-                />
-                {/* E.5: Plan/Agent mode toggle. Sits next to SubAgentToggle so the
-                     two "what tools is the model allowed to use" controls cluster. */}
-                <PlanModeToggle
-                  planMode={planMode}
-                  onToggle={setPlanMode}
-                  disabled={streaming}
-                  tier={headerTier}
-                />
-                <ModelSelector
-                  models={models}
-                  currentModel={currentModel}
-                  onChange={(provider, id) => setModel(provider, id)}
                   disabled={streaming}
                   tier={headerTier}
                 />
@@ -462,7 +581,7 @@ const KnowClawV2Page = () => {
             {headerTier !== 'compact' && (
               <button
                 type="button"
-                onClick={() => setShowFileTree((v) => !v)}
+                onClick={toggleFileTree}
                 className={`h-8 px-2 flex items-center gap-1.5 rounded-lg text-xs transition-colors ${
                   showFileTree
                     ? 'text-amber-600 bg-amber-50 hover:bg-amber-100'
@@ -476,32 +595,30 @@ const KnowClawV2Page = () => {
                 <FolderTree size={13} />
               </button>
             )}
-            {/* E.6: overflow menu — only mounted in compact tier. Carries
-                Model / Thinking / SubAgent / PlanMode / Compact / FileTree. */}
+            {/* E.6: overflow menu — only mounted in compact tier. After
+                the UI revamp it only carries the items that still
+                live in the header (Thinking / SubAgent / Compact /
+                FileTree / SkillsPanel). Model / PlanMode / Workspace
+                moved out of the header entirely. */}
             {headerTier === 'compact' && (
               <HeaderOverflowMenu
-                models={models}
-                currentModel={currentModel}
-                onModelChange={(provider, id) => setModel(provider, id)}
                 thinkingLevel={thinkingLevel}
                 onThinkingChange={changeThinkingLevel}
                 thinkingHint={thinkingHint}
                 onDismissThinkingHint={dismissThinkingHint}
                 subAgentEnabled={subAgentEnabled}
                 onToggleSubAgent={toggleSubAgent}
-                planMode={planMode}
-                onTogglePlanMode={setPlanMode}
                 compactSession={compactSession}
                 compacting={compacting}
                 contextUsage={contextUsage}
                 showFileTree={showFileTree}
-                onToggleFileTree={() => setShowFileTree((v) => !v)}
+                onToggleFileTree={toggleFileTree}
+                showSkillsPanel={showSkillsPanel}
+                onToggleSkillsPanel={toggleSkillsPanel}
                 streaming={streaming}
                 components={{
-                  ModelSelector,
                   ThinkingLevelSelector,
                   SubAgentToggle,
-                  PlanModeToggle,
                   CompactButton,
                 }}
               />
@@ -531,8 +648,13 @@ const KnowClawV2Page = () => {
               {messages.length === 0 && (
               <div className="flex items-center justify-center h-full min-h-[400px]">
                 <div className="text-center max-w-lg">
-                  <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-amber-100 to-orange-100 flex items-center justify-center">
-                    <Zap size={28} className="text-amber-600" />
+                  {/* Brand mark for the empty-state hero. The amber-100→
+                      orange-100 rounded tile was removed per UI feedback
+                      ("去除米色底，放大图标，使用 black") — the icon now
+                      stands on its own, much larger, anchoring the
+                      empty state by visual weight alone. */}
+                  <div className="mx-auto mb-6 flex items-center justify-center">
+                    <KnowClawIcon tone="dark" size={96} />
                   </div>
                   <h3 className="text-xl font-semibold text-slate-800 mb-2">KnowClaw v2</h3>
                   <p className="text-sm text-slate-400 leading-relaxed mb-8">
@@ -580,6 +702,7 @@ const KnowClawV2Page = () => {
                     isLatestTasksBubble={isLatestTasksBubble}
                     onAskUserReply={replyAskUser}
                     onAskUserCancel={cancelAskUser}
+                    onAskUserSkip={skipAskUser}
                   />
                 </div>
               );
@@ -639,25 +762,6 @@ const KnowClawV2Page = () => {
           </div>
         )}
 
-          {/* E.5: "开始执行" CTA. Visible only while in Plan mode and
-              between turns — clicking it switches back to Agent mode
-              and sends a structured "按上述方案开始执行" instruction
-              so the model immediately begins executing the plan it
-              just drafted. */}
-          {planMode && !streaming && messages.length > 0 && (
-            <div className="px-6 py-2 flex justify-center border-t border-violet-100 bg-violet-50/40">
-              <button
-                type="button"
-                onClick={startExecuting}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 shadow-sm transition-colors"
-                title="切换到 Agent 模式并开始按上述方案执行"
-              >
-                <PlayCircle size={15} />
-                <span>开始执行</span>
-              </button>
-            </div>
-          )}
-
           {/* Input */}
           <div className="border-t border-slate-100 bg-white">
             <div className="max-w-3xl mx-auto">
@@ -682,6 +786,72 @@ const KnowClawV2Page = () => {
                 supportsImages={supportsImages}
                 placeholder={composerPlaceholder(streaming, streamingMode)}
                 onUploadFiles={uploadToWorkspace}
+                pinnedSkills={pinnedSkills}
+                onSkillRemove={handlePinnedSkillRemove}
+                // UI revamp: bottom-left cluster carries the
+                // mode/model/skill controls that used to live in the
+                // header. Order matches the screenshot:
+                // Plan/Agent → Model → Skill → (Plan-mode "执行").
+                bottomLeftActions={
+                  <>
+                    <PlanModeToggle
+                      planMode={planMode}
+                      onToggle={setPlanMode}
+                      disabled={streaming}
+                      tier="medium"
+                    />
+                    <ModelSelector
+                      models={models}
+                      currentModel={currentModel}
+                      onChange={(provider, id) => setModel(provider, id)}
+                      disabled={streaming}
+                      tier="medium"
+                      placement="up"
+                    />
+                    <SkillSelector
+                      skills={skills}
+                      selected={pinnedSkills}
+                      onSelect={handlePinnedSkillsChange}
+                      onImport={() => setShowImportModal(true)}
+                      onManage={() => setRightPanel('skills')}
+                      loading={skillsLoading}
+                    />
+                    {planMode && !streaming && messages.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={startExecuting}
+                        className="h-7 px-2.5 inline-flex items-center gap-1 rounded-md text-[12px] font-semibold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-200 transition-all active:scale-95"
+                        title="切换到 Agent 模式并按上述方案开始执行"
+                      >
+                        <PlayCircle size={13} strokeWidth={2.2} />
+                        <span>执行</span>
+                      </button>
+                    )}
+                  </>
+                }
+                // UI revamp: bottom-right cluster carries the
+                // workspace selector. The send button is rendered by
+                // ChatInput itself so it always sits at the far right
+                // and isn't a slot. `placement="up"` so the workspace
+                // popover opens above the composer instead of being
+                // clipped below the viewport edge.
+                bottomRightActions={
+                  <WorkspaceSelector
+                    currentCwd={currentCwd}
+                    isGlobal={cwdIsGlobal}
+                    userFileRoot={userFileRoot}
+                    workspaces={workspaces}
+                    loading={workspacesLoading}
+                    onSelect={(ws) => setCwd(ws?.isGlobal ? null : ws.path)}
+                    onRefresh={loadWorkspaces}
+                    onChooseDirectory={chooseDirectory}
+                    onCreateWorkspace={createWorkspace}
+                    onOpenInExplorer={openInExplorer}
+                    onHideWorkspace={hideWorkspace}
+                    disabled={isSessionLocked}
+                    placement="up"
+                  />
+                }
               />
             </div>
           </div>
@@ -705,6 +875,56 @@ const KnowClawV2Page = () => {
           onUpload={uploadToWorkspace}
         />
       )}
+      {/* SK1: right-side skill manager panel. Mutually exclusive with
+          WorkspaceFileTree (both occupy the same `rightPanel` slot). */}
+      {showSkillsPanel && (
+        <SkillManagerPanel
+          skills={skills}
+          loading={skillsLoading}
+          onToggle={toggleSkill}
+          onDelete={(name, meta) => deleteSkill(name, {
+            cwd: currentCwd || undefined,
+            // SK4: pin scope based on the row's source so the IPC
+            // unambiguously targets the workspace or user copy. The
+            // panel surfaces both as separate rows when a name shadow
+            // exists, so each click should hit exactly one disk path.
+            scope: meta?.source === 'workspace' ? 'workspace' : 'user',
+          })}
+          onRefresh={() => loadSkills(currentCwd || undefined)}
+          onViewDetail={(skill) => setSkillDetailTarget(skill)}
+          onClose={() => setRightPanel(null)}
+          onImport={() => setShowImportModal(true)}
+        />
+      )}
+      {/* SK1: skill detail modal — overlays everything when open. */}
+      {skillDetailTarget && (
+        <SkillDetailModal
+          skill={skillDetailTarget}
+          cwd={currentCwd || undefined}
+          onClose={() => setSkillDetailTarget(null)}
+        />
+      )}
+      {/* SK2: import skill modal — overlays everything when open. The
+          `onImported` callback is fired by the modal whenever a skill
+          (or batch) is successfully imported. We re-trigger
+          `loadSkills` here as a belt-and-suspenders measure even
+          though `importSkill` already awaits it internally — the
+          extra round-trip is cheap and guarantees the panel is in
+          sync if the user closes the modal before our hook's
+          loadSkills resolves. */}
+      <ImportSkillModal
+        open={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImported={() => { void loadSkills?.(currentCwd || undefined); }}
+        importSkill={(srcDir, opts) => importSkill(srcDir, {
+          ...(opts || {}),
+          // SK4: forward cwd so the post-import refresh inside the
+          // hook keeps workspace skills visible.
+          cwd: currentCwd || undefined,
+        })}
+        scanExternalSkills={scanExternalSkills}
+        chooseSkillDir={chooseSkillDir}
+      />
     </div>
   );
 };
@@ -846,7 +1066,11 @@ const StreamingComposerToolbar = ({
   );
 };
 
-const ModelSelector = ({ models, currentModel, onChange, disabled, tier = 'wide' }) => {
+// `placement`: 'up' opens the popover above the trigger (used when the
+// selector lives at the bottom of the screen, e.g. inside the composer
+// toolbar). 'down' opens below (original header behaviour). Default is
+// 'down' so any future header usage stays backward compatible.
+const ModelSelector = ({ models, currentModel, onChange, disabled, tier = 'wide', placement = 'down' }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -861,13 +1085,21 @@ const ModelSelector = ({ models, currentModel, onChange, disabled, tier = 'wide'
 
   if (!models || models.length === 0) {
     return (
-      <span className="h-8 px-3 flex items-center text-xs text-slate-400">
+      <span className="h-7 px-2 flex items-center text-[12px] text-slate-500">
         模型加载中...
       </span>
     );
   }
 
+  const currentModelInfo = currentModel
+    ? models.find((m) => `${m.provider}/${m.id}` === currentModel)
+    : null;
   const fullLabel = currentModel ? currentModel.split('/').slice(-1)[0] : '选择模型';
+  const modeBadge = currentModelInfo?.apiMode === 'chat'
+    ? { text: '/c', title: '/chat/completions' }
+    : currentModelInfo?.apiMode === 'responses'
+      ? { text: '/r', title: '/responses' }
+      : null;
   // E.6: in medium/compact tier we may not have room for a 30-char
   // model id; clip to a sensible head fragment. Wide tier keeps the
   // full name. Title attr always carries the full id for hover-reveal.
@@ -875,27 +1107,43 @@ const ModelSelector = ({ models, currentModel, onChange, disabled, tier = 'wide'
     ? fullLabel
     : (fullLabel.length > 12 ? `${fullLabel.slice(0, 10)}…` : fullLabel);
 
+  // UI revamp: when used inside the composer (`tier !== 'wide'` is the
+  // typical composer call), render a slightly more compact pill so the
+  // 3+ controls in the bottom-left cluster don't run out of horizontal
+  // space. Header callers keep the original h-8 chrome.
+  const triggerHeight = tier === 'wide' ? 'h-8' : 'h-7';
+  const triggerPx = tier === 'wide' ? 'px-3' : 'px-2';
+
   return (
     <div className="relative" ref={ref}>
       <button
         type="button"
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
-        className={`h-8 ${tier === 'wide' ? 'px-3' : 'px-2'} flex items-center gap-1.5 rounded-lg text-xs transition-colors ${
+        className={`${triggerHeight} ${triggerPx} flex items-center gap-1 rounded-md text-[12px] transition-colors border ${
           disabled
-            ? 'text-slate-300 cursor-not-allowed'
+            ? 'text-slate-300 border-transparent cursor-not-allowed'
             : open
-              ? 'bg-slate-100 text-slate-700'
-              : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
+              ? 'bg-slate-100 text-slate-700 border-slate-200'
+              : 'text-slate-600 hover:text-slate-800 hover:bg-slate-100 border-transparent'
         }`}
         title={`选择模型 — 当前: ${fullLabel}`}
       >
         <span className="font-mono">{displayLabel}</span>
+        {modeBadge && (
+          <span title={modeBadge.title} className="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-semibold text-slate-500">
+            {modeBadge.text}
+          </span>
+        )}
         <ChevronDown size={12} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden py-1">
+        <div
+          className={`absolute right-0 w-56 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden py-1 ${
+            placement === 'up' ? 'bottom-full mb-2' : 'top-full mt-2'
+          }`}
+        >
           {models.map((m) => {
             const key = `${m.provider}/${m.id}`;
             const active = key === currentModel;
@@ -909,11 +1157,18 @@ const ModelSelector = ({ models, currentModel, onChange, disabled, tier = 'wide'
                 }`}
               >
                 <span className="font-mono truncate">{m.id}</span>
-                {m.isDefault && (
-                  <span className="ml-2 px-1.5 py-0.5 text-[9px] bg-slate-100 text-slate-500 rounded uppercase tracking-wider">
-                    default
-                  </span>
-                )}
+                <div className="ml-2 flex items-center gap-1 shrink-0">
+                  {m.apiMode && (
+                    <span className="px-1.5 py-0.5 text-[9px] bg-slate-100 text-slate-500 rounded uppercase tracking-wider">
+                      {m.apiMode === 'chat' ? '/c' : '/r'}
+                    </span>
+                  )}
+                  {m.isDefault && (
+                    <span className="px-1.5 py-0.5 text-[9px] bg-slate-100 text-slate-500 rounded uppercase tracking-wider">
+                      default
+                    </span>
+                  )}
+                </div>
               </button>
             );
           })}
@@ -1012,6 +1267,10 @@ const DOMAIN_LABELS = {
   pinned: '自定义目录',
   local: '本地文件夹',
   global: '全局',
+  // FK6-3: dedicated group for the floating-window's `_floating`
+  // workspace so the "回到空间" handoff lands the user on a clearly
+  // labelled entry instead of a generic workspaces/ subfolder row.
+  floating: '悬浮助手',
 };
 
 function WorkspaceSelector({
@@ -1027,6 +1286,10 @@ function WorkspaceSelector({
   onOpenInExplorer,
   onHideWorkspace,
   disabled,
+  // UI revamp: when this selector lives at the bottom of the screen
+  // (inside the composer), the popover panel must open upward so it
+  // doesn't get clipped by the viewport edge.
+  placement = 'down',
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -1043,12 +1306,24 @@ function WorkspaceSelector({
 
   // Refresh the list each time the dropdown opens so newly-created
   // projects / imported folders show up without a manual reload.
+  //
+  // We intentionally only depend on `open` here. The caller's
+  // `onRefresh` (currently `loadWorkspaces` from useKnowClawV2Chat)
+  // may not be referentially stable across parent re-renders; if we
+  // listed it as a dep, the effect would fire repeatedly while the
+  // dropdown is open, each refresh queuing a state update that
+  // re-renders the parent → new function reference → effect fires
+  // again, producing the "opens, flickers, redraws" symptom users
+  // reported after the composer move. Reading via a ref keeps the
+  // call but avoids re-subscribing.
+  const onRefreshRef = useRef(onRefresh);
+  useEffect(() => { onRefreshRef.current = onRefresh; }, [onRefresh]);
   useEffect(() => {
     if (open) {
       setQuery('');
-      onRefresh?.();
+      onRefreshRef.current?.();
     }
-  }, [open, onRefresh]);
+  }, [open]);
 
   // Group workspaces by domain. Filtered by the search query against
   // both name and absolute path so users can paste a path fragment.
@@ -1087,11 +1362,11 @@ function WorkspaceSelector({
     displayTooltip = '选择工作空间';
   }
 
-  // Render order: global → KnowClaw workspaces (the user's most
-  // recent destination, since "新建工作空间" lands here) →
-  // pinned custom directories → IPM structured (projects/cases/study)
-  // → imported local folders.
-  const orderedGroupKeys = ['global', 'workspaces', 'pinned', 'projects', 'cases', 'study', 'local']
+  // Render order: global → 悬浮助手 (FK6 handoff target) →
+  // KnowClaw workspaces (the user's most recent destination, since
+  // "新建工作空间" lands here) → pinned custom directories →
+  // IPM structured (projects/cases/study) → imported local folders.
+  const orderedGroupKeys = ['global', 'floating', 'workspaces', 'pinned', 'projects', 'cases', 'study', 'local']
     .filter((k) => grouped[k] && grouped[k].length > 0);
 
   return (
@@ -1100,12 +1375,12 @@ function WorkspaceSelector({
         type="button"
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
-        className={`h-8 px-2.5 flex items-center gap-1.5 rounded-lg text-xs transition-colors ${
+        className={`h-7 px-2 flex items-center gap-1.5 rounded-md text-[12px] transition-colors border ${
           disabled
-            ? 'text-slate-300 cursor-not-allowed'
+            ? 'text-slate-300 border-transparent cursor-not-allowed'
             : open
-              ? 'bg-slate-100 text-slate-700'
-              : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
+              ? 'bg-slate-100 text-slate-700 border-slate-200'
+              : 'text-slate-600 hover:text-slate-800 hover:bg-slate-100 border-transparent'
         }`}
         title={displayTooltip}
       >
@@ -1119,7 +1394,11 @@ function WorkspaceSelector({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden flex flex-col max-h-[480px]">
+        <div
+          className={`absolute right-0 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden flex flex-col max-h-[480px] ${
+            placement === 'up' ? 'bottom-full mb-2' : 'top-full mt-2'
+          }`}
+        >
           {/* Search row */}
           <div className="px-3 py-2 border-b border-slate-100 bg-slate-50/50">
             <div className="relative">
@@ -1162,11 +1441,21 @@ function WorkspaceSelector({
                   // same rule, so even a renderer that bypasses this
                   // gate can't sneak business data out of view.
                   const canHide = !ws.isGlobal && !ws.protected && Boolean(onHideWorkspace);
+                  // FK6-3: highlight the 悬浮助手 entry with a violet
+                  // accent so it visually stands apart from regular
+                  // workspaces — matches the floating-window's violet
+                  // KnowClaw accent palette and signals "this is the
+                  // floating bucket".
+                  const isFloating = ws.domain === 'floating';
                   return (
                     <div
                       key={`${ws.domain}-${ws.path}`}
                       className={`group w-full px-3 py-2 flex items-center gap-1 text-left text-xs transition-colors ${
-                        active ? 'bg-amber-50 text-amber-700' : 'text-slate-600 hover:bg-slate-50'
+                        active
+                          ? 'bg-amber-50 text-amber-700'
+                          : isFloating
+                            ? 'text-violet-700 hover:bg-violet-50/60'
+                            : 'text-slate-600 hover:bg-slate-50'
                       }`}
                       title={ws.path}
                     >
@@ -1178,9 +1467,17 @@ function WorkspaceSelector({
                         {ws.isGlobal ? (
                           <Globe size={12} className="shrink-0 text-slate-400" />
                         ) : (
-                          <Folder size={12} className="shrink-0 text-slate-400" />
+                          <Folder
+                            size={12}
+                            className={`shrink-0 ${isFloating ? 'text-violet-400' : 'text-slate-400'}`}
+                          />
                         )}
                         <span className="flex-1 truncate">{ws.name}</span>
+                        {isFloating && !active && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 uppercase tracking-wider shrink-0">
+                            悬浮
+                          </span>
+                        )}
                         {active && (
                           <span className="text-[9px] text-amber-600 uppercase tracking-wider shrink-0">当前</span>
                         )}
@@ -1584,10 +1881,11 @@ const SubAgentToggle = ({ enabled, onToggle, disabled, tier = 'wide' }) => {
   );
 };
 
-// E.5: Plan / Agent mode toggle. Sits in the header next to
-// SubAgentToggle. Disabled mid-stream so mode can't flip while a turn
-// is in flight (the backend enforces this too via knowclaw:setPlanMode
-// but we don't even let the click happen).
+// E.5: Plan / Agent mode toggle. Sits in the composer bottom toolbar
+// (post UI revamp; previously lived in the header). Disabled mid-stream
+// so mode can't flip while a turn is in flight (the backend enforces
+// this too via knowclaw:setPlanMode but we don't even let the click
+// happen).
 const PlanModeToggle = ({ planMode, onToggle, disabled, tier = 'wide' }) => {
   const handleClick = () => {
     if (disabled) return;
@@ -1596,19 +1894,23 @@ const PlanModeToggle = ({ planMode, onToggle, disabled, tier = 'wide' }) => {
   const title = planMode
     ? 'Plan 模式 — 模型只能读取与提问，不会改文件。点击切换到 Agent 模式。'
     : 'Agent 模式 — 模型可以读写文件、运行命令。点击切换到 Plan 模式（先规划再执行）。';
-  // E.6: same tier convention as SubAgentToggle.
   const showLabel = tier === 'wide';
+  // UI revamp: compact (h-7) pill in composer; original h-8 in header
+  // overflow menu (tier === 'wide').
+  const compact = tier !== 'wide';
+  const heightCls = compact ? 'h-7' : 'h-8';
+  const padCls = showLabel ? 'px-2' : 'px-2';
   return (
     <button
       type="button"
       onClick={handleClick}
       disabled={disabled}
-      className={`relative h-8 ${showLabel ? 'px-2.5' : 'px-2'} flex items-center gap-1.5 rounded-lg text-xs transition-colors ${
+      className={`relative ${heightCls} ${padCls} flex items-center gap-1 rounded-md text-[12px] transition-colors border ${
         disabled
-          ? 'text-slate-300 cursor-not-allowed'
+          ? 'text-slate-300 border-transparent cursor-not-allowed'
           : planMode
-            ? 'text-violet-600 bg-violet-50 hover:bg-violet-100 ring-1 ring-violet-200'
-            : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+            ? 'text-violet-700 bg-violet-50 hover:bg-violet-100 border-violet-200'
+            : 'text-slate-600 hover:text-slate-800 hover:bg-slate-100 border-transparent'
       }`}
       title={title}
       aria-pressed={Boolean(planMode)}

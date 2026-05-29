@@ -81,7 +81,7 @@ export async function runClassifyAgent(input, signal) {
     createGetPreferencesTool(projectDir),
   ];
 
-  const model = createChatModel();
+  const model = await createChatModel('classification');
 
   const agent = createReactAgent({
     llm: model,
@@ -150,7 +150,18 @@ export async function runClassifyAgent(input, signal) {
 
   log(`结论: → ${validated.targetRelPath} | confidence: ${validated.confidence}`);
 
-  const { model: modelName, baseURL } = getOpenAIConfig();
+  // 读取角色配置时用 try/catch 包裹：非 OpenAI 兼容 Provider 会抛错；
+  // 在那种情况下我们仍能成功完成分类（模型本身已经返回结果），只是无
+  // 法把 baseURL 信息写进 agentMeta。
+  let modelName = '';
+  let baseURL = '';
+  try {
+    const cfg = getOpenAIConfig('classification');
+    modelName = cfg.model;
+    baseURL = cfg.baseURL;
+  } catch {
+    // 非 OpenAI 兼容时 baseURL 留空，model 字段也保持空字符串。
+  }
 
   return {
     ...validated,

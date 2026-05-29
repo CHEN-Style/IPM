@@ -55,10 +55,14 @@ export function buildAskUserTool({ askUser } = {}) {
     name: 'ask_user',
     label: '向用户提问',
     description:
-      '向用户发起结构化多选题（每题 2 个以上选项）。适合 Plan 模式下澄清需求细节、技术选型、命名风格等。' +
-      '不要用它代替自然对话；只在需求确实模糊、用户必须做出明确选择时使用。',
+      '向用户发起结构化多选题（每题 2-5 个选项，1-5 道题）。Plan 与 Agent 模式都可调用：' +
+      '当需求里出现"有限的可枚举分支"——命名/风格/受众/技术选型/破坏性操作确认等——优先用本工具发起选择题，' +
+      '比自然语言罗列让用户手打回答更顺。每次最多 5 题，问完即停等回复。' +
+      '前端会自动在每题末尾追加"其他…"自由文本选项和全局"跳过"按钮，不要在 options 里手动塞这两项。' +
+      '不要用它代替开放式对话；候选答案完全开放或只有一个明显方向时，用普通文本回复即可。',
     promptSnippet:
-      'ask_user: 弹出结构化选择题（1-5 个问题，每题 2+ 选项）由用户在 UI 中点选确认。',
+      'ask_user: 弹出结构化选择题（1-5 题，每题 2+ 选项）由用户在 UI 中点选确认。' +
+      '前端自动追加"其他…"输入框 + "跳过"按钮，无需手动加。',
     parameters: Type.Object({
       questions: Type.Array(
         Type.Object({
@@ -91,23 +95,51 @@ export function buildAskUserTool({ askUser } = {}) {
       }
       try {
         const answers = await askUser(questions, signal);
-        // The renderer may reply with structured signals (cancelled /
-        // timeout / error). Surface them clearly to the model so it
-        // can decide what to do next instead of treating them as
-        // user-provided answers.
+        // The renderer may reply with structured signals
+        // (cancelled / skipped / timeout / error / aborted). Surface
+        // each clearly to the model so it can decide what to do next
+        // instead of treating any of them as user-provided answers.
         if (answers && typeof answers === 'object') {
           if (answers.cancelled) {
-            return textResult('用户取消了本次提问。请改为用自然语言提问，或直接给出方案让用户决定。', answers);
+            return textResult(
+              '用户取消了本次提问。请不要重复发起 ask_user；改为用自然语言提问，' +
+              '或直接给出方案让用户决定。',
+              answers,
+            );
+          }
+          if (answers.skipped) {
+            // The user explicitly opted out of answering. The model
+            // should proceed on its best judgement and may re-confirm
+            // later if a critical decision arises — but it should NOT
+            // immediately re-fire another ask_user with the same
+            // questions, that's annoying.
+            return textResult(
+              '用户选择跳过本次提问，请根据你已有的上下文与默认偏好继续推进；' +
+              '若后续出现关键不确定，可以在执行到那一步时再发一次 ask_user。' +
+              '不要立刻就同一组问题重复发起。',
+              answers,
+            );
           }
           if (answers.timeout) {
             return textResult('用户未在 5 分钟内回复。请发一条文字消息提醒用户，或先把方案做出来等用户回头确认。', answers);
+          }
+          if (answers.aborted) {
+            // Agent-loop was aborted (user clicked Stop). Don't push
+            // more wording — the loop will tear down anyway.
+            return textResult('提问被中断。', answers);
           }
           if (answers.error) {
             return textResult(`ask_user 桥接异常: ${answers.message || answers.error}`, answers);
           }
         }
+        // Normal answers payload. Free-text "其他…" entries are encoded
+        // as `other:<typed text>` strings inline with the rest of the
+        // answers map; the model should treat any value starting with
+        // `other:` as the user's verbatim freeform response.
         return textResult(
-          '用户回复:\n' + JSON.stringify(answers, null, 2),
+          '用户回复:\n' + JSON.stringify(answers, null, 2) +
+          '\n\n说明：值若以 `other:` 开头，表示用户在「其他…」自由文本框中填写的内容，' +
+          '冒号后即为原文，请把它当成用户的明确输入。',
           answers,
         );
       } catch (err) {

@@ -8,8 +8,10 @@ import KnowledgePanorama from './components/knowledge/KnowledgePanorama.jsx';
 import MyDataPage from './components/MyDataPage.jsx';
 import OverviewPage from './components/OverviewPage.jsx';
 import KnowClawV2Page from './components/knowclaw-v2/KnowClawV2Page.jsx';
+import FloatingWorkspaceBridge from './components/knowclaw-v2/FloatingWorkspaceBridge.jsx';
 import TutorialPage from './components/TutorialPage.jsx';
 import KnowClawBubble from './components/KnowClawBubble.jsx';
+import BubbleView from './components/floating-knowclaw/BubbleView.jsx';
 import { TourProvider } from './components/tour/TourProvider.jsx';
 import TourOverlay from './components/tour/TourOverlay.jsx';
 import { ToastProvider } from './hooks/useToast.js';
@@ -35,11 +37,14 @@ const App = () => {
   const [uiMode, setUiMode] = useState(() => {
     try {
       const p = new URLSearchParams(window.location.search);
-      return p.get('ui') === 'floating' ? 'floating' : 'main';
+      const ui = p.get('ui');
+      if (ui === 'floating') return 'floating';
+      if (ui === 'bubble') return 'bubble';
+      return 'main';
     } catch {
       return 'main';
     }
-  }); // main | floating
+  }); // main | floating | bubble
 
   const trackerPage = useMemo(() => {
     if (uiMode === 'floating') return 'floating';
@@ -63,8 +68,14 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    document.documentElement.classList.toggle('ui-bubble', uiMode === 'bubble');
     document.body.classList.toggle('ui-floating', uiMode === 'floating');
-    return () => document.body.classList.remove('ui-floating');
+    document.body.classList.toggle('ui-bubble', uiMode === 'bubble');
+    return () => {
+      document.documentElement.classList.remove('ui-bubble');
+      document.body.classList.remove('ui-floating');
+      document.body.classList.remove('ui-bubble');
+    };
   }, [uiMode]);
 
   useEffect(() => {
@@ -199,12 +210,12 @@ const App = () => {
     setShowOnboarding(false);
   }, []);
 
-  if (showOnboarding === null) {
-    return <div className="h-screen w-full" style={{ background: '#060608' }} />;
-  }
-
-  if (showOnboarding) {
-    return <OnboardingScreen onComplete={finishOnboarding} />;
+  // Auxiliary transparent windows must not render the main-window
+  // onboarding/loading fallback. That fallback is an opaque dark div;
+  // if the bubble window shows before prefs resolve it appears as the
+  // black square the user sees in the centre of the screen.
+  if (uiMode === 'bubble') {
+    return <BubbleView />;
   }
 
   if (uiMode === 'floating') {
@@ -224,10 +235,19 @@ const App = () => {
     );
   }
 
+  if (showOnboarding === null) {
+    return <div className="h-screen w-full" style={{ background: '#060608' }} />;
+  }
+
+  if (showOnboarding) {
+    return <OnboardingScreen onComplete={finishOnboarding} />;
+  }
+
   return (
     <ConfirmDialogProvider>
     <ToastProvider>
     <KnowClawPersistProvider>
+    <FloatingWorkspaceBridge onNavigateToKnowClaw={() => setActiveNav('knowclaw-v2')} />
     <TourProvider navigate={setActiveNav} setMyDataSection={setMyDataSection}>
     <div className="flex flex-col h-screen w-full overflow-hidden select-auto antialiased">
       <div className="flex flex-1 min-h-0 w-full overflow-hidden">

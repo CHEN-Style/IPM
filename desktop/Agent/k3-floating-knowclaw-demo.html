@@ -1,0 +1,1289 @@
+<!--
+  K3 Floating KnowClaw — UI 静态预览 (DEMO ONLY)
+
+  状态：2026-05-25 起 K3 已交付 (FK0~FK7 全部完成)。本 demo 仅作为
+  视觉真源参考；实际实现以 desktop/src/ui/components/floating/ 与
+  desktop/src/ui/components/floating-knowclaw/ 下的组件为准。
+  与最终实现的主要差异：
+    - 「回到空间」改为 ui/backToFloatingWorkspace 请求-回执 IPC，
+      主台 streaming 时阻断 + toast；
+    - 文件拖入新增「发送给 AI 分析」按钮（上传 _floating + 注入
+      @relPath，不自动发送）；
+    - 全局动效统一为 fk-card-in / fk-fade-in / fk-mode-in；
+    - 屏幕权限错误按平台分文案；AI 失败气泡内显示错误卡。
+  完整说明：FLOATING_KNOWCLAW_PLAN.md / FLOATING_KNOWCLAW_SMOKE_TEST.md。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>K3 Floating KnowClaw UI Demo (Deprecated reference — see FLOATING_KNOWCLAW_PLAN.md)</title>
+  <style>
+    :root {
+      --slate-50: #f8fafc;
+      --slate-100: #f1f5f9;
+      --slate-200: #e2e8f0;
+      --slate-300: #cbd5e1;
+      --slate-400: #94a3b8;
+      --slate-500: #64748b;
+      --slate-600: #475569;
+      --slate-700: #334155;
+      --slate-800: #1e293b;
+      --slate-900: #0f172a;
+      --indigo-50: #eef2ff;
+      --indigo-100: #e0e7ff;
+      --indigo-500: #6366f1;
+      --indigo-600: #4f46e5;
+      --emerald-500: #10b981;
+      --amber-500: #f59e0b;
+      --rose-500: #f43f5e;
+      --shadow: 0 24px 70px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(15, 23, 42, 0.05);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--slate-800);
+      background:
+        radial-gradient(circle at 20% 15%, rgba(99, 102, 241, 0.09), transparent 28rem),
+        radial-gradient(circle at 80% 80%, rgba(15, 23, 42, 0.08), transparent 24rem),
+        linear-gradient(135deg, #f8fafc 0%, #edf2f7 100%);
+      padding: 48px;
+    }
+
+    button,
+    input,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .page-note {
+      position: fixed;
+      left: 24px;
+      top: 24px;
+      width: 310px;
+      padding: 16px 18px;
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.72);
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+      backdrop-filter: blur(18px);
+    }
+
+    .page-note h1 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      letter-spacing: -0.01em;
+    }
+
+    .page-note p {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.7;
+      color: var(--slate-500);
+    }
+
+    .page-note code {
+      padding: 1px 5px;
+      border-radius: 6px;
+      background: var(--slate-100);
+      color: var(--slate-700);
+      font-size: 11px;
+    }
+
+    .stage {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 760px;
+      min-height: 620px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 36px;
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.62)),
+        repeating-linear-gradient(0deg, transparent, transparent 31px, rgba(148, 163, 184, 0.08) 32px),
+        repeating-linear-gradient(90deg, transparent, transparent 31px, rgba(148, 163, 184, 0.08) 32px);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    }
+
+    .float-shell {
+      width: max-content;
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      background: transparent;
+      transition: width 220ms ease, height 220ms ease;
+    }
+
+    .drag-handle {
+      height: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 18px 18px 0 0;
+      background: rgba(15, 23, 42, 0.66);
+    }
+
+    .drag-handle span {
+      width: 32px;
+      height: 2px;
+      border-radius: 999px;
+      background: rgba(203, 213, 225, 0.7);
+    }
+
+    .float-body {
+      display: flex;
+      align-items: stretch;
+    }
+
+    .rail {
+      position: relative;
+      width: 48px;
+      flex: 0 0 48px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 6px;
+      border: 1px solid rgba(30, 41, 59, 0.68);
+      border-right: 0;
+      border-radius: 0 0 0 18px;
+      background: rgba(15, 23, 42, 0.77);
+      backdrop-filter: blur(18px);
+    }
+
+    .rail-separator {
+      width: 24px;
+      height: 1px;
+      margin: 1px 0;
+      background: rgba(100, 116, 139, 0.54);
+    }
+
+    .rail-spacer {
+      flex: 1;
+    }
+
+    .rail-button {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(51, 65, 85, 0.72);
+      border-radius: 13px;
+      background: rgba(2, 6, 23, 0.2);
+      color: var(--slate-300);
+      transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+    }
+
+    .rail-button:hover {
+      background: rgba(30, 41, 59, 0.68);
+      color: white;
+    }
+
+    .rail-button.active-indigo {
+      color: #a5b4fc;
+      border-color: rgba(99, 102, 241, 0.36);
+      background: rgba(99, 102, 241, 0.14);
+    }
+
+    .rail-button.active-emerald {
+      color: #6ee7b7;
+      border-color: rgba(16, 185, 129, 0.33);
+      background: rgba(16, 185, 129, 0.12);
+    }
+
+    .rail-button.active-amber {
+      color: #fcd34d;
+      border-color: rgba(245, 158, 11, 0.32);
+      background: rgba(245, 158, 11, 0.12);
+    }
+
+    .rail-button.active-ai {
+      color: white;
+      border-color: rgba(148, 163, 184, 0.48);
+      background: rgba(248, 250, 252, 0.13);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
+
+    .rail-button svg {
+      width: 16px;
+      height: 16px;
+      stroke-width: 1.8;
+    }
+
+    .mode-panel {
+      width: 360px;
+      border-radius: 0 0 18px 0;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid rgba(226, 232, 240, 0.76);
+      border-left: 0;
+      backdrop-filter: blur(22px);
+    }
+
+    .vault,
+    .knowclaw {
+      display: none;
+    }
+
+    .vault.active,
+    .knowclaw.active {
+      display: block;
+    }
+
+    .vault-card {
+      display: flex;
+      flex-direction: column;
+      width: 360px;
+      border-radius: 0 0 18px 0;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.96);
+    }
+
+    .vault-header {
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+      background: linear-gradient(90deg, #f8fafc, #ffffff);
+      color: var(--slate-400);
+    }
+
+    .grip {
+      display: flex;
+      color: var(--slate-400);
+    }
+
+    .vault-title {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.11em;
+    }
+
+    .small-icon-button {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--slate-400);
+    }
+
+    .small-icon-button:hover {
+      background: var(--slate-100);
+      color: var(--slate-600);
+    }
+
+    .vault-main {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 20px;
+      color: var(--slate-400);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .drop-zone {
+      height: 128px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border: 2px dashed var(--slate-200);
+      border-radius: 12px;
+      background: rgba(248, 250, 252, 0.66);
+      transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+    }
+
+    .drop-zone:hover {
+      border-color: var(--slate-300);
+      background: rgba(241, 245, 249, 0.75);
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+    }
+
+    .drop-icon {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 8px;
+      border-radius: 999px;
+      background: rgba(226, 232, 240, 0.86);
+      color: var(--slate-500);
+    }
+
+    .drop-zone strong {
+      font-size: 14px;
+      color: var(--slate-600);
+      font-weight: 600;
+    }
+
+    .drop-zone span {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--slate-400);
+    }
+
+    .project-bar {
+      border-top: 1px solid rgba(226, 232, 240, 0.8);
+      border-radius: 0 0 18px 0;
+      background: rgba(241, 245, 249, 0.82);
+      overflow: hidden;
+    }
+
+    .project-bar-title {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 7px 12px 4px;
+      color: var(--slate-400);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .project-tabs {
+      display: flex;
+      gap: 2px;
+      padding: 0 4px 4px;
+      overflow: hidden;
+    }
+
+    .project-tab {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 13px;
+      border: 0;
+      border-radius: 10px 10px 6px 6px;
+      background: transparent;
+      color: var(--slate-500);
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .project-tab.active {
+      background: white;
+      color: var(--slate-800);
+      box-shadow: 0 1px 6px rgba(15, 23, 42, 0.06);
+    }
+
+    .project-tab.active::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 2px;
+      border-radius: 999px 999px 0 0;
+      background: var(--indigo-600);
+    }
+
+    .knowclaw-panel {
+      width: 360px;
+      min-height: 310px;
+      display: flex;
+      flex-direction: column;
+      background: rgba(255, 255, 255, 0.98);
+    }
+
+    .kc-header {
+      height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      border-bottom: 1px solid rgba(226, 232, 240, 0.82);
+      background: linear-gradient(180deg, #ffffff, #fbfdff);
+    }
+
+    .kc-mark {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--slate-200);
+      border-radius: 8px;
+      color: var(--slate-700);
+      background: white;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    .kc-title {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .kc-title strong {
+      display: block;
+      font-size: 13px;
+      color: var(--slate-800);
+      line-height: 1.2;
+    }
+
+    .workspace-open-button {
+      height: 24px;
+      max-width: 96px;
+      padding: 0 9px;
+      border: 1px solid var(--slate-200);
+      border-radius: 8px;
+      background: var(--slate-50);
+      color: var(--slate-500);
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .workspace-open-button:hover {
+      border-color: var(--slate-300);
+      background: white;
+      color: var(--slate-800);
+    }
+
+    .kc-header-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    .kc-messages {
+      height: 260px;
+      overflow: hidden;
+      padding: 14px 14px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background:
+        linear-gradient(#ffffff, rgba(255, 255, 255, 0.86)),
+        radial-gradient(circle at 50% 0, rgba(99, 102, 241, 0.05), transparent 18rem);
+    }
+
+    .msg {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+
+    .msg.user {
+      justify-content: flex-end;
+    }
+
+    .avatar {
+      width: 22px;
+      height: 22px;
+      flex: 0 0 22px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--slate-100);
+      color: var(--slate-500);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .bubble {
+      max-width: 282px;
+      padding: 9px 11px;
+      border: 1px solid rgba(226, 232, 240, 0.82);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--slate-700);
+      font-size: 12px;
+      line-height: 1.62;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+    }
+
+    .msg.user .bubble {
+      border-color: rgba(99, 102, 241, 0.16);
+      background: var(--indigo-50);
+      color: var(--slate-800);
+    }
+
+    .bubble p {
+      margin: 0;
+    }
+
+    .bubble p + p {
+      margin-top: 7px;
+    }
+
+    .tool-line {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 8px;
+      padding: 4px 7px;
+      border-radius: 8px;
+      background: var(--slate-50);
+      color: var(--slate-400);
+      font-size: 10px;
+    }
+
+    .tool-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--emerald-500);
+    }
+
+    .kc-quick {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      display: flex;
+      gap: 6px;
+      padding: 0;
+      border-top: 0;
+      background: transparent;
+      z-index: 2;
+    }
+
+    .quick-button {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      align-items: center;
+      padding: 0;
+      border: 1px solid var(--slate-200);
+      border-radius: 10px;
+      background: white;
+      color: var(--slate-600);
+      font-size: 0;
+      font-weight: 600;
+      transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+    }
+
+    .quick-button:hover {
+      border-color: var(--slate-300);
+      background: var(--slate-50);
+      transform: translateY(-1px);
+    }
+
+    .quick-button svg {
+      width: 15px;
+      height: 15px;
+      color: var(--slate-500);
+    }
+
+    .kc-input-wrap {
+      flex: 1;
+      display: flex;
+      padding: 12px 16px 16px;
+      background: white;
+      border-top: 1px solid rgba(226, 232, 240, 0.8);
+    }
+
+    .kc-input {
+      position: relative;
+      flex: 1;
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      padding: 0;
+      border: 1px solid var(--slate-200);
+      border-radius: 18px;
+      background: var(--slate-50);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    }
+
+    .kc-input textarea {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      min-height: 150px;
+      max-height: none;
+      padding: 18px 64px 56px 18px;
+      margin-right: 3px;
+      border: 0;
+      outline: 0;
+      resize: none;
+      background: transparent;
+      color: var(--slate-800);
+      font-size: 13px;
+      line-height: 1.45;
+      overflow-y: auto;
+      scrollbar-gutter: stable;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(148, 163, 184, 0.42) transparent;
+    }
+
+    .kc-input textarea::-webkit-scrollbar {
+      width: 9px;
+    }
+
+    .kc-input textarea::-webkit-scrollbar-track {
+      margin: 10px 0 46px;
+      background: transparent;
+    }
+
+    .kc-input textarea::-webkit-scrollbar-thumb {
+      min-height: 32px;
+      border: 3px solid transparent;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.45);
+      background-clip: padding-box;
+    }
+
+    .kc-input textarea::-webkit-scrollbar-thumb:hover {
+      background: rgba(100, 116, 139, 0.5);
+      background-clip: padding-box;
+    }
+
+    .kc-input textarea::placeholder {
+      color: var(--slate-400);
+    }
+
+    .send-button {
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 10px;
+      background: var(--slate-900);
+      color: white;
+    }
+
+    .send-button:hover {
+      background: var(--slate-700);
+    }
+
+    .capture-preview {
+      display: none;
+      margin: 0 12px 10px;
+      padding: 10px;
+      border: 1px solid rgba(226, 232, 240, 0.9);
+      border-radius: 14px;
+      background: white;
+      box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
+    }
+
+    .capture-preview.show {
+      display: block;
+    }
+
+    .capture-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 11px;
+      color: var(--slate-500);
+      font-weight: 600;
+    }
+
+    .capture-thumb {
+      height: 74px;
+      border-radius: 10px;
+      border: 1px solid var(--slate-200);
+      background:
+        linear-gradient(135deg, rgba(248, 250, 252, 0.96), rgba(226, 232, 240, 0.88)),
+        repeating-linear-gradient(0deg, transparent, transparent 11px, rgba(100, 116, 139, 0.1) 12px);
+    }
+
+    .capture-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .secondary-button,
+    .primary-button {
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 9px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .secondary-button {
+      border: 1px solid var(--slate-200);
+      background: white;
+      color: var(--slate-600);
+    }
+
+    .primary-button {
+      border: 1px solid var(--slate-900);
+      background: var(--slate-900);
+      color: white;
+    }
+
+    /* K3 proposal: KnowClaw 默认是轻量输入控制器，回复使用外部大气泡。 */
+    .knowclaw-panel {
+      min-height: 310px;
+    }
+
+    .knowclaw-panel.expanded {
+      min-height: 430px;
+    }
+
+    .kc-header {
+      height: 40px;
+    }
+
+    .kc-messages {
+      display: none;
+    }
+
+    .knowclaw-panel.expanded .kc-messages {
+      display: flex;
+    }
+
+    .kc-mode-button {
+      min-width: 28px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--slate-200);
+      border-radius: 8px;
+      background: white;
+      color: var(--slate-500);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .kc-mode-button:hover {
+      color: var(--slate-800);
+      border-color: var(--slate-300);
+      background: var(--slate-50);
+    }
+
+    .kc-mode-button svg {
+      width: 13px;
+      height: 13px;
+    }
+
+    .kc-input-wrap {
+      border-top: 0;
+    }
+
+    .kc-input textarea {
+      height: 100%;
+      min-height: 150px;
+    }
+
+    .knowclaw-panel.expanded .kc-input textarea {
+      height: 38px;
+      min-height: 38px;
+    }
+
+    .knowclaw-panel.expanded .kc-input-wrap {
+      flex: 0 0 auto;
+      padding: 10px 12px 12px;
+    }
+
+    .knowclaw-panel.expanded .kc-input {
+      min-height: 78px;
+      border-radius: 14px;
+    }
+
+    .knowclaw-panel.expanded .kc-input textarea {
+      min-height: 78px;
+      padding: 12px 60px 48px 12px;
+    }
+
+    .assistant-bubble {
+      position: absolute;
+      top: 112px;
+      right: calc(50% + 244px);
+      width: min(420px, calc(50vw - 116px));
+      max-height: 430px;
+      display: none;
+      z-index: 8;
+      padding: 16px 17px;
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.94);
+      color: var(--slate-700);
+      box-shadow: 0 26px 80px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(255, 255, 255, 0.8) inset;
+      backdrop-filter: blur(22px);
+      overflow: auto;
+      animation: bubble-in 180ms ease-out;
+    }
+
+    .assistant-bubble.show {
+      display: block;
+    }
+
+    .assistant-bubble::after {
+      content: "";
+      position: absolute;
+      top: 30px;
+      right: -8px;
+      width: 16px;
+      height: 16px;
+      border-top: 1px solid rgba(226, 232, 240, 0.95);
+      border-right: 1px solid rgba(226, 232, 240, 0.95);
+      background: rgba(255, 255, 255, 0.94);
+      transform: rotate(45deg);
+    }
+
+    .assistant-bubble .bubble-label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 10px;
+      color: var(--slate-400);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .assistant-bubble .bubble-label span:first-child {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--emerald-500);
+    }
+
+    .assistant-bubble p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.75;
+    }
+
+    .assistant-bubble p + p {
+      margin-top: 9px;
+    }
+
+    .assistant-bubble .bubble-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      margin-top: 14px;
+    }
+
+    .assistant-bubble .bubble-actions button {
+      height: 28px;
+      padding: 0 10px;
+      border: 1px solid var(--slate-200);
+      border-radius: 9px;
+      background: white;
+      color: var(--slate-600);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .assistant-bubble .bubble-actions button:hover {
+      border-color: var(--slate-300);
+      background: var(--slate-50);
+      color: var(--slate-800);
+    }
+
+    .assistant-bubble.thinking p::after {
+      content: "";
+      display: inline-block;
+      width: 2px;
+      height: 13px;
+      margin-left: 3px;
+      background: var(--slate-700);
+      vertical-align: -2px;
+      animation: cursor-blink 900ms infinite;
+    }
+
+    @keyframes bubble-in {
+      from {
+        opacity: 0;
+        transform: translateX(8px) translateY(4px) scale(0.985);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0) translateY(0) scale(1);
+      }
+    }
+
+    @keyframes cursor-blink {
+      0%, 45% { opacity: 1; }
+      46%, 100% { opacity: 0; }
+    }
+
+    .screen-mode-hint {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border: 1px solid rgba(226, 232, 240, 0.88);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.82);
+      color: var(--slate-500);
+      font-size: 12px;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+      backdrop-filter: blur(18px);
+    }
+
+    .screen-mode-hint strong {
+      color: var(--slate-800);
+    }
+
+    @media (max-width: 900px) {
+      body {
+        padding: 24px;
+      }
+
+      .page-note,
+      .screen-mode-hint {
+        display: none;
+      }
+
+      .stage {
+        min-width: auto;
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <aside class="page-note">
+    <h1>K3 悬浮窗 KnowClaw UI/UX 重新设计</h1>
+    <p>
+      默认状态保持当前 <code>KNOW VAULT</code> 悬浮窗样式。点击左侧 rail 底部的
+      <code>AI</code> 按钮切换到 KnowClaw 模式；点击项目/案件/学习按钮会回到文件收纳模式。
+    </p>
+  </aside>
+
+  <main class="stage">
+    <section class="float-shell" aria-label="IPM floating window demo">
+      <div class="drag-handle" title="拖动悬浮窗"><span></span></div>
+      <div class="float-body">
+        <nav class="rail" aria-label="floating rail">
+          <button class="rail-button" title="回到中台" aria-label="回到中台">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M15 18l-6-6 6-6"/><path d="M21 12H9"/></svg>
+          </button>
+          <div class="rail-separator"></div>
+          <button class="rail-button active-emerald mode-vault-button" title="案件" aria-label="案件">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/><path d="M4 7h16v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z"/><path d="M4 12h16"/></svg>
+          </button>
+          <button class="rail-button mode-vault-button" title="项目" aria-label="项目">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          </button>
+          <button class="rail-button mode-vault-button" title="学习" aria-label="学习">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 10L12 5 2 10l10 5 10-5z"/><path d="M6 12v5c3 2 9 2 12 0v-5"/></svg>
+          </button>
+          <div class="rail-spacer"></div>
+          <button id="aiButton" class="rail-button" title="KnowClaw 助手" aria-label="KnowClaw 助手">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 21l-1.9-7.8L4 11l6.1-2.2L12 3z"/></svg>
+          </button>
+        </nav>
+
+        <section class="mode-panel">
+          <div id="vaultView" class="vault active">
+            <div class="vault-card">
+              <header class="vault-header">
+                <div class="grip" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 7h8M8 12h8M8 17h8"/></svg>
+                </div>
+                <div class="vault-title">KNOW VAULT</div>
+                <button class="small-icon-button" title="Compact" aria-label="Compact">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 3v5H3M16 3v5h5M8 21v-5H3M16 21v-5h5"/></svg>
+                </button>
+              </header>
+              <div class="vault-main">
+                <div class="status-row">
+                  <span>等待内容...</span>
+                  <span>确认模式</span>
+                </div>
+                <div class="drop-zone">
+                  <div class="drop-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+                  </div>
+                  <strong>拖拽文件到这里</strong>
+                  <span>或点击选择文件</span>
+                </div>
+              </div>
+              <footer class="project-bar">
+                <div class="project-bar-title">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/><path d="M4 7h16v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z"/></svg>
+                  ACTIVE CASES
+                </div>
+                <div class="project-tabs">
+                  <button class="project-tab active">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                    华东租赁争议
+                  </button>
+                  <button class="project-tab">加盟解除案</button>
+                </div>
+              </footer>
+            </div>
+          </div>
+
+          <div id="knowclawView" class="knowclaw">
+            <div id="knowclawPanel" class="knowclaw-panel">
+              <header class="kc-header">
+                <div class="kc-title">
+                  <strong>KnowClaw</strong>
+                  <button id="openFloatingWorkspaceButton" class="workspace-open-button" title="回到中台并打开 KnowClaw 的 _floating 工作空间">
+                    回到空间
+                  </button>
+                </div>
+                <div class="kc-header-actions">
+                  <button id="newChatButton" class="kc-mode-button" title="新对话" aria-label="新对话">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+                  </button>
+                  <button id="expandButton" class="kc-mode-button" title="展开对话" aria-label="展开对话">展开</button>
+                  <button class="kc-mode-button" title="设置">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1A2 2 0 0 1 7.1 4.2l.1.1a1.7 1.7 0 0 0 1.9.3h0A1.7 1.7 0 0 0 10 3V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.6h0a1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 0 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9v0A1.7 1.7 0 0 0 21 10h0a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+                  </button>
+                </div>
+              </header>
+
+              <div class="kc-messages">
+                <div class="msg">
+                  <div class="avatar">K</div>
+                  <div class="bubble">
+                    <p>我可以在悬浮窗里帮你快速总结当前屏幕、提取 OCR 原文，或基于拖入文件做简短分析。</p>
+                  </div>
+                </div>
+                <div class="msg user">
+                  <div class="bubble">
+                    <p>帮我总结刚才截到的网页。</p>
+                  </div>
+                </div>
+                <div class="msg">
+                  <div class="avatar">K</div>
+                  <div class="bubble">
+                    <p>这页主要在讨论租赁合同纠纷中“情势变更”的适用。核心信息可以归纳为三点：</p>
+                    <p>第一，法院通常会看疫情、商圈变化或监管政策是否显著影响履约基础；第二，租金减免更常见于短期经营受阻场景；第三，证据重点是客流、营收和协商记录。</p>
+                    <span class="tool-line"><span class="tool-dot"></span> OCR 原文已保存到悬浮助手工作空间</span>
+                  </div>
+                </div>
+              </div>
+
+              <div id="capturePreview" class="capture-preview">
+                <div class="capture-head">
+                  <span>全屏截图已准备</span>
+                  <span>1920 x 1080</span>
+                </div>
+                <div class="capture-thumb"></div>
+                <div class="capture-actions">
+                  <button class="primary-button">发送给 AI 总结</button>
+                  <button class="secondary-button">仅 OCR</button>
+                  <button id="closeCapture" class="secondary-button">取消</button>
+                </div>
+              </div>
+
+              <div class="kc-input-wrap">
+                <div class="kc-input">
+                  <textarea id="kcInput" placeholder="问 KnowClaw，或描述你想从截图中获得什么..."></textarea>
+                  <div class="kc-quick">
+                    <button id="captureButton" class="quick-button" title="截屏总结" aria-label="截屏总结">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h4l2-2h4l2 2h4v12H4z"/><circle cx="12" cy="13" r="3"/></svg>
+                    </button>
+                    <button class="quick-button" title="OCR 提取" aria-label="OCR 提取">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
+                    </button>
+                    <button class="quick-button" title="添加文件" aria-label="添加文件">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                    </button>
+                  </div>
+                  <button id="sendButton" class="send-button" aria-label="发送">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <aside id="assistantBubble" class="assistant-bubble" aria-label="KnowClaw 外部回复气泡">
+      <div class="bubble-label"><span></span><strong>KnowClaw 正在旁边回应</strong></div>
+      <p>我会默认把回答放在悬浮窗外侧的大气泡里，避免把 360px 的小窗撑得太满。</p>
+      <p>如果悬浮窗位于右上角，气泡会优先向左出现并向下延伸；如果在左侧或下方，则可以按屏幕剩余空间切换到右侧或向上延伸。</p>
+      <div class="bubble-actions">
+        <button id="bubbleExpandButton">展开到悬浮窗内</button>
+        <button id="bubbleCloseButton">收起</button>
+      </div>
+    </aside>
+  </main>
+
+  <div class="screen-mode-hint">
+    <strong>交互：</strong>
+    AI 模式默认只显示输入和快捷按钮；按 Enter 后外部气泡回复，点击“展开”可回到悬浮窗内部对话。
+  </div>
+
+  <script>
+    const vaultView = document.getElementById('vaultView');
+    const knowclawView = document.getElementById('knowclawView');
+    const aiButton = document.getElementById('aiButton');
+    const vaultButtons = Array.from(document.querySelectorAll('.mode-vault-button'));
+    const captureButton = document.getElementById('captureButton');
+    const capturePreview = document.getElementById('capturePreview');
+    const closeCapture = document.getElementById('closeCapture');
+    const knowclawPanel = document.getElementById('knowclawPanel');
+    const expandButton = document.getElementById('expandButton');
+    const newChatButton = document.getElementById('newChatButton');
+    const kcInput = document.getElementById('kcInput');
+    const sendButton = document.getElementById('sendButton');
+    const assistantBubble = document.getElementById('assistantBubble');
+    const bubbleExpandButton = document.getElementById('bubbleExpandButton');
+    const bubbleCloseButton = document.getElementById('bubbleCloseButton');
+    const openFloatingWorkspaceButton = document.getElementById('openFloatingWorkspaceButton');
+
+    function showVault(clickedButton) {
+      vaultView.classList.add('active');
+      knowclawView.classList.remove('active');
+      aiButton.classList.remove('active-ai');
+      assistantBubble.classList.remove('show', 'thinking');
+      vaultButtons.forEach((btn) => {
+        btn.classList.remove('active-emerald', 'active-indigo', 'active-amber');
+      });
+      if (clickedButton) {
+        const index = vaultButtons.indexOf(clickedButton);
+        clickedButton.classList.add(index === 0 ? 'active-emerald' : index === 1 ? 'active-indigo' : 'active-amber');
+      } else {
+        vaultButtons[0].classList.add('active-emerald');
+      }
+    }
+
+    function showKnowClaw() {
+      vaultView.classList.remove('active');
+      knowclawView.classList.add('active');
+      vaultButtons.forEach((btn) => btn.classList.remove('active-emerald', 'active-indigo', 'active-amber'));
+      aiButton.classList.add('active-ai');
+      assistantBubble.classList.add('show');
+      kcInput?.focus();
+    }
+
+    function setExpanded(nextExpanded) {
+      knowclawPanel.classList.toggle('expanded', nextExpanded);
+      expandButton.textContent = nextExpanded ? '收起' : '展开';
+      expandButton.title = nextExpanded ? '收起对话' : '展开对话';
+      if (nextExpanded) {
+        assistantBubble.classList.remove('show', 'thinking');
+      } else {
+        assistantBubble.classList.add('show');
+      }
+    }
+
+    function resetConversation() {
+      kcInput.value = '';
+      setExpanded(false);
+      assistantBubble.classList.remove('thinking');
+      assistantBubble.classList.add('show');
+      assistantBubble.innerHTML = `
+        <div class="bubble-label"><span></span><strong>新对话已开始</strong></div>
+        <p>你可以直接输入问题并按 Enter。我的回复会先出现在悬浮窗旁边，需要时再展开完整对话。</p>
+        <div class="bubble-actions">
+          <button id="bubbleExpandButton">展开到悬浮窗内</button>
+          <button id="bubbleCloseButton">收起</button>
+        </div>
+      `;
+      bindBubbleButtons();
+      kcInput.focus();
+    }
+
+    function sendPrompt() {
+      const text = kcInput.value.trim() || '帮我总结当前屏幕内容';
+      kcInput.value = '';
+      setExpanded(false);
+      assistantBubble.classList.add('show', 'thinking');
+      assistantBubble.innerHTML = `
+        <div class="bubble-label"><span></span><strong>KnowClaw 正在分析</strong></div>
+        <p>正在理解你的问题：“${text}”</p>
+      `;
+
+      window.setTimeout(() => {
+        assistantBubble.classList.remove('thinking');
+        assistantBubble.innerHTML = `
+          <div class="bubble-label"><span></span><strong>KnowClaw 回复</strong></div>
+          <p>我理解你的诉求是想在不打断当前工作的情况下快速得到答案。这个问题可以先从三个角度看：事实信息、可行动建议，以及需要沉淀到工作空间的原文依据。</p>
+          <p>默认我会把结论放在这个外部大气泡中；如果你要继续追问、查看上下文或工具细节，可以点击展开，把对话收回到悬浮窗内部。</p>
+          <div class="bubble-actions">
+            <button id="bubbleExpandButton">展开到悬浮窗内</button>
+            <button id="bubbleCloseButton">收起</button>
+          </div>
+        `;
+        bindBubbleButtons();
+      }, 700);
+    }
+
+    function bindBubbleButtons() {
+      document.getElementById('bubbleExpandButton')?.addEventListener('click', () => setExpanded(true));
+      document.getElementById('bubbleCloseButton')?.addEventListener('click', () => {
+        assistantBubble.classList.remove('show', 'thinking');
+      });
+    }
+
+    aiButton.addEventListener('click', showKnowClaw);
+    vaultButtons.forEach((button) => {
+      button.addEventListener('click', () => showVault(button));
+    });
+
+    captureButton.addEventListener('click', () => {
+      capturePreview.classList.add('show');
+      assistantBubble.classList.add('show');
+    });
+
+    closeCapture.addEventListener('click', () => {
+      capturePreview.classList.remove('show');
+    });
+
+    expandButton.addEventListener('click', () => {
+      setExpanded(!knowclawPanel.classList.contains('expanded'));
+    });
+
+    newChatButton.addEventListener('click', resetConversation);
+    sendButton.addEventListener('click', sendPrompt);
+    openFloatingWorkspaceButton.addEventListener('click', () => {
+      assistantBubble.classList.add('show');
+      assistantBubble.classList.remove('thinking');
+      assistantBubble.innerHTML = `
+        <div class="bubble-label"><span></span><strong>中台跳转动作</strong></div>
+        <p>实际产品中，这个按钮会关闭悬浮窗，回到中台模式，并直接打开 KnowClaw 页面，同时切换到 <strong>_floating</strong> 工作空间。</p>
+        <div class="bubble-actions">
+          <button id="bubbleExpandButton">展开到悬浮窗内</button>
+          <button id="bubbleCloseButton">收起</button>
+        </div>
+      `;
+      bindBubbleButtons();
+    });
+    kcInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendPrompt();
+      }
+    });
+
+    bindBubbleButtons();
+  </script>
+</body>
+</html>

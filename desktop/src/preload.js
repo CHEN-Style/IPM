@@ -6,11 +6,38 @@ contextBridge.exposeInMainWorld('ipm', {
     openFloating: () => ipcRenderer.invoke('ui/openFloating'),
     backToMain: () => ipcRenderer.invoke('ui/backToMain'),
     resizeFloating: (width, height) => ipcRenderer.invoke('ui/resizeFloating', { width, height }),
+    // FK6-1: floating → main bridge that also re-binds KnowClaw cwd
+    // to `_floating`. Returns one of:
+    //   { ok: true }
+    //   { ok: false, blocked: true, reason: 'main_knowclaw_streaming' }
+    //   { ok: false, reason: 'timeout' | 'no_main_window' | ... }
+    backToFloatingWorkspace: () => ipcRenderer.invoke('ui/backToFloatingWorkspace'),
+    // FK6-1 (main-window side): subscribe to "请打开 _floating 工作空间"
+    // requests pushed by `ui/backToFloatingWorkspace`. Callback receives
+    // `{ requestId }`; reply with `ui.replyOpenFloatingWorkspace(requestId, result)`.
+    onOpenFloatingWorkspaceRequest: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const handler = (_evt, data) => callback(data);
+      ipcRenderer.on('ui:openFloatingWorkspaceRequest', handler);
+      return () => ipcRenderer.removeListener('ui:openFloatingWorkspaceRequest', handler);
+    },
+    replyOpenFloatingWorkspace: (requestId, result) =>
+      ipcRenderer.invoke('ui/replyOpenFloatingWorkspace', { requestId, result }),
   },
   prefs: {
     get: () => ipcRenderer.invoke('prefs/get'),
     set: (patch) => ipcRenderer.invoke('prefs/set', { patch }),
     testLlm: (config) => ipcRenderer.invoke('prefs/testLlm', config),
+    // 多 Provider 升级：以下三个接口让设置页能枚举 / 测试 / 元数据查询
+    listAiModels: (provider) => ipcRenderer.invoke('prefs/listAiModels', { provider }),
+    testAiProvider: (provider, modelId) => ipcRenderer.invoke('prefs/testAiProvider', { provider, modelId }),
+    getAiMeta: () => ipcRenderer.invoke('prefs/getAiMeta'),
+    onUpdated: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const handler = (_evt, payload) => callback(payload);
+      ipcRenderer.on('prefs:updated', handler);
+      return () => ipcRenderer.removeListener('prefs:updated', handler);
+    },
     testSearchApi: (config) => ipcRenderer.invoke('prefs/testSearchApi', config),
     getDataDir: () => ipcRenderer.invoke('prefs/getDataDir'),
     chooseDataDir: () => ipcRenderer.invoke('prefs/chooseDataDir'),
@@ -32,6 +59,21 @@ contextBridge.exposeInMainWorld('ipm', {
       ipcRenderer.on('clipboard/imageChanged', handler);
       return () => ipcRenderer.removeListener('clipboard/imageChanged', handler);
     },
+    // FK5-1: pull the most recent PNG buffer cached by the main-process
+    // clipboard watcher. Returns
+    //   { ok:true, pngBuffer, width, height, token, ageMs }
+    // or { ok:false, reason:'no_image'|'expired'|'error' }. Buffer is
+    // structured-cloned across IPC; renderer receives a Uint8Array view.
+    getLatestImage: () => ipcRenderer.invoke('clipboard/getLatestImage'),
+  },
+  // FK4 + FK5: full-screen capture + capture/note persistence helpers.
+  // All three resolve via `ipcMain.handle` in `desktop/src/main/ipc/capture.js`.
+  capture: {
+    fullScreen: () => ipcRenderer.invoke('capture/fullScreen'),
+    saveArtifacts: (payload) =>
+      ipcRenderer.invoke('capture/saveArtifacts', payload || {}),
+    saveNote: (content, opts = {}) =>
+      ipcRenderer.invoke('capture/saveNote', { content, ...opts }),
   },
   files: {
     getPathForFile: (file) => {
@@ -261,7 +303,18 @@ contextBridge.exposeInMainWorld('ipm', {
     // call sites that only pass `message` keep working unchanged
     // because `images` defaults to undefined and the IPC handler
     // sanitises non-arrays down to `[]`.
-    send: (message, images) => ipcRenderer.invoke('knowclaw:send', { message, images }),
+    //
+    // Skill Selector: optional `pinnedSkills` arg carries an array of
+    // skill names the user pinned for this turn. The main process
+    // resolves each name to its SKILL.md and prepends the bodies to
+    // `message` as a `<pinned_skills>` XML block so the model can
+    // execute the skill without first calling Read.
+    send: (message, images, pinnedSkills) =>
+      ipcRenderer.invoke('knowclaw:send', {
+        message,
+        images,
+        pinnedSkills: Array.isArray(pinnedSkills) ? pinnedSkills : undefined,
+      }),
     abort: () => ipcRenderer.invoke('knowclaw:abort'),
     // U4: steer / followUp / clearQueue. `steer` injects an interrupt
     // at the next tool-call boundary; `followUp` queues the message
@@ -370,13 +423,212 @@ contextBridge.exposeInMainWorld('ipm', {
       return () => ipcRenderer.removeListener('knowclaw:askUser', handler);
     },
     // replyAskUser: send the user's selections back to the waiting tool.
-    // `answers` shape: { [questionId]: optionId | optionId[] }.
-    // Pass `{ cancelled: true }` as the second arg to abandon the prompt.
+    // `answers` shape: { [questionId]: optionId | optionId[] } where
+    // a free-text "其他…" answer is encoded as the wire string
+    // `other:<typed text>`. The second arg supports two dismissal verbs:
+    //   - `{ cancelled: true }` — user abandoned the whole ask_user
+    //   - `{ skipped:   true }` — user let the model decide
     replyAskUser: (requestId, answers, opts) =>
       ipcRenderer.invoke('knowclaw:askUserReply', {
         requestId,
         answers: answers && typeof answers === 'object' ? answers : null,
         cancelled: Boolean(opts?.cancelled),
+        skipped:   Boolean(opts?.skipped),
       }),
+  },
+
+  // ======================================================================
+  // FK0: Floating-window KnowClaw convenience namespace.
+  //
+  // Mirrors the most commonly used `window.ipm.knowclaw.*` methods but
+  // pre-binds every IPC call to `channel: 'floating'`. The main
+  // process routes payloads with `channel === 'floating'` to a
+  // dedicated `channels.floating` state slot — independent session,
+  // independent sender, locked cwd (`userfile/workspaces/_floating/`),
+  // independent thinkingLevel / planMode.
+  //
+  // This keeps the floating-window React tree free from having to
+  // remember to pass `{ channel: 'floating' }` on every call (one
+  // forgotten arg and you'd silently mutate the main-window session
+  // — exactly what RW-FK-5 calls out). It also gives the future
+  // macOS-adapter branch a clean template: add a parallel
+  // `knowclawMac` namespace if/when needed.
+  //
+  // We intentionally only expose the subset the floating window
+  // actually uses. Phase FK0/FK1 needs send/abort/newSession/
+  // continueRecent/getStatus/rehydrate/listSessions/setThinkingLevel
+  // plus onEvent (which doesn't take a channel arg — the main
+  // process pushes events directly to `ch.sender`, which is the
+  // floating window's own WebContents, so the channel binding is
+  // implicit in *which* renderer registered the listener). Other
+  // methods (steer/followUp/openSession/etc.) are included up-front
+  // so FK2–FK6 don't need to revisit this file.
+  knowclawFloating: {
+    send: (message, images) =>
+      ipcRenderer.invoke('knowclaw:send', { message, images, channel: 'floating' }),
+    abort: () =>
+      ipcRenderer.invoke('knowclaw:abort', { channel: 'floating' }),
+    steer: (message, images) =>
+      ipcRenderer.invoke('knowclaw:steer', { message, images, channel: 'floating' }),
+    followUp: (message, images) =>
+      ipcRenderer.invoke('knowclaw:followUp', { message, images, channel: 'floating' }),
+    clearQueue: () =>
+      ipcRenderer.invoke('knowclaw:clearQueue', { channel: 'floating' }),
+    compact: (customInstructions) =>
+      ipcRenderer.invoke('knowclaw:compact', { customInstructions, channel: 'floating' }),
+    newSession: () =>
+      ipcRenderer.invoke('knowclaw:newSession', { channel: 'floating' }),
+    continueRecent: () =>
+      ipcRenderer.invoke('knowclaw:continueRecent', { channel: 'floating' }),
+    getStatus: () =>
+      ipcRenderer.invoke('knowclaw:getStatus', { channel: 'floating' }),
+    rehydrate: () =>
+      ipcRenderer.invoke('knowclaw:rehydrate', { channel: 'floating' }),
+    listSessions: () =>
+      ipcRenderer.invoke('knowclaw:listSessions', { channel: 'floating' }),
+    openSession: (sessionFile) =>
+      ipcRenderer.invoke('knowclaw:openSession', { sessionFile, channel: 'floating' }),
+    deleteSession: (sessionFile) =>
+      ipcRenderer.invoke('knowclaw:deleteSession', { sessionFile, channel: 'floating' }),
+    forkSession: (sessionFile, entryIndex) =>
+      ipcRenderer.invoke('knowclaw:forkSession', { sessionFile, entryIndex, channel: 'floating' }),
+    setThinkingLevel: (level) =>
+      ipcRenderer.invoke('knowclaw:setThinkingLevel', { level, channel: 'floating' }),
+    getCwd: () =>
+      ipcRenderer.invoke('knowclaw:getCwd', { channel: 'floating' }),
+    listWorkspaceTree: (folderPath, depth) =>
+      ipcRenderer.invoke('knowclaw:listWorkspaceTree', { path: folderPath || null, depth, channel: 'floating' }),
+    openInExplorer: (folderPath) =>
+      ipcRenderer.invoke('knowclaw:openInExplorer', { path: folderPath || null, channel: 'floating' }),
+    uploadToWorkspace: (filePaths, destRelDir) =>
+      ipcRenderer.invoke('knowclaw:uploadToWorkspace', {
+        filePaths: Array.isArray(filePaths) ? filePaths : [],
+        destRelDir: destRelDir || '',
+        channel: 'floating',
+      }),
+    // onEvent / onConfirmInstall / onAskUser have no channel arg —
+    // the main process routes events via `ch.sender.send(...)`, which
+    // means each window only receives events for its own channel
+    // automatically. Registering on `'knowclaw:event'` is correct for
+    // both channels; the listener will simply never fire for events
+    // owned by the other channel.
+    onEvent: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('knowclaw:event', handler);
+      return () => ipcRenderer.removeListener('knowclaw:event', handler);
+    },
+    onConfirmInstall: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('knowclaw:confirm-install', handler);
+      return () => ipcRenderer.removeListener('knowclaw:confirm-install', handler);
+    },
+    replyConfirmInstall: (requestId, allow) =>
+      ipcRenderer.invoke('knowclaw:confirm-install-reply', { requestId, allow: Boolean(allow) }),
+    onAskUser: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('knowclaw:askUser', handler);
+      return () => ipcRenderer.removeListener('knowclaw:askUser', handler);
+    },
+    replyAskUser: (requestId, answers, opts) =>
+      ipcRenderer.invoke('knowclaw:askUserReply', {
+        requestId,
+        answers: answers && typeof answers === 'object' ? answers : null,
+        cancelled: Boolean(opts?.cancelled),
+        skipped:   Boolean(opts?.skipped),
+      }),
+  },
+
+  // ── FK2: bubble window IPC ─────────────────────────────────────
+  // Used by the floating window's renderer to control the external
+  // assistant bubble, and by the bubble window's renderer to receive
+  // content + send expand requests.
+  bubble: {
+    // FK4-6: third `ocrText` arg is optional. When passed, BubbleView
+    // renders a "复制 OCR 原文" button below the AI body so the user
+    // can pull the OCR-recognised text into the system clipboard. We
+    // do NOT render the OCR text in the bubble itself — full text
+    // lives on disk under `_floating/captures/*.ocr.txt`.
+    show: (html, thinking, ocrText) =>
+      ipcRenderer.invoke('bubble/show', {
+        html, thinking: !!thinking, ocrText: typeof ocrText === 'string' ? ocrText : '',
+      }),
+    hide: () =>
+      ipcRenderer.invoke('bubble/hide'),
+    setContent: (html, thinking, ocrText) =>
+      ipcRenderer.invoke('bubble/setContent', {
+        html, thinking: !!thinking, ocrText: typeof ocrText === 'string' ? ocrText : '',
+      }),
+    expandRequest: () =>
+      ipcRenderer.invoke('bubble/expandRequest'),
+    onContent: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('bubble:content', handler);
+      return () => ipcRenderer.removeListener('bubble:content', handler);
+    },
+    onExpandRequest: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const handler = () => callback();
+      ipcRenderer.on('bubble:expandRequest', handler);
+      return () => ipcRenderer.removeListener('bubble:expandRequest', handler);
+    },
+  },
+
+  // ── SK0: KnowClaw skill management ─────────────────────────────
+  // Mirrors the 7 handlers registered in `main/ipc/skills.js`. All
+  // calls are stateless request/response — there's no skill-side
+  // event stream. State changes (toggle / import / delete) require a
+  // fresh KnowClaw session to take effect; the renderer should
+  // surface that nudge in the UI (see `requiresNewSession` flag in
+  // the responses).
+  skills: {
+    // SK4: `list` accepts an optional `opts.cwd` so the main process
+    // can also scan `<cwd>/.knowclaw/skills/` and surface workspace-
+    // scoped entries. Global mode (no cwd) gives the historical
+    // builtin+user-only result.
+    list: (opts) =>
+      ipcRenderer.invoke('knowclaw:listSkills', {
+        cwd: typeof opts?.cwd === 'string' ? opts.cwd : undefined,
+      }),
+    // SK4: `getContent` accepts `opts.cwd` so the safety check on the
+    // main side knows that workspace skill paths are trusted.
+    getContent: (filePath, opts) =>
+      ipcRenderer.invoke('knowclaw:getSkillContent', {
+        filePath,
+        cwd: typeof opts?.cwd === 'string' ? opts.cwd : undefined,
+      }),
+    // SK2: `import` accepts `overwrite` and `newName` in opts. When
+    // `newName` is provided and differs from the SKILL.md-declared
+    // name, the main process renames the destination dir AND patches
+    // SKILL.md's `name:` field so pi SDK sees the new identity.
+    import: (srcDir, opts) =>
+      ipcRenderer.invoke('knowclaw:importSkill', {
+        srcDir,
+        overwrite: Boolean(opts?.overwrite),
+        newName: typeof opts?.newName === 'string' ? opts.newName : undefined,
+      }),
+    // SK4: `delete` accepts `opts.cwd` (for workspace skill lookup)
+    // and an optional `opts.scope` ('workspace' | 'user') to pin which
+    // copy gets removed when both happen to exist with the same name.
+    // Default policy (no scope) is workspace-wins-if-present.
+    delete: (name, opts) =>
+      ipcRenderer.invoke('knowclaw:deleteSkill', {
+        name,
+        cwd: typeof opts?.cwd === 'string' ? opts.cwd : undefined,
+        scope: typeof opts?.scope === 'string' ? opts.scope : undefined,
+      }),
+    toggle: (name, enabled) =>
+      ipcRenderer.invoke('knowclaw:toggleSkill', { name, enabled: Boolean(enabled) }),
+    reload: () =>
+      ipcRenderer.invoke('knowclaw:reloadSkills'),
+    scanExternal: () =>
+      ipcRenderer.invoke('knowclaw:scanExternalSkills'),
+    // SK2: native folder picker + SKILL.md preview in one round-trip.
+    // Returns { ok, dir, name, description, files } on success, or
+    // { ok: false, canceled: true } when the user dismisses the dialog.
+    chooseDir: () =>
+      ipcRenderer.invoke('knowclaw:chooseSkillDir'),
   },
 });

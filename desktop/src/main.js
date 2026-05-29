@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, shell, clipboard, protocol, net, globalShortcut, Tray } from 'electron';
+import { app, BrowserWindow, Menu, ipcMain, dialog, shell, clipboard, protocol, net, globalShortcut, Tray, screen } from 'electron';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -20,11 +20,15 @@ import { registerSnippetsIpc } from './main/ipc/snippets.js';
 import { registerScreenshotsIpc } from './main/ipc/screenshots.js';
 import { registerFloatingIpc } from './main/ipc/floating.js';
 import { registerUiIpc } from './main/ipc/ui.js';
+import { registerBubbleIpc } from './main/ipc/bubble.js';
+import { registerCaptureIpc } from './main/ipc/capture.js';
+import { registerClipboardIpc } from './main/ipc/clipboard.js';
 import { registerClassifyRulesIpc } from './main/ipc/classifyRules.js';
 import { registerClassifyEventsIpc } from './main/ipc/classifyEvents.js';
 // W2: seedDefaultRules 不再在新建时调用，但保留模块以备未来「导入模板规则」。
 // import { seedDefaultRules } from '../Agent/storage/classifyRules.js';
 import { registerKnowClawIpc } from './main/ipc/knowclaw.js';
+import { registerSkillsIpc } from './main/ipc/skills.js';
 import { registerPreferencesIpc } from './main/ipc/preferences.js';
 import { registerKnowledgeIpc } from './main/ipc/knowledge.js';
 import { registerAnalyticsIpc, uploadPendingAnalytics } from './main/ipc/analytics.js';
@@ -98,6 +102,13 @@ const getStudyRoot = () => path.join(getUserFileRoot(), 'study');
 const getAppRoot = () => path.join(getUserFileRoot(), '_app');
 const getSandboxRoot = () => path.join(getAppRoot(), 'sandbox');
 const getStatePath = () => path.join(getAppRoot(), 'state.json');
+
+// FK0/FK4: fixed workspace root for the floating-window KnowClaw channel.
+// Mirrors `FLOATING_WORKSPACE_PATH` inside `registerKnowClawIpc()` — exposed
+// here as a thin helper so other IPC modules (capture/clipboard/etc.) can
+// land artifacts in the same place without re-deriving the path.
+const getFloatingWorkspacePath = () =>
+  path.join(getUserFileRoot(), 'workspaces', '_floating');
 
 // ===== Domain: folder templates (MVP->vNext) =====
 const WORK_BIZ_FOLDERS = ['收到资料', '过程文档', '调研研究', '交付成果'];
@@ -1322,8 +1333,10 @@ const migrateLegacyScreenshotFolderIfNeeded = (projectDir) => {
 
 let mainWindow = null;
 let floatingWindow = null;
+let bubbleWindow = null;
 const mainWindowRef = { current: null };
 const floatingWindowRef = { current: null };
+const bubbleWindowRef = { current: null };
 // G1.2a 系统托盘实例。在 app.whenReady 内创建，will-quit 时 destroy。
 let tray = null;
 let clipboardWatchTimer = null;
@@ -1363,8 +1376,11 @@ const enqueueDeleteDir = (absPath) => {
 
 const pruneClipboardImageCache = () => {
   const now = Date.now();
+  // FK5-1: TTL bumped from 60s → 120s so `clipboard/getLatestImage`
+  // sees the most recent screenshot within a useful "I just snipped
+  // something, now let me OCR it" window. See `clipboard.js`.
   for (const [token, v] of clipboardImageCache.entries()) {
-    if (!v?.createdAt || now - v.createdAt > 60_000) {
+    if (!v?.createdAt || now - v.createdAt > 120_000) {
       clipboardImageCache.delete(token);
     }
   }
@@ -1424,7 +1440,7 @@ const stopClipboardWatcher = () => {
 };
 
 const loadRenderer = (win, uiMode = 'main') => {
-  const search = uiMode === 'floating' ? 'ui=floating' : '';
+  const search = uiMode !== 'main' ? `ui=${uiMode}` : '';
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     const url = search ? `${MAIN_WINDOW_VITE_DEV_SERVER_URL}?${search}` : MAIN_WINDOW_VITE_DEV_SERVER_URL;
     win.loadURL(url);
@@ -1854,16 +1870,30 @@ const createFloatingWindow = () => {
   });
   floatingWindow.on('hide', () => {
     stopClipboardWatcher();
+    // FK2: hide bubble when the floating window hides
+    if (bubbleWindow && !bubbleWindow.isDestroyed() && bubbleWindow.isVisible()) {
+      bubbleWindow.hide();
+    }
   });
 
   floatingWindow.on('closed', () => {
     floatingWindow = null;
     floatingWindowRef.current = null;
     stopClipboardWatcher();
-    // 兜底：用户从系统级 X 直接关掉悬浮（而非通过 backToMain）时，确保中台仍可见。
+    // FK2: close bubble when the floating window is closed
+    if (bubbleWindow && !bubbleWindow.isDestroyed()) {
+      bubbleWindow.close();
+    }
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
       mainWindow.show();
     }
+  });
+
+  // FK2: reposition bubble when the floating window moves
+  let moveTimer = null;
+  floatingWindow.on('moved', () => {
+    clearTimeout(moveTimer);
+    moveTimer = setTimeout(repositionBubble, 50);
   });
 
   // 首次创建时窗口默认可见，'show' 事件可能晚于此处触发，因此显式 startClipboardWatcher
@@ -1872,6 +1902,76 @@ const createFloatingWindow = () => {
   floatingWindowRef.current = floatingWindow;
   return floatingWindow;
 };
+
+// ── FK2: Assistant bubble window ──────────────────────────────────
+// A second frameless transparent window that displays AI replies as
+// a large "speech bubble" adjacent to the floating window. Created
+// lazily on first `bubble/show` and reused via show/hide afterwards.
+const createBubbleWindow = () => {
+  if (bubbleWindow && !bubbleWindow.isDestroyed()) return bubbleWindow;
+  bubbleWindow = new BrowserWindow({
+    width: 420,
+    height: 430,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    focusable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    show: false,
+    paintWhenInitiallyHidden: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  bubbleWindow.setAlwaysOnTop(true, 'screen-saver');
+  loadRenderer(bubbleWindow, 'bubble');
+  bubbleWindow.on('closed', () => {
+    bubbleWindow = null;
+    bubbleWindowRef.current = null;
+  });
+  bubbleWindowRef.current = bubbleWindow;
+  return bubbleWindow;
+};
+
+// FK2: position the bubble next to the floating window, choosing the
+// side with more screen space. Debounced and called from 'moved' event.
+function repositionBubble() {
+  if (!bubbleWindow || bubbleWindow.isDestroyed()) return;
+  if (!floatingWindow || floatingWindow.isDestroyed()) return;
+  const fBounds = floatingWindow.getBounds();
+  const display = screen.getDisplayMatching(fBounds);
+  const { x: sx, y: sy, width: sw, height: sh } = display.workArea;
+
+  const spaceLeft = fBounds.x - sx;
+  const spaceRight = (sx + sw) - (fBounds.x + fBounds.width);
+  const horizontal = spaceLeft >= spaceRight ? 'left' : 'right';
+
+  const sideSpace = horizontal === 'left' ? spaceLeft : spaceRight;
+  const bubbleW = Math.max(200, Math.min(420, sideSpace - 24));
+  const bSize = bubbleWindow.getContentSize();
+  const bubbleH = Math.min(bSize[1] || 430, sh - 32);
+  const gap = 12;
+
+  let bx;
+  if (horizontal === 'left') {
+    bx = fBounds.x - bubbleW - gap;
+  } else {
+    bx = fBounds.x + fBounds.width + gap;
+  }
+  let by = fBounds.y + 60;
+  by = Math.max(sy, Math.min(by, sy + sh - bubbleH));
+  bx = Math.max(sx, bx);
+
+  bubbleWindow.setBounds({
+    x: Math.round(bx), y: Math.round(by),
+    width: Math.round(bubbleW), height: Math.round(bubbleH),
+  });
+}
 
 // G1.0/G1.1 全局切换：Ctrl+Shift+Space / 托盘单击 / 标题栏按钮共享此函数。
 // 逻辑：若悬浮窗存在且可见 → 切到中台（隐藏悬浮）；否则 → 切到悬浮（隐藏中台）。
@@ -2183,6 +2283,17 @@ app.whenReady().then(() => {
     getWorkspaceDirOrThrow,
   });
 
+  // SK0: KnowClaw skill management. Registers 7 `knowclaw:*Skill*` IPC
+  // channels that the renderer uses to enumerate, toggle, import, and
+  // delete skills. State lives in `state.knowclaw.skills`; the
+  // `disabled` array is consumed by `registerKnowClawIpc`'s
+  // `ensureSession` to feed `skillsOverride` on the next pi session.
+  registerSkillsIpc({
+    ipcMain,
+    readState,
+    writeState,
+  });
+
   ipcMain.handle('classify:getSnapshot', async (_evt, payload) => {
     const projectName = String(payload?.projectName || '');
     return { ok: true, ...classifyTracker.getSnapshot(projectName) };
@@ -2399,6 +2510,27 @@ app.whenReady().then(() => {
     mainWindowRef,
     floatingWindowRef,
   });
+
+  registerBubbleIpc({
+    ipcMain,
+    floatingWindowRef,
+    bubbleWindowRef,
+    createBubbleWindow,
+    repositionBubble,
+  });
+
+  // FK4: full-screen capture + capture/note persistence into
+  // `userfile/workspaces/_floating/{captures,notes}/`.
+  registerCaptureIpc({
+    ipcMain,
+    floatingWindowRef,
+    bubbleWindowRef,
+    getFloatingWorkspacePath,
+  });
+
+  // FK5: latest-image getter on top of the existing clipboard watcher
+  // cache. Reuses the Map populated by `startClipboardWatcher()` above.
+  registerClipboardIpc({ ipcMain, clipboardImageCache });
 
   // G1.0 全局快捷键：Ctrl+Shift+Space 双向切换悬浮 / 中台
   try {

@@ -40,11 +40,12 @@ import {
   describeIpmConfig,
   describeSearchApiConfig,
   getIpmLlmConfig,
+  getIpmLlmConfigs,
   getSearchApiConfig,
 } from './ipmConfig.js';
-import { applyIpmRuntimeKey, buildAuthStorage } from './auth.js';
+import { applyIpmRuntimeKeys, buildAuthStorage } from './auth.js';
 import {
-  registerIpmProvider,
+  registerIpmProviders,
   buildModelRegistry,
   findIpmModel,
   getDefaultIpmModel,
@@ -282,11 +283,32 @@ function makeEventLogger(prefix = '[KnowClaw-PoC]') {
  *                                     change takes effect on the *next* session
  *                                     creation — existing sessions keep their tool
  *                                     set frozen until they're disposed.
+ * @param {string[]} [opts.disabledSkills=[]]
+ *                                     SK0: list of skill names to exclude from
+ *                                     this session's system prompt. Threaded
+ *                                     into a `skillsOverride` callback on
+ *                                     `DefaultResourceLoader` which filters the
+ *                                     loaded skill list after pi's normal
+ *                                     scan/validate pass. Effect:
+ *                                       - the model never sees disabled skills in
+ *                                         `<available_skills>`, so it won't
+ *                                         spontaneously invoke them;
+ *                                       - `/skill:name` commands still work (the
+ *                                         command path doesn't consult prompt
+ *                                         injection);
+ *                                       - disabled-skill files remain on disk
+ *                                         untouched — toggle is a soft mute.
+ *                                     Like `subAgentEnabled`, this is captured
+ *                                     at session-creation time; running sessions
+ *                                     keep their skill set frozen.
  * @returns {Promise<CreateSessionResult>}
  */
 export async function createSession(opts = {}) {
   const cwd = opts.cwd || process.cwd();
   const modelIdOverride = opts.modelId ? String(opts.modelId).trim() : '';
+  // 多 Provider 升级：runtime / IPC 端可显式指定 pi 端的 provider id，
+  // 让 setModel('ipm-openai-abc', 'gpt-5.1') 这种用法精确生效。
+  const providerIdOverride = opts.providerId ? String(opts.providerId).trim() : '';
   const mode = opts.mode || 'continueRecent';
   const sessionFile = opts.sessionFile || undefined;
   const toolDeps = opts.toolDeps && typeof opts.toolDeps === 'object' ? opts.toolDeps : null;
@@ -296,10 +318,16 @@ export async function createSession(opts = {}) {
   // pass `false` to skip registration entirely so the model can't even
   // see the tool.
   const subAgentEnabled = opts.subAgentEnabled !== false;
+  // SK0: skill mute-list. Names appearing here get filtered out of the
+  // ResourceLoader's skill set via `skillsOverride` (see § 8c below).
+  const disabledSkills = Array.isArray(opts.disabledSkills)
+    ? opts.disabledSkills.filter((n) => typeof n === 'string' && n.trim()).map((n) => n.trim())
+    : [];
 
-  // --- 1. Read IPM config ---
-  const ipmConfig = getIpmLlmConfig();
-  log('IPM LLM config:', describeIpmConfig(ipmConfig));
+  // --- 1. Read IPM configs (KnowClaw 多模型) ---
+  const ipmConfigs = getIpmLlmConfigs();
+  const ipmConfig = ipmConfigs[0] || null;
+  log('IPM KnowClaw configs:', ipmConfigs.length, describeIpmConfig(ipmConfig));
 
   // --- 2. Build AuthStorage + ModelRegistry (in-memory, no disk IO) ---
   let authStorage;
@@ -312,22 +340,22 @@ export async function createSession(opts = {}) {
     return { sessionId: null, resumed: false, sessionFile: null, error: String(err?.message || err) };
   }
 
-  // --- 3. Register ipm-openai provider directly on ModelRegistry ---
+  // --- 3. Register all KnowClaw providers on ModelRegistry ---
   try {
-    registerIpmProvider(modelRegistry, ipmConfig);
+    registerIpmProviders(modelRegistry, ipmConfigs);
   } catch (err) {
-    log('failed to register ipm-openai provider:', err?.message || err);
+    log('failed to register KnowClaw providers:', err?.message || err);
     return { sessionId: null, resumed: false, sessionFile: null, error: String(err?.message || err) };
   }
 
-  // --- 4. Inject runtime API key ---
-  applyIpmRuntimeKey(authStorage, ipmConfig);
+  // --- 4. Inject runtime API keys (一次性把所有 provider 的 Key 都装上) ---
+  applyIpmRuntimeKeys(authStorage, ipmConfigs);
 
   // --- 5. Check available models ---
   const ipmModels = await listIpmModelsAsync(modelRegistry);
   log(
-    `ipm-openai models registered: ${ipmModels.length}`,
-    ipmModels.map((m) => m.id),
+    `KnowClaw models registered: ${ipmModels.length}`,
+    ipmModels.map((m) => `${m.provider}/${m.id}`),
   );
 
   if (!ipmConfig || ipmModels.length === 0) {
@@ -336,9 +364,26 @@ export async function createSession(opts = {}) {
   }
 
   // --- 6. Resolve model ---
-  const model = modelIdOverride
-    ? findIpmModel(modelRegistry, modelIdOverride)
-    : getDefaultIpmModel(modelRegistry, ipmConfig);
+  // modelIdOverride 既可以是 "providerId/modelId"，也可以是单纯的 modelId
+  // （兼容旧调用方式）。providerIdOverride 优先于 modelIdOverride 中的
+  // providerId 前缀。
+  let resolvedProviderId = providerIdOverride;
+  let resolvedModelId = modelIdOverride;
+  if (modelIdOverride && modelIdOverride.includes('/')) {
+    const [maybeProvider, ...rest] = modelIdOverride.split('/');
+    if (maybeProvider && rest.length > 0) {
+      resolvedProviderId = resolvedProviderId || maybeProvider;
+      resolvedModelId = rest.join('/');
+    }
+  }
+
+  let model = null;
+  if (resolvedModelId) {
+    model = findIpmModel(modelRegistry, resolvedModelId, resolvedProviderId);
+  }
+  if (!model) {
+    model = getDefaultIpmModel(modelRegistry, ipmConfig);
+  }
   log('selected model:', model ? `${model.provider}/${model.id}` : null);
 
   if (!model) {
@@ -522,6 +567,29 @@ export async function createSession(opts = {}) {
     });
     const userSkillsRoot = getUserSkillsRoot();
     const additionalSkillPaths = [BUILTIN_SKILLS_DIR];
+
+    // SK4: workspace-level skills live under `<cwd>/.knowclaw/skills/`.
+    // Insert BEFORE the user root so pi SDK's first-discovered-wins
+    // collision rule yields the workspace copy when a global user skill
+    // shares the same name. This matches the priority applied by the
+    // `listSkills` IPC (builtin > workspace > user) so the UI and the
+    // runtime stay in sync.
+    //
+    // We only append the path when (a) a non-global cwd is bound to
+    // this session and (b) the directory actually exists — pi SDK is
+    // fine with non-existent paths (they yield zero skills) but we skip
+    // the entry to keep the diagnostic logs cleaner.
+    if (cwd) {
+      try {
+        const wsSkillDir = path.join(cwd, '.knowclaw', 'skills');
+        if (fs.existsSync(wsSkillDir)) {
+          additionalSkillPaths.push(wsSkillDir);
+        }
+      } catch {
+        // ignore — workspace skills are best-effort
+      }
+    }
+
     if (userSkillsRoot) {
       additionalSkillPaths.push(userSkillsRoot);
     }
@@ -539,12 +607,27 @@ export async function createSession(opts = {}) {
       ? Boolean(opts.noContextFiles)
       : true;
 
+    // SK0: build a `skillsOverride` callback when the caller asked to
+    // mute one or more skills. `DefaultResourceLoader` invokes it during
+    // `reload()` AFTER `loadSkills()` has finished scanning + validating,
+    // letting us drop entries by name without re-implementing the SDK's
+    // discovery logic. When the mute list is empty we leave the override
+    // undefined so pi takes its happy-path branch.
+    const disabledSkillsSet = new Set(disabledSkills);
+    const skillsOverride = disabledSkillsSet.size > 0
+      ? ({ skills, diagnostics }) => ({
+          skills: skills.filter((s) => !disabledSkillsSet.has(s.name)),
+          diagnostics,
+        })
+      : undefined;
+
     resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir: getAgentDir(),
       systemPrompt,
       noContextFiles,
       additionalSkillPaths,
+      skillsOverride,
     });
     await resourceLoader.reload();
     log('resourceLoader: systemPrompt injected', describeKnowClawPrompt(systemPrompt));
@@ -557,7 +640,11 @@ export async function createSession(opts = {}) {
       log(
         `skills loaded: ${skills.length}`,
         skills.map((s) => s.name),
-        { builtin: BUILTIN_SKILLS_DIR, user: userSkillsRoot || '(none)' },
+        {
+          builtin: BUILTIN_SKILLS_DIR,
+          user: userSkillsRoot || '(none)',
+          disabled: disabledSkillsSet.size > 0 ? [...disabledSkillsSet] : '(none)',
+        },
       );
       if (diagnostics.length > 0) {
         log('skills diagnostics:', diagnostics.map((d) => d?.message || d));

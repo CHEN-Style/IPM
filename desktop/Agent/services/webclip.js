@@ -95,7 +95,7 @@ export async function summarizeContent(text) {
 
   try {
     const { createSummaryModel } = await import('./llm.js');
-    const model = createSummaryModel();
+    const model = await createSummaryModel();
     const truncated = text.slice(0, MAX_SUMMARY_INPUT);
     const result = await model.invoke([
       { role: 'system', content: '你是一个知识管理助手。用户会给你一段网页正文，请用中文总结核心要点，200字以内。只输出总结内容，不要任何前缀。' },

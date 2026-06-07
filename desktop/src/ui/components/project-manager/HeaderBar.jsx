@@ -18,6 +18,9 @@ import {
   Upload,
   X,
   CornerDownLeft,
+  Cloud,
+  CloudUpload,
+  Loader2,
 } from 'lucide-react';
 
 const DEBOUNCE_MS = 280;
@@ -67,6 +70,12 @@ const HeaderBar = ({
   isAttachedBroken,
   onRefreshAttached,
   onRelocateAttached,
+  // C3: 云端发布（仅在项目根级显示）
+  showCloudPublish,
+  cloudPublishing,
+  cloudBound,
+  cloudVersionNumber,
+  onPublishCurrent,
 }) => {
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef(null);
@@ -490,6 +499,32 @@ const HeaderBar = ({
             >
               <Sparkles size={13} /> {aiUploadRunning ? 'AI分类中…' : 'AI分类'}
             </button>
+            {showCloudPublish && (
+              cloudPublishing ? (
+                <span
+                  className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-[#3e4b9c]/10 text-[#3e4b9c] text-xs font-medium whitespace-nowrap shrink-0"
+                  title="正在发布到云端"
+                >
+                  <Loader2 size={13} className="animate-spin" /> 发布中…
+                </span>
+              ) : cloudBound ? (
+                <span
+                  className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100 text-xs font-medium whitespace-nowrap shrink-0"
+                  title={cloudVersionNumber ? `已绑定云端 · 版本 v${cloudVersionNumber}` : '已绑定云端'}
+                >
+                  <Cloud size={13} /> 云端{cloudVersionNumber ? ` v${cloudVersionNumber}` : ''}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onPublishCurrent?.()}
+                  className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-white text-[#3e4b9c] border border-[#3e4b9c]/30 hover:bg-[#3e4b9c]/5 transition-colors text-xs font-medium whitespace-nowrap shrink-0"
+                  title="将该项目发布到云端"
+                >
+                  <CloudUpload size={13} /> 发布到云端
+                </button>
+              )
+            )}
             {isAttachedProject && (
               <button
                 type="button"

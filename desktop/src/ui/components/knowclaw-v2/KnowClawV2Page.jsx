@@ -727,7 +727,7 @@ const KnowClawV2Page = () => {
             </button>
           )}
           {/* E.1: DeepSeek-style side nav rail. Renders one marker per
-              user message + a viewport indicator. Sits in the same
+              user message. Sits in the same
               relative-positioned Chat body container as the "回到底部"
               button (which is anchored to right-6 — the rail uses
               right-1 so the two don't overlap). The rail short-circuits

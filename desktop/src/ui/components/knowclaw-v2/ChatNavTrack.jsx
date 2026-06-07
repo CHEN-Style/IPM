@@ -31,17 +31,82 @@
 // value. Bails out (returns null) when fewer than 2 user turns
 // exist — single-turn conversations don't need a TOC.
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
+
+// Module-level style injection for the rail's scroll affordance.
+// We avoid Tailwind's `scrollbar-hide` plugin (not configured in this
+// project anyway) and instead drive a two-state scrollbar:
+//
+//   Idle (rail collapsed): scrollbar invisible — the rail is just a
+//     translucent tick column on the page edge, a visible scrollbar
+//     would look broken without a panel surface behind it.
+//
+//   Hover (rail expanded): a thin, low-contrast scrollbar appears,
+//     giving the user the "this list is taller than what you see,
+//     scroll me" affordance the user explicitly asked for.
+//
+// Hover state is detected via the outer `group/nav` class set by the
+// component below. `.group\/nav` in CSS literal text → `.group\\/nav`
+// in this JS template string (one level of JS escaping).
+const KC_NAV_STYLE_ID = 'kc-chat-nav-style';
+function ensureNavStyleInjected() {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(KC_NAV_STYLE_ID)) return;
+  const el = document.createElement('style');
+  el.id = KC_NAV_STYLE_ID;
+  el.textContent = `
+    /* Idle state: scrollbar layout-reserved but visually invisible.
+       We reserve the width so the rail's right edge doesn't shift
+       when hover transitions in; instead we just animate the thumb
+       opacity / colour. Firefox uses scrollbar-width:thin once
+       (no transition support) and recolors via scrollbar-color. */
+    .kc-chat-nav-scroll {
+      scrollbar-width: thin;
+      scrollbar-color: transparent transparent;
+      -ms-overflow-style: none;
+    }
+    .kc-chat-nav-scroll::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .kc-chat-nav-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .kc-chat-nav-scroll::-webkit-scrollbar-thumb {
+      background: transparent;
+      border-radius: 3px;
+    }
+
+    /* Hover state: thumb fades in to a low-contrast slate. This is
+       the user-facing affordance — "there's more below, I can scroll
+       this". The outer .group/nav is set by the rail's wrapper. */
+    .group\\/nav:hover .kc-chat-nav-scroll {
+      scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
+    }
+    .group\\/nav:hover .kc-chat-nav-scroll::-webkit-scrollbar-thumb {
+      background: rgba(100, 116, 139, 0.45);
+    }
+    .group\\/nav:hover .kc-chat-nav-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(100, 116, 139, 0.7);
+    }
+  `;
+  document.head.appendChild(el);
+}
+
+function flattenText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
 
 export default function ChatNavTrack({ messages, scrollContainerRef }) {
+  useEffect(() => { ensureNavStyleInjected(); }, []);
   const userAnchors = useMemo(() => {
     const anchors = [];
     if (!Array.isArray(messages)) return anchors;
     for (let i = 0; i < messages.length; i += 1) {
       const m = messages[i];
       if (m?.role !== 'user') continue;
-      const raw = typeof m.content === 'string' ? m.content : '';
-      const flat = raw.replace(/\s+/g, ' ').trim();
+      const flat = flattenText(m.content);
+      if (!flat) continue;
       anchors.push({
         index: i,
         snippet: flat.slice(0, 24),
@@ -79,13 +144,35 @@ export default function ChatNavTrack({ messages, scrollContainerRef }) {
           shadow only — geometry (max-width) is handled per-row
           below so the card grows rightward smoothly as snippets
           reveal. */}
+      {/* Geometry note:
+            - Inline `maxHeight: min(65vh, 520px)` is used instead of a
+              Tailwind arbitrary class because we hit a case where the
+              JIT-compiled class wasn't being applied in production
+              builds, leaving the rail unbounded. Inline style is the
+              robust fallback — it always wins.
+            - The cap of 520px / 65vh means on a typical 800px viewport
+              the rail uses ~520px (room for ~18 rows) before kicking
+              the scroll affordance in; on shorter windows it falls
+              back to 65vh so we never overflow the chat region.
+            - `overflow-y-auto` does the actual scrolling.
+            - `kc-chat-nav-scroll` is our custom class (see
+              ensureNavStyleInjected at the top of the file) — the
+              scrollbar gutter is reserved at all times (no layout
+              shift on hover) but the thumb is invisible when idle and
+              fades into a low-contrast slate when the rail is
+              hover-expanded.
+            - `overscroll-contain` keeps wheel scrolling local to the
+              rail when the cursor is over it; we don't want a scroll
+              past the rail's ends to start scrolling the entire
+              chat transcript behind it. */}
       <div
         className="flex flex-col items-end gap-0.5 py-2 px-2.5 rounded-xl
                    bg-transparent ring-1 ring-transparent shadow-none
                    group-hover/nav:bg-white/95 group-hover/nav:ring-slate-200
                    group-hover/nav:shadow-lg group-hover/nav:backdrop-blur-sm
                    transition-[background-color,box-shadow] duration-200
-                   max-h-[70vh] overflow-y-auto scrollbar-hide"
+                   overflow-y-auto overscroll-contain kc-chat-nav-scroll"
+        style={{ maxHeight: 'min(65vh, 520px)' }}
       >
         {userAnchors.map((anchor) => (
           <button

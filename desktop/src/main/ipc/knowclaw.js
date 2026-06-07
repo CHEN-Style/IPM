@@ -389,6 +389,82 @@ function readJsonlEntries(absPath) {
   return entries;
 }
 
+function normalizePersistedMessageEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+
+  // Some pi versions expose getEntries() as the raw AgentMessage objects.
+  if (entry.role === 'user' || entry.role === 'assistant' || entry.role === 'toolResult') {
+    return entry;
+  }
+
+  // Persisted JSONL entries normally wrap the message under `message`.
+  // Keep the extraction permissive so a minor pi serialization shape
+  // change does not collapse the renderer transcript back to the
+  // compacted active-context view.
+  const candidates = [
+    entry.message,
+    entry.data?.message,
+    entry.data,
+  ];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    if (
+      candidate.role === 'user' ||
+      candidate.role === 'assistant' ||
+      candidate.role === 'toolResult'
+    ) {
+      const timestamp =
+        typeof candidate.timestamp === 'number'
+          ? candidate.timestamp
+          : (typeof entry.timestamp === 'number' ? entry.timestamp : undefined);
+      return timestamp ? { ...candidate, timestamp } : candidate;
+    }
+  }
+
+  return null;
+}
+
+function extractRendererHistoryMessages(session, sessionFile) {
+  const persistedMessages = [];
+
+  try {
+    const sm = session?.sessionManager;
+    const entries = sm && typeof sm.getEntries === 'function' ? sm.getEntries() : null;
+    if (Array.isArray(entries)) {
+      for (const entry of entries) {
+        const msg = normalizePersistedMessageEntry(entry);
+        if (msg) persistedMessages.push(msg);
+      }
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[KnowClaw] getEntries history extraction failed:', err?.message || err);
+  }
+
+  if (persistedMessages.length === 0 && sessionFile) {
+    try {
+      const entries = readJsonlEntries(sessionFile);
+      for (const entry of entries) {
+        const msg = normalizePersistedMessageEntry(entry);
+        if (msg) persistedMessages.push(msg);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[KnowClaw] JSONL history extraction failed:', err?.message || err);
+    }
+  }
+
+  if (persistedMessages.length > 0) {
+    return mapPiMessagesForRenderer(persistedMessages);
+  }
+
+  // Last resort: pi's active context. This may be compacted and can
+  // omit older turns, but it is still better than an empty transcript
+  // for in-memory sessions or unknown persistence formats.
+  const piMessages = Array.isArray(session?.messages) ? session.messages : [];
+  return mapPiMessagesForRenderer(piMessages);
+}
+
 // ---- U3: install-guard module (lazy-loaded) ------------------------------
 //
 // `installGuard.js` lives in `Agent/pi-runtime/tools/` — the same
@@ -663,8 +739,18 @@ export function registerKnowClawIpc({
   readState,
   writeState,
   getWorkspaceDirOrThrow,
+  isWorkspaceLocked,
 }) {
   if (!ipcMain) throw new Error('registerKnowClawIpc: ipcMain is required');
+
+  // C3: helper to block agent writes/uploads into a workspace that is being
+  // published. cwd is an absolute path; the lock check matches by prefix.
+  const cwdLockedResponse = (cwd) => {
+    if (typeof isWorkspaceLocked === 'function' && cwd && isWorkspaceLocked(cwd)) {
+      return { ok: false, error: '该项目正在云端发布，暂时无法修改', code: 'WORKSPACE_LOCKED' };
+    }
+    return null;
+  };
   if (typeof getUserFileRoot !== 'function') {
     throw new Error('registerKnowClawIpc: getUserFileRoot is required');
   }
@@ -1432,6 +1518,8 @@ export function registerKnowClawIpc({
 
   ipcMain.handle('knowclaw:send', async (evt, payload) => {
     const ch = getChannel(payload);
+    const locked = cwdLockedResponse(ch?.cwd);
+    if (locked) return locked;
     const message = String(payload?.message ?? '').trim();
     // U8b-2: image attachments are optional. An empty message is still
     // refused, but a text-less prompt that carries images is allowed
@@ -2110,6 +2198,8 @@ export function registerKnowClawIpc({
   //     try to recurse — the user can drag the parent's contents instead.
   ipcMain.handle('knowclaw:uploadToWorkspace', async (_evt, payload) => {
     const ch = getChannel(payload);
+    const locked = cwdLockedResponse(ch?.cwd);
+    if (locked) return { ...locked, uploaded: [], skipped: [] };
     const MAX_BYTES = 100 * 1024 * 1024; // 100 MB / file
     const filePaths = Array.isArray(payload?.filePaths) ? payload.filePaths : [];
     if (filePaths.length === 0) {
@@ -3163,9 +3253,11 @@ function extractLatestTasksEntry(session) {
 
 /**
  * Build a `history_loaded` event payload from a freshly opened
- * AgentSession. Walks the live `session.messages` array (which
- * resolves the active branch leaf, including compaction). Falls back
- * to an empty list if extraction throws.
+ * AgentSession. Renderer history should prefer the append-only
+ * persisted entry log, not `session.messages`: the latter represents
+ * pi's active model context and can intentionally drop older turns
+ * after compaction / branch recovery. Falling back to `session.messages`
+ * is reserved for in-memory sessions or unknown persistence formats.
  *
  * U7 additions:
  *   - `tasks`: latest `knowclaw:tasks` snapshot from the session
@@ -3176,8 +3268,7 @@ function extractLatestTasksEntry(session) {
 function buildHistoryLoadedEvent(session, sessionFile) {
   let historyMessages = [];
   try {
-    const piMessages = Array.isArray(session?.messages) ? session.messages : [];
-    historyMessages = mapPiMessagesForRenderer(piMessages);
+    historyMessages = extractRendererHistoryMessages(session, sessionFile);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn('[KnowClaw] history extraction failed:', err?.message || err);

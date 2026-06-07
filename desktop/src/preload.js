@@ -631,4 +631,32 @@ contextBridge.exposeInMainWorld('ipm', {
     chooseDir: () =>
       ipcRenderer.invoke('knowclaw:chooseSkillDir'),
   },
+
+  // ── C2: Cloud binding + local workspace scan ───────────────────
+  // Offline-only in C2. `getBindingStatus` reads meta/cloud.json;
+  // `scanWorkspace` walks the workspace and returns a SHA-256 manifest.
+  // `onScanProgress` subscribes to per-file hashing progress pushed on
+  // the `cloud:scanProgress` channel; returns an unsubscribe function.
+  cloud: {
+    getBindingStatus: (params) =>
+      ipcRenderer.invoke('cloud/getBindingStatus', params || {}),
+    scanWorkspace: (params) =>
+      ipcRenderer.invoke('cloud/scanWorkspace', params || {}),
+    onScanProgress: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const handler = (_evt, data) => callback(data);
+      ipcRenderer.on('cloud:scanProgress', handler);
+      return () => ipcRenderer.removeListener('cloud:scanProgress', handler);
+    },
+    // C3: publish flow
+    publish: (params) => ipcRenderer.invoke('cloud/publish', params || {}),
+    cancelPublish: (params) => ipcRenderer.invoke('cloud/cancelPublish', params || {}),
+    getLockedWorkspaces: () => ipcRenderer.invoke('cloud/getLockedWorkspaces'),
+    onPublishProgress: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const handler = (_evt, data) => callback(data);
+      ipcRenderer.on('cloud:publishProgress', handler);
+      return () => ipcRenderer.removeListener('cloud:publishProgress', handler);
+    },
+  },
 });

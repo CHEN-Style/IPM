@@ -79,6 +79,26 @@ const VITE_EXTERNALS = [
   'ppu-ocv',
 ];
 
+function shouldCopyAgentFile(agentSrc, srcPath) {
+  const rel = path.relative(agentSrc, srcPath);
+  if (!rel) return true;
+  const parts = rel.split(path.sep);
+  const base = parts[parts.length - 1];
+  const isRootFile = parts.length === 1;
+
+  // Root Agent/*.md files are development plans / reports, not runtime
+  // assets. Keeping them in the MSI can introduce non-ANSI file names
+  // (for example IPM Chinese report docs) and break WiX's default 1252
+  // database encoding. Nested SKILL.md files remain included.
+  if (isRootFile && base.toLowerCase().endsWith('.md')) return false;
+  if (isRootFile && base === 'k3-floating-knowclaw-demo.html') return false;
+  if (base === '.env') return false;
+  if (parts.includes('__pycache__')) return false;
+  if (base.toLowerCase().endsWith('.pyc')) return false;
+
+  return true;
+}
+
 module.exports = {
   packagerConfig: {
     // ASAR is INTENTIONALLY DISABLED.
@@ -167,7 +187,10 @@ module.exports = {
       const agentSrc = path.resolve(__dirname, 'Agent');
       const agentDest = path.join(buildPath, 'Agent');
       if (fs.existsSync(agentSrc) && !fs.existsSync(agentDest)) {
-        fs.cpSync(agentSrc, agentDest, { recursive: true });
+        fs.cpSync(agentSrc, agentDest, {
+          recursive: true,
+          filter: (srcPath) => shouldCopyAgentFile(agentSrc, srcPath),
+        });
         console.log(`[packageAfterCopy] Copied Agent/ directory to build path`);
       }
 
@@ -214,6 +237,19 @@ module.exports = {
         icon: './assets/icon.ico',
         ui: {
           chooseDirectory: true,
+        },
+        beforeCreate: (creator) => {
+          // WiX defaults the MSI database to code page 1252. Our packaged
+          // app intentionally includes user-facing Chinese docs / skill
+          // assets, so generated File/@Name values can contain CJK
+          // characters. Force UTF-8 at the Product level before the WXS is
+          // generated; otherwise light.exe fails with LGHT0311.
+          if (typeof creator.wixTemplate === 'string' && !/Codepage=/.test(creator.wixTemplate)) {
+            creator.wixTemplate = creator.wixTemplate.replace(
+              'Language="{{Language}}">',
+              'Language="{{Language}}"\n           Codepage="65001">',
+            );
+          }
         },
       },
     },

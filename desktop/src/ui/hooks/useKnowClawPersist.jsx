@@ -63,6 +63,7 @@ import {
   summarizeToolArgs,
   normalizeTasksArray,
 } from '../components/knowclaw-v2/knowclawEventReducer.js';
+import { tryExtractPartialArgs } from '../utils/partialJsonExtractor.js';
 
 const KnowClawCtx = createContext(null);
 
@@ -202,6 +203,13 @@ export function KnowClawPersistProvider({ children }) {
   const sawThinkingDeltaRef = useRef(false);
   const turnIdRef = useRef(0);
   const taskCallsRef = useRef(new Map());
+  // R4: per-tool-call accumulator for streaming JSON argument fragments
+  // emitted by pi-ai's `toolcall_delta`. Keyed by toolCallId; cleared
+  // on `toolcall_end`, `agent_end`, `error`, and explicit session
+  // teardown. Used by the `tryExtractPartialArgs` helper to keep
+  // FileChangePreview growing in real time while the model is still
+  // generating a long `content` payload.
+  const toolCallArgBufferRef = useRef(new Map());
   const currentCwdRef = useRef(null);
   const sessionIdRef = useRef(null);
   const rehydratedRef = useRef(false);
@@ -347,6 +355,87 @@ export function KnowClawPersistProvider({ children }) {
                 { ...last, thinking: thinkingBufferRef.current },
               ];
             });
+          } else if (sub.type === 'toolcall_start') {
+            // R4: the model has started emitting a tool call. Drop a
+            // placeholder card NOW (rather than waiting for
+            // `tool_execution_start`) so users see "正在准备 write…"
+            // immediately instead of staring at a frozen UI while a
+            // large `content` blob streams in.
+            const tc = sub.partial?.content?.[sub.contentIndex];
+            const toolCallId = tc?.id || `tc-${Date.now()}-${sub.contentIndex}`;
+            const name = tc?.name || 'tool';
+            toolCallArgBufferRef.current.set(toolCallId, '');
+            setStreamingPhase('tool');
+            setActiveToolName(name);
+            setMessages((prev) => {
+              const updated = ensureStreamingMessage(prev);
+              const last = updated[updated.length - 1];
+              const exists = last.tools?.some((t) => t.toolCallId === toolCallId);
+              if (exists) return updated;
+              return [
+                ...updated.slice(0, -1),
+                {
+                  ...last,
+                  tools: [
+                    ...(last.tools || []),
+                    {
+                      name,
+                      toolCallId,
+                      status: 'preparing',
+                      summary: '',
+                      startTime: Date.now(),
+                    },
+                  ],
+                },
+              ];
+            });
+          } else if (sub.type === 'toolcall_delta') {
+            // R4: append the raw JSON fragment to the per-toolCall
+            // buffer, then attempt to extract a renderable partial
+            // shape for known file-mutator tools.
+            const delta = sub.delta || '';
+            if (!delta) break;
+            const tc = sub.partial?.content?.[sub.contentIndex];
+            const toolCallId = tc?.id;
+            if (!toolCallId) break;
+            const buf = toolCallArgBufferRef.current;
+            buf.set(toolCallId, (buf.get(toolCallId) || '') + delta);
+            const toolName = tc?.name || '';
+            if (toolName === 'write' || toolName === 'edit') {
+              const extracted = tryExtractPartialArgs(toolName, buf.get(toolCallId));
+              if (extracted) {
+                const nextSummary = extracted.path
+                  ? summarizeToolArgs(toolName, extracted)
+                  : undefined;
+                setMessages((prev) =>
+                  updateToolByCallId(prev, toolCallId, {
+                    partialArgs: extracted,
+                    ...(nextSummary ? { summary: nextSummary } : {}),
+                  }),
+                );
+              }
+            }
+          } else if (sub.type === 'toolcall_end') {
+            // R4: the model finished emitting the tool call. Stamp the
+            // fully-parsed arguments onto the card and downgrade the
+            // status to `pending_exec` — the agent loop will flip it
+            // to `running` when `tool_execution_start` lands.
+            const finalTc = sub.toolCall;
+            const toolCallId = finalTc?.id;
+            if (toolCallId) toolCallArgBufferRef.current.delete(toolCallId);
+            if (toolCallId && finalTc) {
+              const finalArgs = finalTc.arguments && typeof finalTc.arguments === 'object'
+                ? finalTc.arguments
+                : undefined;
+              setMessages((prev) =>
+                updateToolByCallId(prev, toolCallId, {
+                  status: 'pending_exec',
+                  args: finalArgs,
+                  partialArgs: undefined,
+                  summary: summarizeToolArgs(finalTc.name || '', finalArgs || {}),
+                }),
+              );
+            }
           }
           break;
         }
@@ -375,8 +464,38 @@ export function KnowClawPersistProvider({ children }) {
           setMessages((prev) => {
             const updated = ensureStreamingMessage(prev);
             const last = updated[updated.length - 1];
-            const exists = last.tools?.some((t) => t.toolCallId === toolCallId);
-            if (exists) return updated;
+            const existingIdx = (last.tools || []).findIndex(
+              (t) => t.toolCallId === toolCallId,
+            );
+            // R4: prefer to upgrade an existing card created earlier
+            // by `toolcall_start` rather than appending a duplicate.
+            // We carry over the original startTime so the elapsed-
+            // time chip still measures "from when the model first
+            // committed to the tool" rather than just the execution
+            // window.
+            if (existingIdx >= 0) {
+              const tools = last.tools.map((t, j) =>
+                j === existingIdx
+                  ? {
+                      ...t,
+                      status: 'running',
+                      summary,
+                      args:
+                        event.args && typeof event.args === 'object'
+                          ? event.args
+                          : t.args,
+                      partialArgs: undefined,
+                    }
+                  : t,
+              );
+              return [
+                ...updated.slice(0, -1),
+                { ...last, tools },
+              ];
+            }
+            // Fallback: no `toolcall_start` was received (e.g. a
+            // provider that doesn't emit per-toolCall streaming
+            // events). Create the card from scratch as we always did.
             return [
               ...updated.slice(0, -1),
               {
@@ -454,6 +573,11 @@ export function KnowClawPersistProvider({ children }) {
           const finalThinking = thinkingBufferRef.current;
           streamBufferRef.current = '';
           thinkingBufferRef.current = '';
+          // R4: any toolcall arg buffers left over (e.g. the agent
+          // loop ended right at the tail of `tool_execution_end`) are
+          // garbage now — wipe them to avoid memory pinning across
+          // turns.
+          toolCallArgBufferRef.current.clear();
           setStreaming(false);
           setStreamingPhase('idle');
           setActiveToolName(null);
@@ -529,6 +653,9 @@ export function KnowClawPersistProvider({ children }) {
           streamBufferRef.current = '';
           thinkingBufferRef.current = '';
           sawThinkingDeltaRef.current = false;
+          // R4: drop any partial toolcall buffers — they belong to the
+          // aborted turn.
+          toolCallArgBufferRef.current.clear();
           setStreaming(false);
           setStreamingPhase('idle');
           setActiveToolName(null);
@@ -546,6 +673,8 @@ export function KnowClawPersistProvider({ children }) {
 
         case 'history_loaded': {
           streamBufferRef.current = '';
+          // R4: history switch invalidates any in-flight tool buffers.
+          toolCallArgBufferRef.current.clear();
           setStreaming(false);
           const restored = Array.isArray(event.messages) ? event.messages : [];
           taskCallsRef.current.clear();
@@ -849,6 +978,9 @@ export function KnowClawPersistProvider({ children }) {
     } catch { /* ignore */ }
     thinkingBufferRef.current = '';
     sawThinkingDeltaRef.current = false;
+    // R4: any partial toolcall buffer is now meaningless — the agent
+    // loop will not finish emitting the matching `toolcall_end`.
+    toolCallArgBufferRef.current.clear();
     setStreaming(false);
     setStreamingPhase('idle');
     setActiveToolName(null);
@@ -959,6 +1091,10 @@ export function KnowClawPersistProvider({ children }) {
       showToast(`新建会话失败: ${errMsg}`, 'error');
     }
     streamBufferRef.current = '';
+    // R4: dropping the session also invalidates every partial toolcall
+    // buffer — clear them so a stale write/edit fragment from the old
+    // session can't leak into the new one.
+    toolCallArgBufferRef.current.clear();
     setMessages([]);
     setStreaming(false);
     setPendingSteer([]);

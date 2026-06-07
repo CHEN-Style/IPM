@@ -18,6 +18,7 @@ import {
   CornerDownLeft,
 } from 'lucide-react';
 import appIconUrl from '../../../assets/icon.png';
+import CloudActivityPanel from './CloudActivityPanel.jsx';
 
 /**
  * KnowClaw brand mark, inline SVG version used by the sidebar nav row.
@@ -468,6 +469,9 @@ const Sidebar = ({
           </nav>
         </div>
       </div>
+
+      {/* ── Cloud activity (C3): in-flight publishes, hidden when none ── */}
+      {!isCollapsed && <CloudActivityPanel />}
 
       {/* ── Bottom: floating mode + pin + user ── */}
       <div className="px-3 pb-4 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>

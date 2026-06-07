@@ -24,6 +24,7 @@ import ClassifyTraceView from './project-manager/ClassifyTraceView.jsx';
 import PreferencesPage from './project-manager/PreferencesPage.jsx';
 import CreateKnowledgeModal from './project-manager/CreateKnowledgeModal.jsx';
 import { useToast } from '../hooks/useToast.js';
+import { useCloudPublish } from '../hooks/useCloudPublish.jsx';
 import { fileDecor, folderDecor, fmtBytes, fmtTime } from './project-manager/utils.js';
 
 /** Stable analytics ids for context menu rows (labels come from useContextMenu). */
@@ -75,6 +76,60 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
     badgeByStatus,
     setProjectStatus,
   } = useProjects({ normalizedDomain, isStudy, entityApi, setNotice });
+
+  // C3: cloud publish wiring. Tracks per-project binding status (for the cloud
+  // icon / menu) and derives the set of projects currently being published.
+  const cloud = useCloudPublish();
+  const [cloudBindings, setCloudBindings] = useState({}); // name -> { bound, versionNumber }
+  const fetchBinding = useCallback(async (name) => {
+    if (!name || isStudy) return;
+    try {
+      const res = await window.ipm?.cloud?.getBindingStatus?.({ projectName: name, domain: normalizedDomain });
+      setCloudBindings((prev) => ({
+        ...prev,
+        [name]: { bound: Boolean(res?.bound), versionNumber: res?.binding?.lastSyncedVersionNumber ?? null },
+      }));
+    } catch { /* ignore */ }
+  }, [isStudy, normalizedDomain]);
+  useEffect(() => {
+    if (isStudy) return;
+    for (const p of projects || []) {
+      if (p?.name && !p.attached) void fetchBinding(p.name);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects, normalizedDomain, isStudy]);
+
+  const cloudLockedNames = useMemo(() => {
+    const set = new Set();
+    for (const a of cloud.activityList) {
+      if (a.phase === 'publishing' && a.domain === normalizedDomain) set.add(a.projectName);
+    }
+    return set;
+  }, [cloud.activityList, normalizedDomain]);
+  const cloudBoundNames = useMemo(() => {
+    const set = new Set();
+    for (const [name, info] of Object.entries(cloudBindings)) {
+      if (info?.bound) set.add(name);
+    }
+    return set;
+  }, [cloudBindings]);
+
+  const handlePublishProject = useCallback((name) => {
+    if (!name) return;
+    cloud.openPublishModal(name, normalizedDomain);
+  }, [cloud, normalizedDomain]);
+
+  // Refresh a project's binding once its publish finishes.
+  const handledDoneRef = useRef(new Set());
+  useEffect(() => {
+    for (const a of cloud.activityList) {
+      if (a.phase === 'done' && a.domain === normalizedDomain && !handledDoneRef.current.has(a.key)) {
+        handledDoneRef.current.add(a.key);
+        void fetchBinding(a.projectName);
+      }
+    }
+  }, [cloud.activityList, normalizedDomain, fetchBinding]);
+
   const [knowledgeCtx, setKnowledgeCtx] = useState(null); // { name, path } | null
   const {
     cwd,
@@ -368,6 +423,10 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
         setNotice({ variant: 'error', message: e?.message || String(e) });
       }
     }),
+    // C3: 云端发布（学习域不支持）
+    onPublish: isStudy ? undefined : handlePublishProject,
+    cloudBoundNames,
+    cloudLockedNames,
   });
   const title = useMemo(() => {
     if (isRoot) return entityLabelAll;
@@ -759,6 +818,11 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
         isAttachedBroken={isAttachedBroken}
         onRefreshAttached={handleRefreshAttached}
         onRelocateAttached={handleRelocateAttached}
+        showCloudPublish={cwd.type === 'project' && !cwd.relPath && !isStudy && !isAttachedCwd}
+        cloudPublishing={cwd.type === 'project' ? cloudLockedNames.has(cwd.name) : false}
+        cloudBound={cwd.type === 'project' ? Boolean(cloudBindings[cwd.name]?.bound) : false}
+        cloudVersionNumber={cwd.type === 'project' ? (cloudBindings[cwd.name]?.versionNumber ?? null) : null}
+        onPublishCurrent={() => { if (cwd.type === 'project' && cwd.name) handlePublishProject(cwd.name); }}
       />
 
       {/* Content */}
@@ -791,6 +855,8 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
             localFolders={localFolders}
             projects={projects}
             entityLabel={entityLabel}
+            cloudBindings={cloudBindings}
+            cloudLockedNames={cloudLockedNames}
             onEnterLocalFolder={enterLocalFolder}
             onContextMenuLocalFolder={handleRowContextMenuLocalFolder}
             onEnterProject={enterProject}
@@ -1147,11 +1213,17 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
               <button
                 key={it.label}
                 type="button"
+                disabled={it.disabled}
                 data-track={pmContextMenuTrack(it.label)}
-                className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition-colors ${
-                  it.danger ? 'text-rose-600 hover:bg-rose-50' : 'text-slate-700'
+                className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                  it.disabled
+                    ? 'text-slate-300 cursor-default'
+                    : it.danger
+                      ? 'text-rose-600 hover:bg-rose-50'
+                      : 'text-slate-700 hover:bg-slate-50'
                 }`}
                 onClick={() => {
+                  if (it.disabled) return;
                   closeMenu();
                   it.onClick?.();
                 }}

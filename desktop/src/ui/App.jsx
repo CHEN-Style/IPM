@@ -17,6 +17,7 @@ import TourOverlay from './components/tour/TourOverlay.jsx';
 import { ToastProvider } from './hooks/useToast.js';
 import { ConfirmDialogProvider } from './hooks/useConfirmDialog.jsx';
 import { KnowClawPersistProvider } from './hooks/useKnowClawPersist.jsx';
+import { CloudPublishProvider } from './hooks/useCloudPublish.jsx';
 import useUsageTracker from './hooks/useUsageTracker.js';
 import OnboardingScreen from './components/OnboardingScreen.jsx';
 
@@ -247,6 +248,7 @@ const App = () => {
     <ConfirmDialogProvider>
     <ToastProvider>
     <KnowClawPersistProvider>
+    <CloudPublishProvider onPublished={() => { void refreshWorkspaceStats(); }}>
     <FloatingWorkspaceBridge onNavigateToKnowClaw={() => setActiveNav('knowclaw-v2')} />
     <TourProvider navigate={setActiveNav} setMyDataSection={setMyDataSection}>
     <div className="flex flex-col h-screen w-full overflow-hidden select-auto antialiased">
@@ -353,6 +355,7 @@ const App = () => {
     </div>
     <TourOverlay />
     </TourProvider>
+    </CloudPublishProvider>
     </KnowClawPersistProvider>
     </ToastProvider>
     </ConfirmDialogProvider>

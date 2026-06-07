@@ -22,6 +22,11 @@ const useContextMenu = ({
   projects,
   refreshAttached,
   relocateAttached,
+  // C3: 云端发布。onPublish(projectName) 触发发布弹窗；cloudBoundNames/
+  // cloudLockedNames 是 Set，用于决定菜单项的可用状态。
+  onPublish,
+  cloudBoundNames,
+  cloudLockedNames,
 }) => {
   const [menu, setMenu] = useState(null); // {x,y, items:[{label,onClick, danger?}]}
 
@@ -72,6 +77,18 @@ const useContextMenu = ({
       if (isAttached && typeof relocateAttached === 'function') {
         items.push({ label: `重新定位外部根：${projectName}`, onClick: () => relocateAttached(projectName) });
       }
+      // C3: 云端发布入口（仅标准项目；外部导入暂不支持）。
+      if (typeof onPublish === 'function' && !isAttached) {
+        const isLocked = cloudLockedNames?.has?.(projectName);
+        const isBound = cloudBoundNames?.has?.(projectName);
+        if (isLocked) {
+          items.push({ label: '正在发布…', disabled: true, onClick: () => {} });
+        } else if (isBound) {
+          items.push({ label: '已绑定云端', disabled: true, onClick: () => {} });
+        } else {
+          items.push({ label: `发布到云端：${projectName}`, onClick: () => onPublish(projectName) });
+        }
+      }
       items.push({
         label: isAttached ? `取消导入：${projectName}` : `删除${entityLabel}：${projectName}`,
         danger: true,
@@ -79,7 +96,7 @@ const useContextMenu = ({
       });
       openMenu(e.clientX, e.clientY, items);
     },
-    [deleteProject, entityLabel, openMenu, projects, refreshAttached, relocateAttached, renameProject],
+    [deleteProject, entityLabel, openMenu, projects, refreshAttached, relocateAttached, renameProject, onPublish, cloudBoundNames, cloudLockedNames],
   );
 
   const handleRowContextMenuLocalFolder = useCallback(

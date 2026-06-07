@@ -34,6 +34,9 @@ import { registerKnowledgeIpc } from './main/ipc/knowledge.js';
 import { registerAnalyticsIpc, uploadPendingAnalytics } from './main/ipc/analytics.js';
 import { registerSearchIpc } from './main/ipc/search.js';
 import { registerOcrIpc } from './main/ipc/ocr.js';
+import { registerCloudIpc } from './main/ipc/cloud.js';
+import { createLockGuardedIpcMain } from './main/cloud/publishLockGuard.js';
+import { isWorkspaceLocked } from './main/cloud/publishLock.js';
 import { ClassifyTracker } from './main/classifyTracker.js';
 import { getProjectDb, closeProjectDb, closeAllDbs } from '../Agent/db/index.js';
 import { getSupervisorDb, closeSupervisorDb } from '../Agent/db/supervisorDb.js';
@@ -2237,6 +2240,11 @@ app.whenReady().then(() => {
     app.relaunch();
     app.exit(0);
   });
+  // C3: a publish-lock-guarded view of ipcMain. Passed only to write-capable
+  // modules so that file/project mutations are blocked while a workspace is
+  // being published. Read-only handlers keep the raw ipcMain.
+  const guardedIpcMain = createLockGuardedIpcMain(ipcMain, { getWorkspaceDirOrThrow });
+
   registerMetaIpc({
     ipcMain,
     getWorkspaceDirOrThrow,
@@ -2253,7 +2261,7 @@ app.whenReady().then(() => {
     getProjectLogPath,
   });
   registerAiStorageIpc({
-    ipcMain,
+    ipcMain: guardedIpcMain,
     getWorkspaceDirOrThrow,
     normalizeRelPathPosix,
     listAiSuggestions,
@@ -2281,6 +2289,8 @@ app.whenReady().then(() => {
     readState,
     writeState,
     getWorkspaceDirOrThrow,
+    // C3: block agent writes / uploads into a workspace being published.
+    isWorkspaceLocked,
   });
 
   // SK0: KnowClaw skill management. Registers 7 `knowclaw:*Skill*` IPC
@@ -2305,7 +2315,7 @@ app.whenReady().then(() => {
   });
 
   registerExplorerIpc({
-    ipcMain,
+    ipcMain: guardedIpcMain,
     dialog,
     shell,
     sanitizeProjectName,
@@ -2358,7 +2368,7 @@ app.whenReady().then(() => {
   };
 
   registerProjectsIpc({
-    ipcMain,
+    ipcMain: guardedIpcMain,
     dialog,
     shell,
     readState,
@@ -2390,7 +2400,7 @@ app.whenReady().then(() => {
   });
 
   registerCasesIpc({
-    ipcMain,
+    ipcMain: guardedIpcMain,
     dialog,
     shell,
     readState,
@@ -2488,7 +2498,7 @@ app.whenReady().then(() => {
   });
 
   registerFloatingIpc({
-    ipcMain,
+    ipcMain: guardedIpcMain,
     getWorkspaceDirOrThrow,
     sanitizeFileName,
     ensureTempDir,
@@ -2550,6 +2560,9 @@ app.whenReady().then(() => {
   registerAnalyticsIpc({ ipcMain, getAppRoot });
   registerSearchIpc({ ipcMain, getProjectsRoot, getCasesRoot, getStudyRoot });
   registerOcrIpc({ ipcMain });
+
+  // C2: Desktop cloud binding + local workspace scan (offline-only).
+  registerCloudIpc({ ipcMain, getWorkspaceDirOrThrow });
 
   uploadPendingAnalytics(getAppRoot()).catch(() => {});
 

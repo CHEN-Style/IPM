@@ -1,0 +1,33 @@
+{
+  "name": "@ipm/cloud-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "IPM v2.1 Cloud API server",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "db:migrate": "tsx src/infra/db/migrate-cli.ts",
+    "db:migrate:prod": "node dist/infra/db/migrate-cli.js",
+    "db:check": "tsx src/infra/db/self-check-cli.ts",
+    "db:seed": "tsx src/infra/db/seed-cli.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "@fastify/helmet": "^13.0.2",
+    "ali-oss": "^6.23.0",
+    "dotenv": "^17.4.2",
+    "fastify": "^5.8.5",
+    "pg": "^8.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/ali-oss": "^6.23.3",
+    "@types/node": "^25.9.1",
+    "@types/pg": "^8.20.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

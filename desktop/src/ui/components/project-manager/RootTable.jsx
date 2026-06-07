@@ -1,5 +1,5 @@
 import React from 'react';
-import { FolderOpen, Settings2, BookOpen, AlertTriangle, Link as LinkIcon } from 'lucide-react';
+import { FolderOpen, Settings2, BookOpen, AlertTriangle, Link as LinkIcon, Cloud, Loader2 } from 'lucide-react';
 
 const RootTable = ({
   errorText,
@@ -7,6 +7,9 @@ const RootTable = ({
   localFolders, // eslint-disable-line no-unused-vars
   projects,
   entityLabel,
+  // C3: 云端绑定状态 / 正在发布的项目名集合，用于在项目名旁显示云图标。
+  cloudBindings,
+  cloudLockedNames,
   onEnterLocalFolder, // eslint-disable-line no-unused-vars
   onContextMenuLocalFolder, // eslint-disable-line no-unused-vars
   onEnterProject,
@@ -50,6 +53,9 @@ const RootTable = ({
             const isAttached = Boolean(p?.attached);
             const isBroken = Boolean(p?.broken);
             const externalPath = String(p?.externalRootPath || '');
+            const cloudPublishing = cloudLockedNames?.has?.(p.name);
+            const cloudInfo = cloudBindings?.[p.name];
+            const cloudBound = Boolean(cloudInfo?.bound);
             const rowCls = isAttached && isBroken
               ? 'bg-rose-50/70 hover:bg-rose-50 border border-rose-200/60'
               : (rowStyleByStatus?.(p.status) || '');
@@ -99,6 +105,20 @@ const RootTable = ({
                         路径失效
                       </span>
                     )}
+                    {cloudPublishing ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#3e4b9c]/10 text-[#3e4b9c] shrink-0" title="正在发布到云端">
+                        <Loader2 size={11} className="animate-spin" />
+                        发布中
+                      </span>
+                    ) : cloudBound ? (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 border border-emerald-100 shrink-0"
+                        title={cloudInfo?.versionNumber ? `已绑定云端 · 版本 v${cloudInfo.versionNumber}` : '已绑定云端'}
+                      >
+                        <Cloud size={11} />
+                        云端{cloudInfo?.versionNumber ? ` v${cloudInfo.versionNumber}` : ''}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               </td>

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   ChevronDown, ChevronRight, Wrench, Loader2,
   Check, X, Undo2, Zap, MessageSquare,
-  AlertCircle,
+  AlertCircle, Sparkles, Hourglass,
 } from 'lucide-react';
 import { marked } from 'marked';
 
@@ -314,6 +314,17 @@ function ThinkingBlock({ thinking, isStreaming }) {
 /* ── Tool status config ── */
 
 const STATUS_CONFIG = {
+  // R4: `preparing` lands when the LLM has just started emitting the
+  // tool call (toolcall_start) — args are not yet complete. We show a
+  // pulsing sparkle to convey "model is generating" rather than the
+  // generic spinner so users can distinguish "thinking up the call"
+  // from "tool is actually running".
+  preparing:   { icon: Sparkles, spin: false, pulse: true, color: 'text-violet-500', label: '生成中...' },
+  // R4: `pending_exec` lands at toolcall_end and clears the moment
+  // `tool_execution_start` arrives — usually a single frame, but we
+  // want a distinct label for the brief "args parsed, about to run"
+  // window so the UI never silently swallows that transition.
+  pending_exec: { icon: Hourglass, spin: false, color: 'text-amber-500', label: '即将执行' },
   running:     { icon: Loader2, spin: true,  color: 'text-blue-500',  label: '执行中...' },
   interrupted: { icon: Loader2, spin: false, color: 'text-amber-500', label: '等待确认' },
   confirmed:   { icon: Loader2, spin: true,  color: 'text-blue-500',  label: '执行中...' },
@@ -362,14 +373,26 @@ const ToolCallCard = ({ tool, projectName, domain }) => {
 
   const cfg = STATUS_CONFIG[tool.status] || STATUS_CONFIG.done;
   const Icon = cfg.icon || Wrench;
-  const isBusy = tool.status === 'running' || tool.status === 'interrupted' || tool.status === 'confirmed';
-  // E.2: file-mutator tools (write / edit) get a live preview panel
-  // that's rendered straight from `tool.args` — no need to wait for
-  // `tool.result`. This bypasses the "wait until done to expand"
-  // rule that gates regular tools and lets users watch the LLM
-  // commit content in real-ish time.
+  // R4: `preparing` and `pending_exec` are also "busy" — the card
+  // should not be treated as terminal (no `tool.result` yet, the
+  // model may still be streaming args). Keeping the result panel
+  // gated on !isBusy also avoids flashing a stale `result` from a
+  // previous turn during the brief preparing→running transition.
+  const isBusy = (
+    tool.status === 'running'
+    || tool.status === 'preparing'
+    || tool.status === 'pending_exec'
+    || tool.status === 'interrupted'
+    || tool.status === 'confirmed'
+  );
+  // E.2 + R4: file-mutator tools (write / edit) render a live preview
+  // straight from `tool.args` once the SDK hands them over fully, OR
+  // from `tool.partialArgs` extracted incrementally from
+  // `toolcall_delta` while the model is still emitting JSON.
   const isFileMutator = tool.name === 'write' || tool.name === 'edit';
-  const hasPreviewableArgs = isFileMutator && tool.args && typeof tool.args === 'object';
+  const hasFullArgs = isFileMutator && tool.args && typeof tool.args === 'object';
+  const hasPartialArgs = isFileMutator && tool.partialArgs && typeof tool.partialArgs === 'object';
+  const hasPreviewableArgs = hasFullArgs || hasPartialArgs;
   const isDelegateTask = tool.name === 'delegate_task';
   const canExpand = hasPreviewableArgs || (!isBusy && !!tool.result);
   const showUndo = tool.undoActionId && tool.status === 'done' && undoState !== 'done';
@@ -437,7 +460,7 @@ const ToolCallCard = ({ tool, projectName, domain }) => {
       >
         <Icon
           size={13}
-          className={`${cfg.color}${cfg.spin ? ' animate-spin' : ''} shrink-0`}
+          className={`${cfg.color}${cfg.spin ? ' animate-spin' : ''}${cfg.pulse ? ' animate-pulse' : ''} shrink-0`}
         />
         <span className="font-mono text-gray-500 uppercase tracking-wider text-[11px] shrink-0">
           {tool.name}

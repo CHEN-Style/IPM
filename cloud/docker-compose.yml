@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ipm-cloud-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ipm
+      POSTGRES_PASSWORD: ipm_dev_password
+      POSTGRES_DB: ipm_cloud
+    volumes:
+      - ipm-cloud-postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ipm -d ipm_cloud"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./server
+    container_name: ipm-cloud-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 4210
+      LOG_LEVEL: info
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      DATABASE_URL: postgres://ipm:ipm_dev_password@postgres:5432/ipm_cloud
+      OSS_REGION: ${OSS_REGION:-}
+      OSS_BUCKET: ${OSS_BUCKET:-}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+      OSS_ENDPOINT: ${OSS_ENDPOINT:-}
+    ports:
+      - "4210:4210"
+
+volumes:
+  ipm-cloud-postgres:

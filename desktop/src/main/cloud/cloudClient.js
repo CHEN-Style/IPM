@@ -6,6 +6,7 @@
 // `devUserId`; once real auth lands it switches to a lazy `getToken()` bearer.
 
 import { CLOUD_DEV_CONFIG } from './devConfig.js';
+import { getActiveAccessToken } from './authStore.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -33,12 +34,8 @@ export class CloudClient {
     const headers = {};
     if (this.devUserId) headers['X-Dev-User-Id'] = this.devUserId;
     if (this.getToken) {
-      try {
-        const token = await this.getToken();
-        if (token) headers.Authorization = `Bearer ${token}`;
-      } catch {
-        // ignore token resolution failures; server returns 401 if required
-      }
+      const token = await this.getToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
     }
     return headers;
   }
@@ -135,6 +132,19 @@ export function createDevCloudClient(overrides = {}) {
   return new CloudClient({
     baseURL: CLOUD_DEV_CONFIG.baseURL,
     devUserId: CLOUD_DEV_CONFIG.devUserId,
+    ...overrides,
+  });
+}
+
+/**
+ * Create a CloudClient that authenticates with the logged-in user's JWT.
+ * `getToken` lazily resolves (and refreshes) the active user's access token.
+ * Used by all real cloud operations once auth lands (C3.5+).
+ */
+export function createAuthCloudClient(overrides = {}) {
+  return new CloudClient({
+    baseURL: CLOUD_DEV_CONFIG.baseURL,
+    getToken: getActiveAccessToken,
     ...overrides,
   });
 }

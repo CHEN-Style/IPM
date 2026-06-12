@@ -54,6 +54,10 @@ export function registerProjectsIpc({
 
   ipcMain.handle('projects/list', async () => {
     const root = getProjectsRoot();
+    if (!fs.existsSync(root)) {
+      fs.mkdirSync(root, { recursive: true });
+      return [];
+    }
     const entries = fs.readdirSync(root, { withFileTypes: true });
     const state = readState();
     const statusMap = state.projectStatuses && typeof state.projectStatuses === 'object' ? state.projectStatuses : {};

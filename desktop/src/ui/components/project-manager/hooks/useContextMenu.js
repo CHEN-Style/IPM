@@ -15,6 +15,7 @@ const useContextMenu = ({
   deleteEntry,
   removeLocalFolder,
   onCreateKnowledge,
+  onRestoreFile,
   // W3b: 项目/案件根级重命名（学习域不传则不显示菜单项）
   renameProject,
   // F1: 附属壳专属操作（外部导入项目）。projects 提供识别 attached 标记的元数据，
@@ -127,11 +128,14 @@ const useContextMenu = ({
       }
       openMenu(e.clientX, e.clientY, [
         { label: '新建知识碎片', onClick: () => onCreateKnowledge?.(entry) },
+        ...(typeof onRestoreFile === 'function'
+          ? [{ label: `查看历史/恢复文件：${entry.name}`, onClick: () => onRestoreFile(entry) }]
+          : []),
         { label: `重命名：${entry.name}`, onClick: () => openRename?.(entry) },
         { label: `删除文件：${entry.name}`, danger: true, onClick: () => deleteEntry?.(entry) },
       ]);
     },
-    [deleteEntry, isRoot, openMenu, openNewFolderAt, openRename, uploadFilesTo, onCreateKnowledge],
+    [deleteEntry, isRoot, openMenu, openNewFolderAt, openRename, uploadFilesTo, onCreateKnowledge, onRestoreFile],
   );
 
   return {

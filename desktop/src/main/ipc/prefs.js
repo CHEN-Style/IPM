@@ -1,5 +1,6 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { testBochaApiKey } from '../../../Agent/services/searchService.js';
+import { createAuthCloudClient } from '../cloud/cloudClient.js';
 import {
   PROVIDER_TYPES,
   ROLE_NAMES,
@@ -44,6 +45,25 @@ function sanitizeSearchApi(cfg) {
   const provider = cfg.provider === 'bocha' ? 'bocha' : 'bocha';
   const apiKey = typeof cfg.apiKey === 'string' ? cfg.apiKey.trim() : '';
   return { provider, apiKey };
+}
+
+function aiConfigSummary(config) {
+  const ai = config?.ai && typeof config.ai === 'object' ? config.ai : {};
+  const providers = Array.isArray(ai.providers) ? ai.providers : [];
+  const roleAssignments = ai.roleAssignments && typeof ai.roleAssignments === 'object' ? ai.roleAssignments : {};
+  const searchApi = config?.searchApi && typeof config.searchApi === 'object' ? config.searchApi : null;
+  return {
+    providerCount: providers.length,
+    providerNames: providers.map((p) => p?.name || p?.id).filter(Boolean).slice(0, 8),
+    roles: {
+      knowclaw: Array.isArray(roleAssignments.knowclaw) ? roleAssignments.knowclaw.length : 0,
+      classification: Boolean(roleAssignments.classification),
+      summary: Boolean(roleAssignments.summary),
+      preferenceParsing: Boolean(roleAssignments.preferenceParsing),
+    },
+    hasSearchApi: Boolean(searchApi?.apiKey),
+    containsSecrets: providers.some((p) => Boolean(p?.apiKey)) || Boolean(searchApi?.apiKey),
+  };
 }
 
 /**
@@ -122,6 +142,126 @@ export function registerPrefsIpc({ ipcMain, readState, writeState, normalizeFloa
       // Renderer notification is best-effort; the write already succeeded.
     }
     return { ok: true, prefs: prefsResponse };
+  });
+
+  // --------------------------------------------------------------------------
+  // C9 — Enterprise AI config template distribution
+  // --------------------------------------------------------------------------
+
+  ipcMain.handle('prefs/orgConfig/createTemplate', async (_evt, payload) => {
+    const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
+    if (!name) return { ok: false, error: 'name is required' };
+    try {
+      const state = readState();
+      const prefs = state.prefs && typeof state.prefs === 'object' ? state.prefs : {};
+      const config = {
+        ai: readAiSettingsFromState({ prefs }),
+        searchApi: sanitizeSearchApi(prefs.searchApi) || { ...DEFAULT_SEARCH_API },
+      };
+      const client = createAuthCloudClient();
+      return await client.post('/api/org-configs/templates', {
+        name,
+        description: typeof payload?.description === 'string' ? payload.description.trim() : '',
+        config,
+        maxUses: Number.isInteger(payload?.maxUses) && payload.maxUses > 0 ? payload.maxUses : null,
+        expiresAt: typeof payload?.expiresAt === 'string' && payload.expiresAt ? payload.expiresAt : null,
+      });
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  ipcMain.handle('prefs/orgConfig/listTemplates', async () => {
+    try {
+      const client = createAuthCloudClient();
+      return await client.get('/api/org-configs/templates');
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err), templates: [] };
+    }
+  });
+
+  ipcMain.handle('prefs/orgConfig/rotateCode', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    try {
+      const client = createAuthCloudClient();
+      return await client.post(`/api/org-configs/templates/${id}/rotate-code`, {});
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  ipcMain.handle('prefs/orgConfig/disableTemplate', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    try {
+      const client = createAuthCloudClient();
+      return await client.post(`/api/org-configs/templates/${id}/disable`, {});
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  ipcMain.handle('prefs/orgConfig/listUses', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    if (!id) return { ok: false, error: 'id is required', uses: [] };
+    try {
+      const client = createAuthCloudClient();
+      return await client.get(`/api/org-configs/templates/${id}/uses`);
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err), uses: [] };
+    }
+  });
+
+  ipcMain.handle('prefs/orgConfig/previewCode', async (_evt, payload) => {
+    const code = typeof payload?.code === 'string' ? payload.code.trim() : '';
+    if (!code) return { ok: false, error: 'code is required' };
+    try {
+      const client = createAuthCloudClient();
+      return await client.post('/api/org-configs/preview', { code });
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  ipcMain.handle('prefs/orgConfig/importCode', async (_evt, payload) => {
+    const code = typeof payload?.code === 'string' ? payload.code.trim() : '';
+    if (!code) return { ok: false, error: 'code is required' };
+    try {
+      const client = createAuthCloudClient();
+      const res = await client.post('/api/org-configs/import', {
+        code,
+        clientInfo: {
+          product: 'IPM Desktop',
+          importedAt: new Date().toISOString(),
+        },
+      });
+      if (!res?.ok || !res.template?.config) return res || { ok: false, error: '导入失败' };
+
+      const config = res.template.config;
+      const state = readState();
+      state.prefs = state.prefs && typeof state.prefs === 'object' ? state.prefs : {};
+      state.prefs.ai = sanitizeAiPatch(config.ai);
+      state.prefs.searchApi = sanitizeSearchApi(config.searchApi) || { ...DEFAULT_SEARCH_API };
+      writeState(state);
+      const prefsResponse = buildPrefsResponse(state.prefs, normalizeFloatingUploadMode);
+      try {
+        _evt.sender.send('prefs:updated', { changedKeys: ['ai', 'searchApi'], prefs: prefsResponse });
+      } catch {
+        // best effort
+      }
+      return {
+        ok: true,
+        template: {
+          ...res.template,
+          config: undefined,
+          summary: res.template.summary || aiConfigSummary(config),
+        },
+        prefs: prefsResponse,
+      };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
   });
 
   // 旧接口：用 state 中的 prefs.llm 字段做最小连通性测试，保留以兼容仍

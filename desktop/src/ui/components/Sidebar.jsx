@@ -9,6 +9,7 @@ import {
   BookMarked,
   GraduationCap,
   Layers,
+  Cloud,
   Pin,
   PinOff,
   File,
@@ -91,7 +92,10 @@ const Sidebar = ({
 }) => {
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [userName, setUserName] = useState('');
+  const [authInfo, setAuthInfo] = useState(null); // { loggedIn, offline, user }
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const menuAnchorRef = useRef(null);
+  const accountAnchorRef = useRef(null);
   const isPinned = Boolean(pinned);
   const isCollapsed = Boolean(collapsed) && !isPinned;
 
@@ -172,8 +176,14 @@ const Sidebar = ({
     if (el) el.scrollIntoView({ block: 'nearest' });
   }, [searchActiveIdx]);
 
-  const displayName = userName || '用户';
-  const avatarChar = userName ? userName[0].toUpperCase() : '我';
+  const accountName = authInfo?.loggedIn ? (authInfo.user?.displayName || authInfo.user?.email || '') : '';
+  const displayName = accountName || userName || '用户';
+  const accountSubtitle = authInfo?.loggedIn
+    ? (authInfo.user?.email || '云端账号')
+    : authInfo?.offline
+      ? '离线模式'
+      : '内测版本';
+  const avatarChar = (accountName || userName) ? (accountName || userName)[0].toUpperCase() : '我';
 
   useEffect(() => {
     let cancelled = false;
@@ -184,6 +194,44 @@ const Sidebar = ({
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.ipm?.auth?.getStatus?.();
+        if (!cancelled) setAuthInfo(res || null);
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const onDocClick = (e) => {
+      if (!accountMenuOpen) return;
+      const anchor = accountAnchorRef.current;
+      if (anchor && anchor.contains(e.target)) return;
+      setAccountMenuOpen(false);
+    };
+    window.addEventListener('click', onDocClick);
+    return () => window.removeEventListener('click', onDocClick);
+  }, [accountMenuOpen]);
+
+  const handleSwitchAccount = useCallback(async () => {
+    setAccountMenuOpen(false);
+    try { await window.ipm?.auth?.switchUser?.(); } catch { /* relaunch handles it */ }
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    setAccountMenuOpen(false);
+    try { await window.ipm?.auth?.logout?.(); } catch { /* relaunch handles it */ }
+  }, []);
+
+  const handleLoginFromOffline = useCallback(async () => {
+    setAccountMenuOpen(false);
+    // Switching to the login screen requires clearing the offline choice.
+    try { await window.ipm?.auth?.switchUser?.(); } catch { /* relaunch handles it */ }
   }, []);
 
   useEffect(() => {
@@ -457,6 +505,18 @@ const Sidebar = ({
             onClick={() => navSelectDirect('knowclaw-v2')}
             dataTrack="nav-knowclaw"
           />
+          {/* C4: cloud collaboration projects. Hidden in offline mode. */}
+          {authInfo?.loggedIn && (
+            <NavItem
+              icon={<Cloud size={17} />}
+              label="协作项目"
+              active={activeNav === 'cloud-projects'}
+              collapsed={isCollapsed}
+              navDirectWhenCollapsed
+              onClick={() => navSelectDirect('cloud-projects')}
+              dataTrack="nav-cloud-projects"
+            />
+          )}
         </nav>
 
         <div className={isCollapsed ? 'mt-4' : 'mt-7'}>
@@ -522,15 +582,59 @@ const Sidebar = ({
           )}
         </button>
 
-        {/* User */}
-        <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-2.5 px-1'}`}>
-          <div className="w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-semibold text-white shrink-0" style={{ background: ACCENT }}>
-            {avatarChar}
-          </div>
-          {!isCollapsed && (
-            <div className="flex flex-col min-w-0">
-              <span className="text-[13px] font-medium truncate max-w-[120px]" style={{ color: '#d4d4d4' }}>{displayName}</span>
-              <span className="text-[11px] truncate" style={{ color: '#525252' }}>内测版本</span>
+        {/* User / account */}
+        <div className="relative" ref={accountAnchorRef}>
+          <button
+            type="button"
+            onClick={() => {
+              if (isCollapsed) { requestExpand(); return; }
+              setAccountMenuOpen((v) => !v);
+            }}
+            className={`w-full flex items-center rounded-md transition-colors ${isCollapsed ? 'justify-center px-2 py-1.5' : 'gap-2.5 px-1 py-1.5'}`}
+            style={{ background: accountMenuOpen ? 'rgba(255,255,255,0.04)' : 'transparent' }}
+            title="账号"
+            data-track="sidebar-account-menu"
+          >
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-semibold text-white shrink-0" style={{ background: authInfo?.offline ? '#525252' : ACCENT }}>
+              {avatarChar}
+            </div>
+            {!isCollapsed && (
+              <>
+                <div className="flex flex-col min-w-0 text-left">
+                  <span className="text-[13px] font-medium truncate max-w-[120px]" style={{ color: '#d4d4d4' }}>{displayName}</span>
+                  <span className="text-[11px] truncate max-w-[120px]" style={{ color: '#525252' }}>{accountSubtitle}</span>
+                </div>
+                <ChevronDown size={12} className="ml-auto" style={{ color: '#525252' }} />
+              </>
+            )}
+          </button>
+
+          {/* Account menu */}
+          {!isCollapsed && accountMenuOpen && (
+            <div className="absolute left-0 right-0 bottom-full mb-2 z-50">
+              <div className="rounded-lg shadow-2xl overflow-hidden border" style={{ background: '#1a1a1a', borderColor: '#2a2a2a' }}>
+                {authInfo?.loggedIn ? (
+                  <>
+                    <div className="px-3 py-2 text-[10px] uppercase tracking-[0.06em] font-medium" style={{ color: '#525252', borderBottom: '1px solid #2a2a2a' }}>云端账号</div>
+                    <button type="button" onClick={handleSwitchAccount} className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] transition-colors hover:bg-white/[0.04]" style={{ color: '#d4d4d4' }}>
+                      <CornerDownLeft size={13} style={{ color: '#737373' }} />
+                      <span>切换账号</span>
+                    </button>
+                    <button type="button" onClick={handleLogout} className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] transition-colors hover:bg-white/[0.04]" style={{ color: '#d98a8a' }}>
+                      <X size={13} style={{ color: '#d98a8a' }} />
+                      <span>退出登录</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="px-3 py-2 text-[10px] uppercase tracking-[0.06em] font-medium" style={{ color: '#525252', borderBottom: '1px solid #2a2a2a' }}>离线模式</div>
+                    <button type="button" onClick={handleLoginFromOffline} className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] transition-colors hover:bg-white/[0.04]" style={{ color: '#d4d4d4' }}>
+                      <CornerDownLeft size={13} style={{ color: '#737373' }} />
+                      <span>登录云端账号</span>
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           )}
         </div>

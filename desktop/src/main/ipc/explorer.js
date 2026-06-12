@@ -118,7 +118,9 @@ export function registerExplorerIpc({
 
     const effectiveName = isStudyRoot ? STUDY_WORKSPACE_NAME : projectName;
     const projectDir = isStudyRoot ? getStudyRoot() : path.join(getWorkspaceRoot(domain), projectName);
-    if (!fs.existsSync(projectDir)) throw new Error(`目录不存在：${effectiveName}`);
+    if (!fs.existsSync(projectDir)) {
+      fs.mkdirSync(projectDir, { recursive: true });
+    }
 
     // Lazy init for legacy projects: ensure new meta layout exists, and migrate old meta/items.json once.
     try {

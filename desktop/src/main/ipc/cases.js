@@ -54,6 +54,10 @@ export function registerCasesIpc({
   // ===== Cases (案件) =====
   ipcMain.handle('cases/list', async () => {
     const root = getCasesRoot();
+    if (!fs.existsSync(root)) {
+      fs.mkdirSync(root, { recursive: true });
+      return [];
+    }
     const entries = fs.readdirSync(root, { withFileTypes: true });
     const state = readState();
     const statusMap = state.caseStatuses && typeof state.caseStatuses === 'object' ? state.caseStatuses : {};

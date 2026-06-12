@@ -29,6 +29,14 @@ import path from 'node:path';
 import os from 'node:os';
 
 import { dialog } from 'electron';
+import { createAuthCloudClient } from '../cloud/cloudClient.js';
+import {
+  createSkillPackage,
+  downloadBuffer,
+  installSkillPackage,
+  putBufferToSignedUrl,
+  sha256Of,
+} from '../cloud/skillPackage.js';
 
 // `@earendil-works/pi-coding-agent` is ESM-only (its package.json exports
 // map only declares an `"import"` condition). Vite compiles the Electron
@@ -898,6 +906,217 @@ export function registerSkillsIpc({ ipcMain, readState, writeState }) {
     }
   });
 
+  // --------------------------------------------------------------------------
+  // C7 — organization Skill Registry / market
+  // --------------------------------------------------------------------------
+
+  ipcMain.handle('knowclaw:registryListSkills', async (_evt, payload) => {
+    try {
+      const client = createAuthCloudClient();
+      const q = typeof payload?.q === 'string' && payload.q.trim()
+        ? `?q=${encodeURIComponent(payload.q.trim())}`
+        : '';
+      return await client.get(`/api/skills${q}`);
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err), skills: [] };
+    }
+  });
+
+  ipcMain.handle('knowclaw:registryGetSkill', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    try {
+      const client = createAuthCloudClient();
+      return await client.get(`/api/skills/${id}`);
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  ipcMain.handle('knowclaw:registryPublishSkill', async (_evt, payload) => {
+    const skillDir = typeof payload?.skillDir === 'string' ? payload.skillDir : '';
+    const version = typeof payload?.version === 'string' && payload.version.trim() ? payload.version.trim() : '1.0.0';
+    const descriptionOverride = typeof payload?.description === 'string' ? payload.description.trim() : '';
+    if (!skillDir) return { ok: false, error: 'skillDir is required' };
+
+    const wsRoot = resolveWorkspaceSkillDir(payload?.cwd);
+    if (!isSafeSkillPath(skillDir, wsRoot ? [wsRoot] : [])) {
+      return { ok: false, error: 'skillDir is not within a trusted skill root' };
+    }
+
+    try {
+      const pkg = createSkillPackage(skillDir, { version });
+      if (descriptionOverride) pkg.manifest.description = descriptionOverride;
+      const client = createAuthCloudClient();
+      const upload = await client.post('/api/skills/upload-url', {
+        slug: pkg.manifest.slug,
+        version,
+        sha256: pkg.sha256,
+        sizeBytes: pkg.sizeBytes,
+      });
+      if (!upload?.ok) return { ok: false, error: upload?.error || '获取上传 URL 失败' };
+      await putBufferToSignedUrl(upload.uploadUrl, pkg.buffer);
+      const res = await client.post('/api/skills', {
+        slug: pkg.manifest.slug,
+        name: pkg.manifest.name,
+        description: pkg.manifest.description,
+        version,
+        packageSha256: pkg.sha256,
+        sizeBytes: pkg.sizeBytes,
+        storageKey: upload.storageKey,
+        manifest: pkg.manifest,
+        metadata: { disableModelInvocation: pkg.manifest.disableModelInvocation },
+      });
+      return { ...res, manifest: pkg.manifest };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  ipcMain.handle('knowclaw:registryPublishVersion', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    const skillDir = typeof payload?.skillDir === 'string' ? payload.skillDir : '';
+    const version = typeof payload?.version === 'string' && payload.version.trim() ? payload.version.trim() : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    if (!skillDir) return { ok: false, error: 'skillDir is required' };
+    if (!version) return { ok: false, error: 'version is required' };
+
+    const wsRoot = resolveWorkspaceSkillDir(payload?.cwd);
+    if (!isSafeSkillPath(skillDir, wsRoot ? [wsRoot] : [])) {
+      return { ok: false, error: 'skillDir is not within a trusted skill root' };
+    }
+
+    try {
+      const pkg = createSkillPackage(skillDir, { version });
+      const client = createAuthCloudClient();
+      const upload = await client.post('/api/skills/upload-url', {
+        slug: pkg.manifest.slug,
+        version,
+        sha256: pkg.sha256,
+        sizeBytes: pkg.sizeBytes,
+      });
+      if (!upload?.ok) return { ok: false, error: upload?.error || '获取上传 URL 失败' };
+      await putBufferToSignedUrl(upload.uploadUrl, pkg.buffer);
+      return await client.post(`/api/skills/${id}/versions`, {
+        name: pkg.manifest.name,
+        description: pkg.manifest.description,
+        version,
+        packageSha256: pkg.sha256,
+        sizeBytes: pkg.sizeBytes,
+        storageKey: upload.storageKey,
+        manifest: pkg.manifest,
+        metadata: { disableModelInvocation: pkg.manifest.disableModelInvocation },
+      });
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  ipcMain.handle('knowclaw:registryInstallSkill', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    const versionId = typeof payload?.versionId === 'string' ? payload.versionId : '';
+    const overwrite = Boolean(payload?.overwrite);
+    const newName = typeof payload?.newName === 'string' ? payload.newName.trim() : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    if (!versionId) return { ok: false, error: 'versionId is required' };
+    const userSkillsRoot = getUserSkillsRoot();
+    if (!userSkillsRoot) return { ok: false, error: 'KNOWCLAW_USER_SKILLS_ROOT is not configured' };
+
+    try {
+      const client = createAuthCloudClient();
+      const info = await client.post(`/api/skills/${id}/versions/${versionId}/download`, {});
+      if (!info?.ok) return { ok: false, error: info?.error || '获取下载 URL 失败' };
+      const buffer = await downloadBuffer(info.downloadUrl);
+      const actualSha = sha256Of(buffer);
+      if (actualSha.toLowerCase() !== String(info.packageSha256 || '').toLowerCase()) {
+        return { ok: false, error: 'Skill 包校验失败：sha256 不匹配' };
+      }
+      const installed = installSkillPackage(buffer, userSkillsRoot, {
+        overwrite,
+        newName,
+        importedFrom: `org_registry:${id}:${versionId}`,
+      });
+      if (!installed.ok) return installed;
+
+      await client.post(`/api/skills/${id}/install`, { versionId }).catch(() => undefined);
+      patchSkillsState(readState, writeState, (current) => ({
+        disabled: current.disabled.filter((n) => n !== installed.skill.name),
+        importedSources: {
+          ...current.importedSources,
+          [installed.skill.name]: {
+            from: `org_registry:${id}:${versionId}`,
+            importedAt: new Date().toISOString(),
+            originalName: installed.originalName,
+            version: info.version,
+          },
+        },
+      }));
+      return { ...installed, version: info.version, requiresNewSession: true };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  ipcMain.handle('knowclaw:registryAdminListReviewQueue', async (_evt, payload) => {
+    try {
+      const client = createAuthCloudClient();
+      const status = typeof payload?.status === 'string' && payload.status.trim()
+        ? `?status=${encodeURIComponent(payload.status.trim())}`
+        : '';
+      return await client.get(`/api/skills/admin/review-queue${status}`);
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err), skills: [] };
+    }
+  });
+
+  ipcMain.handle('knowclaw:registryAdminListOrgUsers', async () => {
+    try {
+      const client = createAuthCloudClient();
+      return await client.get('/api/skills/admin/org-users');
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err), users: [] };
+    }
+  });
+
+  ipcMain.handle('knowclaw:registryAdminReviewSkill', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    try {
+      const client = createAuthCloudClient();
+      return await client.post(`/api/skills/${id}/review`, {
+        decision: payload?.decision,
+        note: typeof payload?.note === 'string' ? payload.note : undefined,
+        grants: Array.isArray(payload?.grants) ? payload.grants : undefined,
+      });
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  ipcMain.handle('knowclaw:registryAdminGetAccess', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    try {
+      const client = createAuthCloudClient();
+      return await client.get(`/api/skills/${id}/access`);
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err), grants: [] };
+    }
+  });
+
+  ipcMain.handle('knowclaw:registryAdminSetAccess', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    try {
+      const client = createAuthCloudClient();
+      return await client.post(`/api/skills/${id}/access`, {
+        grants: Array.isArray(payload?.grants) ? payload.grants : [],
+      });
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
   // eslint-disable-next-line no-console
-  console.log(`${TAG} registered 8 IPC channels (builtin=${getBuiltinSkillsDir() || '(unset)'}, user=${getUserSkillsRoot() || '(unset)'})`);
+  console.log(`${TAG} registered IPC channels (builtin=${getBuiltinSkillsDir() || '(unset)'}, user=${getUserSkillsRoot() || '(unset)'})`);
 }

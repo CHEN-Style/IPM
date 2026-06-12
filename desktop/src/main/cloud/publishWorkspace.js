@@ -9,8 +9,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { scanWorkspace } from './workspaceScanner.js';
 import { writeCloudBinding } from './cloudBinding.js';
+import { writeBaseline } from './cloudBaseline.js';
 import { lockWorkspace, unlockWorkspace } from './publishLock.js';
-import { CLOUD_DEV_CONFIG } from './devConfig.js';
+
 
 const STEPS = ['scanning', 'creating', 'checking', 'uploading', 'committing', 'done'];
 
@@ -67,7 +68,9 @@ export async function publishWorkspace(opts) {
     cloudName,
     description,
     message,
-    orgId = CLOUD_DEV_CONFIG.devOrgId,
+    orgId,
+    userId,
+    userDisplayName,
     cloudClient,
     shouldCancel,
     onProgress,
@@ -114,12 +117,13 @@ export async function publishWorkspace(opts) {
 
     // ── Step 2: create workspace ──────────────────────────────────
     emit(onProgress, { step: 'creating', status: 'running' });
-    const createRes = await cloudClient.post('/api/workspaces', {
-      orgId,
+    const createBody = {
       name: cloudName || projectName,
       domain,
       description: description || undefined,
-    });
+    };
+    if (orgId) createBody.orgId = orgId;
+    const createRes = await cloudClient.post('/api/workspaces', createBody);
     const workspace = createRes.workspace;
     emit(onProgress, { step: 'creating', status: 'done', workspaceId: workspace.id });
     checkCancel();
@@ -221,23 +225,38 @@ export async function publishWorkspace(opts) {
       versionNumber: commitRes.versionNumber,
     });
 
-    // ── Step 6: write local binding ───────────────────────────────
+    // ── Step 6: write local binding + baseline ────────────────────
     const binding = writeCloudBinding(projectDir, {
       cloudWorkspaceId: workspace.id,
-      orgId,
-      orgSlug: CLOUD_DEV_CONFIG.devOrgSlug,
-      orgName: CLOUD_DEV_CONFIG.devOrgName,
+      orgId: orgId || undefined,
       domain,
       lastSyncedVersionId: commitRes.versionId,
       lastSyncedVersionNumber: commitRes.versionNumber,
       lastSyncedAt: new Date().toISOString(),
       syncMode: 'manual',
       sourceType: 'standard',
+      role: 'owner',
       boundBy: {
-        userId: CLOUD_DEV_CONFIG.devUserId,
-        displayName: CLOUD_DEV_CONFIG.devUserDisplayName,
+        userId: userId || undefined,
+        displayName: userDisplayName || undefined,
       },
     });
+
+    // Baseline = the manifest we just committed (basis for the next diff).
+    writeBaseline(projectDir, {
+      versionId: commitRes.versionId,
+      versionNumber: commitRes.versionNumber,
+      entries: scan.entries,
+    });
+
+    // Initialize the canonical folder structure on the cloud (owner action).
+    // Non-fatal: a failure here only means folder protection isn't seeded yet.
+    try {
+      const folderPaths = scan.entries.filter((e) => e.entryType === 'folder').map((e) => e.path);
+      await cloudClient.post(`/api/workspaces/${workspace.id}/folders`, { folders: folderPaths });
+    } catch {
+      // ignore; folders can be re-synced later by the owner
+    }
 
     emit(onProgress, {
       step: 'done',

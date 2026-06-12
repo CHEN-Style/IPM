@@ -1592,6 +1592,126 @@ export function KnowClawPersistProvider({ children }) {
     }
   }, []);
 
+  const listRegistrySkills = useCallback(async (opts) => {
+    try {
+      return await window.ipm?.skills?.registryList?.(opts || {})
+        || { ok: false, skills: [], error: 'skills IPC unavailable' };
+    } catch (err) {
+      return { ok: false, skills: [], error: String(err?.message || err) };
+    }
+  }, []);
+
+  const getRegistrySkill = useCallback(async (id) => {
+    try {
+      return await window.ipm?.skills?.registryGet?.(id)
+        || { ok: false, error: 'skills IPC unavailable' };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }, []);
+
+  const publishRegistrySkill = useCallback(async (payload) => {
+    try {
+      const res = await window.ipm?.skills?.registryPublish?.({
+        ...(payload || {}),
+        cwd: payload?.cwd || undefined,
+      });
+      if (res?.ok) {
+        const name = res?.manifest?.name || 'Skill';
+        const version = res?.manifest?.version || payload?.version || '';
+        setMessages((prev) => [
+          ...prev,
+          { role: 'system', content: `技能「${name}」已提交审核${version ? `（${version}）` : ''}：管理员通过后，授权成员可在组织市场安装。`, ts: Date.now() },
+        ]);
+      }
+      return res || { ok: false, error: 'skills IPC unavailable' };
+    } catch (err) {
+      const errText = String(err?.message || err);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'system', content: `技能发布失败: ${errText}`, ts: Date.now() },
+      ]);
+      return { ok: false, error: errText };
+    }
+  }, []);
+
+  const installRegistrySkill = useCallback(async (payload) => {
+    try {
+      const res = await window.ipm?.skills?.registryInstall?.(payload || {});
+      if (!res?.ok) return res || { ok: false, error: 'skills IPC unavailable' };
+      await window.ipm?.skills?.reload?.();
+      await loadSkills(payload?.cwd || undefined);
+      const name = res?.skill?.name || 'Skill';
+      setMessages((prev) => [
+        ...prev,
+        { role: 'system', content: `技能「${name}」已从组织市场安装：下次新对话起生效。`, ts: Date.now() },
+      ]);
+      return res;
+    } catch (err) {
+      const errText = String(err?.message || err);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'system', content: `技能安装失败: ${errText}`, ts: Date.now() },
+      ]);
+      return { ok: false, error: errText };
+    }
+  }, [loadSkills]);
+
+  const listSkillReviewQueue = useCallback(async (opts) => {
+    try {
+      return await window.ipm?.skills?.registryAdminListReviewQueue?.(opts || {})
+        || { ok: false, skills: [], error: 'skills IPC unavailable' };
+    } catch (err) {
+      return { ok: false, skills: [], error: String(err?.message || err) };
+    }
+  }, []);
+
+  const listOrgUsersForSkills = useCallback(async () => {
+    try {
+      return await window.ipm?.skills?.registryAdminListOrgUsers?.()
+        || { ok: false, users: [], error: 'skills IPC unavailable' };
+    } catch (err) {
+      return { ok: false, users: [], error: String(err?.message || err) };
+    }
+  }, []);
+
+  const reviewRegistrySkill = useCallback(async (payload) => {
+    try {
+      const res = await window.ipm?.skills?.registryAdminReview?.(payload || {});
+      if (res?.ok) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'system',
+            content: payload?.decision === 'approved' ? 'Skill 已审核通过。' : 'Skill 已拒绝上架。',
+            ts: Date.now(),
+          },
+        ]);
+      }
+      return res || { ok: false, error: 'skills IPC unavailable' };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }, []);
+
+  const getRegistrySkillAccess = useCallback(async (id) => {
+    try {
+      return await window.ipm?.skills?.registryAdminGetAccess?.(id)
+        || { ok: false, grants: [], error: 'skills IPC unavailable' };
+    } catch (err) {
+      return { ok: false, grants: [], error: String(err?.message || err) };
+    }
+  }, []);
+
+  const setRegistrySkillAccess = useCallback(async (payload) => {
+    try {
+      return await window.ipm?.skills?.registryAdminSetAccess?.(payload || {})
+        || { ok: false, error: 'skills IPC unavailable' };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }, []);
+
   // SK4: `opts.cwd` lets the main process resolve workspace-root
   // candidates; `opts.scope` ('workspace' | 'user') pins the deletion
   // when both copies share a name. Default policy (no scope) is
@@ -2087,6 +2207,15 @@ export function KnowClawPersistProvider({ children }) {
     importSkill,
     scanExternalSkills,
     chooseSkillDir,
+    listRegistrySkills,
+    getRegistrySkill,
+    publishRegistrySkill,
+    installRegistrySkill,
+    listSkillReviewQueue,
+    listOrgUsersForSkills,
+    reviewRegistrySkill,
+    getRegistrySkillAccess,
+    setRegistrySkillAccess,
     setPlanMode,
     replyAskUser,
     cancelAskUser,
@@ -2111,6 +2240,9 @@ export function KnowClawPersistProvider({ children }) {
     steerMessage, followUpMessage, clearQueueAction, compactSession,
     toggleSubAgent, loadSkills, toggleSkill, deleteSkill,
     importSkill, scanExternalSkills, chooseSkillDir,
+    listRegistrySkills, getRegistrySkill, publishRegistrySkill, installRegistrySkill,
+    listSkillReviewQueue, listOrgUsersForSkills, reviewRegistrySkill,
+    getRegistrySkillAccess, setRegistrySkillAccess,
     setPlanMode, replyAskUser, cancelAskUser, skipAskUser, startExecuting,
     loadWorkspaceTree, uploadToWorkspace,
   ]);

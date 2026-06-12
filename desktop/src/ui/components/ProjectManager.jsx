@@ -23,6 +23,8 @@ import useClassifyPipeline from './project-manager/hooks/useClassifyPipeline.js'
 import ClassifyTraceView from './project-manager/ClassifyTraceView.jsx';
 import PreferencesPage from './project-manager/PreferencesPage.jsx';
 import CreateKnowledgeModal from './project-manager/CreateKnowledgeModal.jsx';
+import SyncStatusBar from './cloud-projects/SyncStatusBar.jsx';
+import FileHistoryRestoreModal from './cloud-projects/FileHistoryRestoreModal.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { useCloudPublish } from '../hooks/useCloudPublish.jsx';
 import { fileDecor, folderDecor, fmtBytes, fmtTime } from './project-manager/utils.js';
@@ -38,6 +40,7 @@ function pmContextMenuTrack(label) {
   if (t.startsWith('上传文件到文件夹')) return 'pm-upload-to-folder';
   if (/^在「.+」中新建文件夹$/.test(t)) return 'pm-new-folder-in-folder';
   if (t.startsWith('重命名：')) return 'pm-rename-entry';
+  if (t.startsWith('查看历史/恢复文件：')) return 'pm-restore-file';
   if (t.startsWith('删除文件夹：')) return 'pm-delete-folder';
   if (t.startsWith('删除文件：')) return 'pm-delete-file';
   if (t.startsWith('取消关联：')) return 'pm-unlink-local-folder';
@@ -354,6 +357,11 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
     }
   };
   const [createKnowledgeTarget, setCreateKnowledgeTarget] = useState(null);
+  const [restoreFileTarget, setRestoreFileTarget] = useState(null);
+  const openRestoreFile = useCallback((entry) => {
+    if (!entry || entry.kind !== 'file' || cwd.type !== 'project' || !cwd.name) return;
+    setRestoreFileTarget({ entry, projectName: cwd.name, domain: normalizedDomain });
+  }, [cwd, normalizedDomain]);
   const {
     menu,
     closeMenu,
@@ -386,6 +394,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
         isAttached: Boolean(meta?.attached),
       });
     },
+    onRestoreFile: !isStudy && cwd.type === 'project' && cloudBoundNames.has(cwd.name) ? openRestoreFile : undefined,
     // W3b: 仅 projects/cases 域提供根级重命名（学习域不传 → 菜单不显示）
     renameProject: isStudy ? undefined : openRenameWorkspace,
     // F1: 附属壳右键菜单 — 刷新外部结构 / 重新定位（仅项目和案件域）
@@ -825,6 +834,15 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
         onPublishCurrent={() => { if (cwd.type === 'project' && cwd.name) handlePublishProject(cwd.name); }}
       />
 
+      {/* C5: sync banner for a bound project (push/pull/milestone) */}
+      {cwd.type === 'project' && !isStudy && !isAttachedCwd && cloudBindings[cwd.name]?.bound && (
+        <SyncStatusBar
+          projectName={cwd.name}
+          domain={normalizedDomain}
+          onAfterSync={() => { void fetchBinding(cwd.name); void refreshEntries?.(); }}
+        />
+      )}
+
       {/* Content */}
       <div className="flex-1 overflow-y-auto" onContextMenu={handleBlankContextMenu}>
         <AIGhostOverview
@@ -1250,6 +1268,18 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
         target={createKnowledgeTarget}
         onClose={() => setCreateKnowledgeTarget(null)}
         onNavigateKnowledge={() => setKnowledgeCtx({ name: createKnowledgeTarget.projectName })}
+      />
+    )}
+    {restoreFileTarget && (
+      <FileHistoryRestoreModal
+        projectName={restoreFileTarget.projectName}
+        domain={restoreFileTarget.domain}
+        entry={restoreFileTarget.entry}
+        onClose={() => setRestoreFileTarget(null)}
+        onRestored={() => {
+          setNotice({ variant: 'success', message: '已恢复到本地；确认无误后可同步到云端。' });
+          void refreshEntries?.();
+        }}
       />
     )}
     </div>

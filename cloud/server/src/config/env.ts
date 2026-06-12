@@ -14,6 +14,14 @@ const envSchema = z.object({
 
   DATABASE_URL: z.string().min(1),
 
+  // C3.5 Auth: JWT signing secrets. In development these fall back to a fixed
+  // dev secret so a fresh checkout works without extra config; production must
+  // set strong unique values (validated below).
+  JWT_SECRET: z.string().min(1).default('dev-insecure-access-secret-change-me'),
+  JWT_REFRESH_SECRET: z.string().min(1).default('dev-insecure-refresh-secret-change-me'),
+  JWT_ACCESS_EXPIRES: z.string().default('2h'),
+  JWT_REFRESH_EXPIRES: z.string().default('30d'),
+
   OSS_REGION: optionalNonEmptyString,
   OSS_BUCKET: optionalNonEmptyString,
   OSS_ACCESS_KEY_ID: optionalNonEmptyString,
@@ -26,6 +34,15 @@ const envSchema = z.object({
 export type Env = z.infer<typeof envSchema>;
 
 export const env = envSchema.parse(process.env);
+
+// In production, refuse to boot with the insecure default JWT secrets.
+if (env.NODE_ENV === 'production') {
+  if (env.JWT_SECRET.startsWith('dev-insecure') || env.JWT_REFRESH_SECRET.startsWith('dev-insecure')) {
+    throw new Error(
+      'JWT_SECRET / JWT_REFRESH_SECRET must be set to strong unique values in production.',
+    );
+  }
+}
 
 export const ossConfigured =
   Boolean(env.OSS_REGION) &&

@@ -80,3 +80,14 @@ export function getSignedPutUrl(objectKey: string, expiresSeconds = 900) {
     'Content-Type': BLOB_UPLOAD_CONTENT_TYPE,
   });
 }
+
+// C4: signed GET URL for downloading a blob during pull.
+export function getSignedGetUrl(objectKey: string, expiresSeconds = 900) {
+  const client = createOssClient();
+  if (!client) throw new Error('OSS is not configured');
+
+  return client.signatureUrl(objectKey, {
+    method: 'GET',
+    expires: expiresSeconds,
+  });
+}

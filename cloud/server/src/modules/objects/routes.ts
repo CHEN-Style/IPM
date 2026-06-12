@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { pool } from '../../infra/db/postgres.js';
 import { env, ossConfigured } from '../../config/env.js';
-import { getSignedPutUrl } from '../../infra/oss/ossClient.js';
+import { getSignedPutUrl, getSignedGetUrl } from '../../infra/oss/ossClient.js';
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/i, 'sha256 must be 64 hex chars');
 
@@ -24,6 +24,10 @@ const uploadUrlsSchema = z.object({
 });
 
 const confirmSchema = z.object({
+  hashes: z.array(sha256Schema).min(1).max(2000),
+});
+
+const downloadUrlsSchema = z.object({
   hashes: z.array(sha256Schema).min(1).max(2000),
 });
 
@@ -118,5 +122,34 @@ export async function registerObjectRoutes(app: FastifyInstance) {
       [parsed.data.hashes],
     );
     return reply.send({ ok: true, confirmed: result.rows.map((r) => r.sha256) });
+  });
+
+  // C4: signed GET URLs for downloading blobs during pull.
+  app.post('/api/objects/download-urls', async (request, reply) => {
+    const userId = request.userId;
+    if (!userId) return reply.code(401).send({ ok: false, error: 'Unauthenticated.' });
+
+    if (!ossConfigured) {
+      return reply.code(503).send({ ok: false, error: 'OSS is not configured on the server.' });
+    }
+
+    const parsed = downloadUrlsSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ ok: false, error: 'Invalid body', details: parsed.error.flatten() });
+    }
+
+    const objs = await pool.query<{ sha256: string; storage_key: string }>(
+      `SELECT sha256, storage_key FROM objects WHERE sha256 = ANY($1) AND status = 'available'`,
+      [parsed.data.hashes],
+    );
+
+    const urls = objs.rows.map((row) => ({
+      sha256: row.sha256,
+      downloadUrl: getSignedGetUrl(row.storage_key),
+    }));
+    const found = new Set(objs.rows.map((r) => r.sha256.toLowerCase()));
+    const missing = parsed.data.hashes.filter((h) => !found.has(h.toLowerCase()));
+
+    return reply.send({ ok: true, urls, missing });
   });
 }

@@ -37,6 +37,8 @@ import {
 } from 'lucide-react';
 
 import { useConfirmDialog } from '../../hooks/useConfirmDialog.jsx';
+import SkillMarketplacePanel from './SkillMarketplacePanel.jsx';
+import SkillReviewAdminPanel from './SkillReviewAdminPanel.jsx';
 
 // Visual config for the four source buckets. `key` matches SkillInfo
 // `source` field exactly so the grouping pass is a straight lookup.
@@ -243,11 +245,24 @@ const SkillManagerPanel = ({
   onViewDetail,
   onClose,
   onImport,
+  onPublish,
+  listRegistrySkills,
+  installRegistrySkill,
+  listSkillReviewQueue,
+  listOrgUsersForSkills,
+  reviewRegistrySkill,
+  getRegistrySkillAccess,
+  setRegistrySkillAccess,
+  onRegistryInstalled,
+  cwd,
+  currentUser,
 }) => {
   const confirm = useConfirmDialog();
   const [query, setQuery] = useState('');
   const [busyName, setBusyName] = useState(null);
+  const [activeTab, setActiveTab] = useState('local');
   const searchInputRef = useRef(null);
+  const canAdminSkills = currentUser?.orgRole === 'owner' || currentUser?.orgRole === 'admin';
 
   // Filter + group in one pass. We rebuild the filtered map on each
   // render because both `skills` and `query` are cheap inputs and the
@@ -323,8 +338,8 @@ const SkillManagerPanel = ({
   // filter. Doesn't apply when the panel re-mounts via React strict
   // mode double-invoke — the ref still points at the same input.
   useEffect(() => {
-    searchInputRef.current?.focus?.();
-  }, []);
+    if (activeTab === 'local') searchInputRef.current?.focus?.();
+  }, [activeTab]);
 
   return (
     <aside className="w-72 shrink-0 h-full flex flex-col border-l border-slate-100 bg-slate-50/50">
@@ -360,6 +375,38 @@ const SkillManagerPanel = ({
 
       {/* Search */}
       <div className="shrink-0 px-3 py-2 bg-white border-b border-slate-100">
+        <div className={`grid ${canAdminSkills ? 'grid-cols-3' : 'grid-cols-2'} gap-1 p-1 mb-2 rounded-lg bg-slate-100`}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('local')}
+            className={`h-7 rounded-md text-[12px] font-medium transition-colors ${
+              activeTab === 'local' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            本地
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('market')}
+            className={`h-7 rounded-md text-[12px] font-medium transition-colors ${
+              activeTab === 'market' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            组织市场
+          </button>
+          {canAdminSkills && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('review')}
+              className={`h-7 rounded-md text-[12px] font-medium transition-colors ${
+                activeTab === 'review' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              审核管理
+            </button>
+          )}
+        </div>
+        {activeTab === 'local' && (
         <div className="relative">
           <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -382,9 +429,27 @@ const SkillManagerPanel = ({
             </button>
           )}
         </div>
+        )}
       </div>
 
       {/* Body */}
+      {activeTab === 'review' && canAdminSkills ? (
+        <SkillReviewAdminPanel
+          listSkillReviewQueue={listSkillReviewQueue}
+          listOrgUsersForSkills={listOrgUsersForSkills}
+          reviewRegistrySkill={reviewRegistrySkill}
+          getRegistrySkillAccess={getRegistrySkillAccess}
+          setRegistrySkillAccess={setRegistrySkillAccess}
+        />
+      ) : activeTab === 'market' ? (
+        <SkillMarketplacePanel
+          listRegistrySkills={listRegistrySkills}
+          installRegistrySkill={installRegistrySkill}
+          onPublish={onPublish}
+          onInstalled={onRegistryInstalled}
+          cwd={cwd}
+        />
+      ) : (
       <div className="flex-1 min-h-0 overflow-y-auto py-1">
         {loading && skills.length === 0 ? (
           <div className="px-4 py-6 text-[12px] text-slate-400 leading-relaxed flex items-center gap-2">
@@ -424,8 +489,10 @@ const SkillManagerPanel = ({
             ))
         )}
       </div>
+      )}
 
       {/* Footer */}
+      {activeTab === 'local' && (
       <div className="shrink-0 px-3 py-2.5 bg-white border-t border-slate-100">
         <button
           type="button"
@@ -438,6 +505,7 @@ const SkillManagerPanel = ({
           导入技能
         </button>
       </div>
+      )}
     </aside>
   );
 };

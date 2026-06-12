@@ -6,6 +6,7 @@ import FloatingMode from './components/floating/FloatingMode.jsx';
 import SettingsPage from './components/SettingsPage.jsx';
 import KnowledgePanorama from './components/knowledge/KnowledgePanorama.jsx';
 import MyDataPage from './components/MyDataPage.jsx';
+import CloudProjectsPage from './components/cloud-projects/CloudProjectsPage.jsx';
 import OverviewPage from './components/OverviewPage.jsx';
 import KnowClawV2Page from './components/knowclaw-v2/KnowClawV2Page.jsx';
 import FloatingWorkspaceBridge from './components/knowclaw-v2/FloatingWorkspaceBridge.jsx';
@@ -20,9 +21,11 @@ import { KnowClawPersistProvider } from './hooks/useKnowClawPersist.jsx';
 import { CloudPublishProvider } from './hooks/useCloudPublish.jsx';
 import useUsageTracker from './hooks/useUsageTracker.js';
 import OnboardingScreen from './components/OnboardingScreen.jsx';
+import LoginPage from './components/auth/LoginPage.jsx';
 
 const App = () => {
   const [showOnboarding, setShowOnboarding] = useState(null); // null = loading, true/false = resolved
+  const [authStatus, setAuthStatus] = useState(null); // null = loading, {needsAuth, loggedIn, offline, user}
   const [activeNav, setActiveNav] = useState('mydata');
   const [myDataSection, setMyDataSection] = useState('home'); // home | projects | cases | study
   const [selectedDoc, setSelectedDoc] = useState(null); // 右侧详情后续接入
@@ -68,6 +71,22 @@ const App = () => {
     return () => { cancelled = true; };
   }, []);
 
+  // C3.5: resolve auth status. Only relevant for the main window UI.
+  useEffect(() => {
+    if (uiMode !== 'main') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.ipm?.auth?.getStatus?.();
+        if (cancelled) return;
+        setAuthStatus(res || { needsAuth: false, loggedIn: false, offline: true });
+      } catch {
+        if (!cancelled) setAuthStatus({ needsAuth: false, loggedIn: false, offline: true });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [uiMode]);
+
   useEffect(() => {
     document.documentElement.classList.toggle('ui-bubble', uiMode === 'bubble');
     document.body.classList.toggle('ui-floating', uiMode === 'floating');
@@ -96,7 +115,7 @@ const App = () => {
   const [displayNav, setDisplayNav] = useState(activeNav);
   const fadeTimerRef = useRef(null);
 
-  const fadeEligible = useMemo(() => new Set(['overview', 'mydata', 'knowledge', 'knowclaw-v2', 'tutorial']), []);
+  const fadeEligible = useMemo(() => new Set(['overview', 'mydata', 'knowledge', 'knowclaw-v2', 'tutorial', 'cloud-projects']), []);
 
   useEffect(() => {
     if (fadeTimerRef.current) {
@@ -236,12 +255,17 @@ const App = () => {
     );
   }
 
-  if (showOnboarding === null) {
+  if (showOnboarding === null || authStatus === null) {
     return <div className="h-screen w-full" style={{ background: '#060608' }} />;
   }
 
   if (showOnboarding) {
     return <OnboardingScreen onComplete={finishOnboarding} />;
+  }
+
+  // C3.5: gate on auth choice. Show login when no choice has been made yet.
+  if (authStatus.needsAuth) {
+    return <LoginPage onOfflineChosen={() => setAuthStatus({ ...authStatus, needsAuth: false, offline: true })} />;
   }
 
   return (
@@ -306,7 +330,7 @@ const App = () => {
               }`}
             />
             {displayNav === 'settings' ? (
-            <SettingsPage />
+            <SettingsPage currentUser={authStatus?.user || null} />
             ) : displayNav === 'tutorial' ? (
             <TutorialPage />
             ) : displayNav === 'overview' ? (
@@ -318,7 +342,9 @@ const App = () => {
               }}
             />
             ) : displayNav === 'knowclaw-v2' ? (
-            <KnowClawV2Page />
+            <KnowClawV2Page currentUser={authStatus?.user || null} />
+            ) : displayNav === 'cloud-projects' ? (
+            <CloudProjectsPage onOpenLocal={(domain) => openMyDataDomain(domain || 'projects')} />
             ) : displayNav === 'mydata' ? (
               <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} onNavigate={setActiveNav} searchNavTarget={searchNavTarget} onSearchNavDone={() => setSearchNavTarget(null)} />
           ) : (

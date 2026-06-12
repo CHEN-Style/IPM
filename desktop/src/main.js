@@ -35,7 +35,9 @@ import { registerAnalyticsIpc, uploadPendingAnalytics } from './main/ipc/analyti
 import { registerSearchIpc } from './main/ipc/search.js';
 import { registerOcrIpc } from './main/ipc/ocr.js';
 import { registerCloudIpc } from './main/ipc/cloud.js';
+import { registerAuthIpc } from './main/ipc/auth.js';
 import { createLockGuardedIpcMain } from './main/cloud/publishLockGuard.js';
+import * as userScope from './main/cloud/userScope.js';
 import { isWorkspaceLocked } from './main/cloud/publishLock.js';
 import { ClassifyTracker } from './main/classifyTracker.js';
 import { getProjectDb, closeProjectDb, closeAllDbs } from '../Agent/db/index.js';
@@ -88,7 +90,9 @@ const writeBootstrapConfig = (patch) => {
 
 const getDefaultUserFileRoot = () => path.join(app.getPath('userData'), 'IPM', 'userfile');
 
-const getUserFileRoot = () => {
+// The configurable physical base directory. All per-user data roots live
+// underneath it (see userScope). `prefs/*DataDir` handlers operate on THIS.
+const getBaseFileRoot = () => {
   if (!app.isPackaged) {
     return path.resolve(process.cwd(), 'userfile');
   }
@@ -97,6 +101,13 @@ const getUserFileRoot = () => {
     return cfg.userFileRoot;
   }
   return getDefaultUserFileRoot();
+};
+
+// The active data root for the current user (or offline). Before userScope is
+// initialized (very early boot), fall back to the base root so nothing crashes.
+const getUserFileRoot = () => {
+  if (userScope.isInitialized()) return userScope.getActiveUserRoot();
+  return getBaseFileRoot();
 };
 
 const getProjectsRoot = () => path.join(getUserFileRoot(), 'projects');
@@ -610,6 +621,48 @@ const normalizeProjectStatus = (status) => {
   const s = String(status || '').toLowerCase();
   if (s === 'active' || s === 'pending' || s === 'archived') return s;
   return 'active';
+};
+
+// C4: create a fresh local destination for a pulled cloud workspace. Only the
+// system dirs are seeded ('blank' template); the cloud manifest provides the
+// real folder/file structure. The chosen name is de-duplicated against the
+// target root so an existing local project is never clobbered.
+const createLocalCloudProject = ({ domain, name }) => {
+  const d = normalizeWorkspaceDomain(domain);
+  const root = getWorkspaceRoot(d);
+  fs.mkdirSync(root, { recursive: true });
+
+  const base = sanitizeProjectName(name) || '云端项目';
+  let finalName = base;
+  let i = 1;
+  while (fs.existsSync(path.join(root, finalName))) {
+    finalName = `${base} (${i})`;
+    i += 1;
+  }
+
+  const proj = ensureProjectStructure(finalName, d, { template: 'blank' });
+  try {
+    syncStructureJson(proj.path, finalName);
+  } catch {
+    // best-effort; structure.json is re-derivable
+  }
+
+  // Register active status so the project shows up consistently in lists.
+  try {
+    const state = readState();
+    if (d === 'projects') {
+      state.projectStatuses = state.projectStatuses && typeof state.projectStatuses === 'object' ? state.projectStatuses : {};
+      state.projectStatuses[finalName] = normalizeProjectStatus('active');
+    } else if (d === 'cases') {
+      state.caseStatuses = state.caseStatuses && typeof state.caseStatuses === 'object' ? state.caseStatuses : {};
+      state.caseStatuses[finalName] = normalizeProjectStatus('active');
+    }
+    writeState(state);
+  } catch {
+    // ignore status seeding failures
+  }
+
+  return { projectDir: proj.path, finalName, domain: d };
 };
 
 const normalizeFloatingUploadMode = (mode) => {
@@ -2079,6 +2132,11 @@ app.whenReady().then(() => {
   }
   updateSplashProgress('正在准备运行环境...');
 
+  // C3.5: initialize per-user data scope before any data path is resolved.
+  // This also performs the one-time migration of legacy top-level data into
+  // `_offline/` on first upgrade.
+  userScope.initUserScope(getBaseFileRoot);
+
   process.env.IPM_USER_DATA = app.getPath('userData');
   process.env.IPM_STATE_PATH = getStatePath();
   process.env.KNOWCLAW_SESSION_ROOT = path.join(app.getPath('userData'), 'knowclaw-sessions');
@@ -2190,7 +2248,7 @@ app.whenReady().then(() => {
 
   // ===== Data directory management =====
   ipcMain.handle('prefs/getDataDir', async () => {
-    return { ok: true, path: getUserFileRoot(), isCustom: !!readBootstrapConfig().userFileRoot };
+    return { ok: true, path: getBaseFileRoot(), isCustom: !!readBootstrapConfig().userFileRoot };
   });
 
   ipcMain.handle('prefs/chooseDataDir', async () => {
@@ -2205,7 +2263,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('prefs/setDataDir', async (_evt, { newPath }) => {
-    const oldPath = getUserFileRoot();
+    const oldPath = getBaseFileRoot();
     if (path.resolve(newPath) === path.resolve(oldPath)) {
       return { ok: true, changed: false };
     }
@@ -2561,8 +2619,19 @@ app.whenReady().then(() => {
   registerSearchIpc({ ipcMain, getProjectsRoot, getCasesRoot, getStudyRoot });
   registerOcrIpc({ ipcMain });
 
+  // C3.5: Auth (login/register/logout/offline) + per-user scope switching.
+  registerAuthIpc({
+    ipcMain,
+    app,
+    getMainWindow: () => mainWindow,
+    refreshEnv: () => {
+      process.env.IPM_STATE_PATH = getStatePath();
+    },
+  });
+
   // C2: Desktop cloud binding + local workspace scan (offline-only).
-  registerCloudIpc({ ipcMain, getWorkspaceDirOrThrow });
+  // C4: also handles cloud browse / join / pull and on-demand file download.
+  registerCloudIpc({ ipcMain, getWorkspaceDirOrThrow, createLocalCloudProject });
 
   uploadPendingAnalytics(getAppRoot()).catch(() => {});
 

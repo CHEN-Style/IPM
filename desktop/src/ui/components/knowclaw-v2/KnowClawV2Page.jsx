@@ -42,6 +42,7 @@ import WorkspaceFileTree from './WorkspaceFileTree.jsx';
 import SkillManagerPanel from './SkillManagerPanel.jsx';
 import SkillDetailModal from './SkillDetailModal.jsx';
 import ImportSkillModal from './ImportSkillModal.jsx';
+import PublishSkillModal from './PublishSkillModal.jsx';
 import SkillSelector from './SkillSelector.jsx';
 import useHeaderTier from './useHeaderTier.js';
 import HeaderOverflowMenu from './HeaderOverflowMenu.jsx';
@@ -55,7 +56,7 @@ const HINT_PROMPTS = [
   '当前工作目录是什么？',
 ];
 
-const KnowClawV2Page = () => {
+const KnowClawV2Page = ({ currentUser = null }) => {
   const {
     messages,
     streaming,
@@ -117,6 +118,14 @@ const KnowClawV2Page = () => {
     importSkill,
     scanExternalSkills,
     chooseSkillDir,
+    listRegistrySkills,
+    publishRegistrySkill,
+    installRegistrySkill,
+    listSkillReviewQueue,
+    listOrgUsersForSkills,
+    reviewRegistrySkill,
+    getRegistrySkillAccess,
+    setRegistrySkillAccess,
     // E.5: Plan-mode state + actions.
     planMode,
     setPlanMode,
@@ -247,6 +256,7 @@ const KnowClawV2Page = () => {
   // SK2: visibility of the import skill modal. Triggered by the
   // "+ 导入技能" button at the bottom of SkillManagerPanel.
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showPublishSkillModal, setShowPublishSkillModal] = useState(false);
 
   // Skill Selector: names of skills the user has pinned to the next
   // outgoing message. Cleared after each successful send (see
@@ -894,6 +904,17 @@ const KnowClawV2Page = () => {
           onViewDetail={(skill) => setSkillDetailTarget(skill)}
           onClose={() => setRightPanel(null)}
           onImport={() => setShowImportModal(true)}
+          onPublish={() => setShowPublishSkillModal(true)}
+          listRegistrySkills={listRegistrySkills}
+          installRegistrySkill={installRegistrySkill}
+          listSkillReviewQueue={listSkillReviewQueue}
+          listOrgUsersForSkills={listOrgUsersForSkills}
+          reviewRegistrySkill={reviewRegistrySkill}
+          getRegistrySkillAccess={getRegistrySkillAccess}
+          setRegistrySkillAccess={setRegistrySkillAccess}
+          onRegistryInstalled={() => { void loadSkills?.(currentCwd || undefined); }}
+          cwd={currentCwd || undefined}
+          currentUser={currentUser}
         />
       )}
       {/* SK1: skill detail modal — overlays everything when open. */}
@@ -924,6 +945,16 @@ const KnowClawV2Page = () => {
         })}
         scanExternalSkills={scanExternalSkills}
         chooseSkillDir={chooseSkillDir}
+      />
+      <PublishSkillModal
+        open={showPublishSkillModal}
+        skills={skills}
+        cwd={currentCwd || undefined}
+        onClose={() => setShowPublishSkillModal(false)}
+        publishRegistrySkill={publishRegistrySkill}
+        onPublished={() => {
+          setShowPublishSkillModal(false);
+        }}
       />
     </div>
   );

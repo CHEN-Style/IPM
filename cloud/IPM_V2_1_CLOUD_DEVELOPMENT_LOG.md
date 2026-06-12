@@ -65,18 +65,19 @@
 | C1 | 数据模型：Org / Workspace / Blob / Manifest | 数据库 schema、对象索引、版本 manifest | G1, G2, G4, G5 | `DONE` |
 | C2 | Desktop Cloud Binding 与本地扫描 | `meta/cloud.json`、hash 扫描、待提交清单 | G2, G4 | `DONE` |
 | C3 | 发布本地项目到云端 | 初始上传、初始 manifest、云端 workspace 创建 | G2, G4 | `DONE` |
-| C4 | 成员加入与拉取副本 | 加入项目、拉 manifest、小文件下载、大文件占位 | G3 | `PLANNED` |
-| C5 | 显式提交 / 拉取 | 变更扫描、提交说明、上传缺失 blob、拉取更新 | G3, G5 | `PLANNED` |
-| C6 | 简化冲突与单文件恢复 | 同名冲突副本、版本列表、单文件恢复 | G5, G6 | `PLANNED` |
-| C7 | Skill Registry 与官方市场 | Skill 元数据、包上传、安装/更新、权限声明 | G8 | `PLANNED` |
-| C8 | 企业 Skill 分发 | 默认 Skill、企业私有 Skill、版本锁定、禁用策略 | G7, G8 | `PLANNED` |
-| C9 | 企业权限、配额与保留策略 | owner/editor/viewer、存储配额、历史保留、基础审计 | G7 | `PLANNED` |
+| C3.5 | 真实鉴权（Auth） | JWT 注册/登录、邀请码、Per-User 数据隔离、登录 UI | G1 | `DONE` |
+| C4 | 成员加入与拉取副本 | 加入/浏览/拉取、小文件下载、大文件占位、CloudProjectsPage | G3 | `DONE` |
+| C5 | 显式同步与里程碑版本 | 三方 diff、增量 push/pull、软删除、文件夹保护、Milestone、同步 UI | G3, G5 | `DONE` |
+| C6 | 简化冲突与单文件恢复 | 同名冲突副本、版本列表、单文件恢复 | G5, G6 | `DONE` |
+| C7 | Skill Registry 与官方市场 | Skill 元数据、包上传、安装/更新、组织市场 UI | G8 | `DONE` |
+| C8 | Skill 审核与访问控制 | 提交待审、管理员审核、可见范围、授权安装 | G7, G8 | `DONE` |
+| C9 | 企业 AI 配置模板分发 | AI Provider/模型/Search API 配置模板、配置码导入、使用记录 | G7 | `DONE` |
 | C10 | NAS / 本地共享盘外部资料源 | 附属文件夹升级、网络路径、WebDAV/S3 适配 | G9 | `PLANNED` |
 | C11 | 飞书连接器 | OAuth、云空间目录、选择文件、导入 IPM | G9 | `PLANNED` |
 | C12 | 企业微信微盘连接器 | 企业授权、space/file 列表、下载导入 | G9 | `PLANNED` |
 | C13 | 外部 Agent 记录导入 | Kimi/Cursor/Claude Code 记录导入为知识/归档 | G10 | `PLANNED` |
 
-> **说明**：C0-C6 是 Cloud Core MVP；C7-C9 是 IPM 自身 Agent 生态与企业化；C10-C13 是外部生态连接。
+> **说明**：C0-C3.5-C6 是 Cloud Core MVP；C7-C9 是 IPM 自身 Agent 生态与企业化；C10-C13 是外部生态连接。
 
 ---
 
@@ -389,87 +390,274 @@ events
 
 ---
 
-### Phase C4 — 成员加入与拉取副本
+### Phase C3.5 — 真实鉴权（Auth）
 
-**Status:** `PLANNED`
+**Status:** `DONE`（2026-06-07，JWT 鉴权 + 邀请码注册 + Per-User 数据隔离 + 登录 UI）
 
-**目标**：第二个成员可加入云端项目，并在本地生成工作副本。
+**目标**：替换 C3 的 `X-Dev-User-Id` 临时鉴权，实现真实的用户注册/登录/令牌管理，并在桌面端建立 Per-User 本地数据隔离，为 C4 多人协作提供身份基础。
 
 **工作清单**
 
 写/改：
-1. Cloud API：邀请/加入 workspace。
-2. Desktop：云端项目列表。
-3. Desktop：选择下载模式。
-4. Desktop：拉取最新 manifest。
-5. Desktop：创建本地目录结构。
-6. Desktop：小文件下载，大文件占位。
+1. 数据库迁移 `0002_auth.sql`：`invite_codes`、`refresh_tokens` 表，`users.password_hash` 列。
+2. 环境变量扩展：`JWT_SECRET`、`JWT_REFRESH_SECRET`、`JWT_ACCESS_EXPIRES`、`JWT_REFRESH_EXPIRES`。
+3. Auth 模块实现：`POST /api/auth/register`（邀请码校验）、`POST /api/auth/login`、`POST /api/auth/refresh`（token rotation）、`POST /api/auth/logout`、`GET /api/auth/me`。
+4. 中间件改造：`devAuth.ts` → `auth.ts`（JWT Bearer 优先，dev 环境保留 `X-Dev-User-Id` 兼容）。
+5. 邀请码 CLI：`npm run invite:create -- --org <orgId>`。
+6. Desktop Per-User 数据目录重构：`userScope.js`（`users/{userId}/` + `_offline/` + legacy 迁移）。
+7. Token 存储：`authStore.js`（`safeStorage` 加密 + access token 自动 refresh）。
+8. Auth IPC：`auth/getStatus`、`auth/register`、`auth/login`、`auth/logout`、`auth/useOffline`、`auth/switchUser`。
+9. CloudClient 改造：新增 `createAuthCloudClient()`（注入 JWT + 自动 refresh）。
+10. 登录 UI：`LoginPage.jsx`（深色 Linear 风格，登录/注册 Tab + 离线入口）。
+11. App.jsx 集成：auth 状态判断，未选择时显示 LoginPage。
+12. Sidebar 账号控制：显示当前用户/切换账号/退出登录/离线模式下的"登录"入口。
 
-**下载模式**
+**关键设计决策**
 
-| 模式 | 行为 |
+| 决策 | 选择 |
 |------|------|
-| 完整下载 | 下载所有文件 |
-| 索引优先 | 只下载目录、manifest、小文件 |
-| 按需下载 | 大文件显示占位，点击再下载 |
+| 鉴权方案 | 邀请码 + 邮箱密码注册，JWT 双 token（access 2h + refresh 30d） |
+| 密码存储 | bcryptjs（纯 JS，避免原生编译） |
+| Token 桌面存储 | Electron `safeStorage` 加密，无 keystore 时明文 fallback |
+| 本地数据隔离 | Per-User 目录（`users/{userId}/`），离线数据在 `_offline/` |
+| 账号切换 | 开发模式 `webContents.reload()`，打包后 `app.relaunch()` |
+| 迁移策略 | 首次升级自动将旧数据移入 `_offline/`，不可逆 |
+| 单/多 org | C4 阶段只支持单 org |
 
 **验证方法**
 
-1. 用户 B 可看到用户 A 发布的项目。
-2. 用户 B 可加入并生成本地副本。
-3. 大文件可不立即下载。
+1. 注册：邀请码有效 → 201；无效/过期/超限 → 400。✅
+2. 登录：正确密码 → 200 + token pair；错误密码 → 401。✅
+3. `/me`：Bearer token → 当前用户；无 token → 401。✅
+4. Refresh：有效 refresh token → 新 token pair（rotation）；已吊销 → 401。✅
+5. 两个用户注册后身份隔离：各自 `/me` 返回正确身份。✅
+6. Dev 兼容：`X-Dev-User-Id` 在非生产环境仍有效。✅
+7. Desktop 构建验证：renderer vite build + main esbuild parse 通过。✅
+8. 桌面端登录→reload→进入主界面（开发模式验证通过）。✅
 
 **变更日志**
 
-- 待实现。
+- **C3.5 主体**（2026-06-07）：
+  - 新增 `cloud/server/src/infra/db/migrations/0002_auth.sql`：`invite_codes` 表（含 `role`/`max_uses`/`used_count`/`expires_at`）、`refresh_tokens` 表（token hash + revoked_at + expires_at）、`users.password_hash` 列。
+  - 修改 `cloud/server/src/config/env.ts`：新增 `JWT_SECRET`/`JWT_REFRESH_SECRET`/`JWT_ACCESS_EXPIRES`/`JWT_REFRESH_EXPIRES`，开发默认值 + 生产环境强制校验。
+  - 修改 `cloud/server/package.json`：新增 `bcryptjs`（密码哈希）、`jsonwebtoken`（JWT 签发/验证）、`@types/jsonwebtoken`（dev）、`invite:create` 脚本。
+  - 新增 `cloud/server/src/modules/auth/tokens.ts`：`signAccessToken`/`verifyAccessToken`/`issueRefreshToken`/`lookupRefreshToken`/`revokeRefreshToken`，refresh token 以 SHA-256 哈希后存入数据库。
+  - 新增 `cloud/server/src/modules/auth/routes.ts`：替换 C0 占位，实现完整 register（邀请码锁行 + 校验 + bcrypt + 创建用户 + 加入 org + event）/ login / refresh（rotation）/ logout / me。
+  - 新增 `cloud/server/src/modules/auth/invite-cli.ts`：生成 `IPM-XXXX-XXXX` 格式邀请码，支持 `--org`/`--role`/`--max-uses`/`--expires-days` 参数。
+  - 新增 `cloud/server/src/middleware/auth.ts`：替换 `devAuth.ts`，优先 Bearer JWT → 非生产环境 fallback `X-Dev-User-Id` → 401。
+  - 删除 `cloud/server/src/middleware/devAuth.ts`。
+  - 新增 `desktop/src/main/cloud/userScope.js`：Per-User 数据目录管理（`initUserScope`/`getActiveUserRoot`/`setCurrentUser`/`setOffline`/`clearCurrentUser`/`needsAuthChoice`），含 legacy → `_offline/` 一次性迁移。
+  - 新增 `desktop/src/main/cloud/authStore.js`：`saveTokens`/`loadTokens`/`clearTokens`/`getAccessToken`/`getActiveAccessToken`，使用 `safeStorage` 加密，过期自动 refresh。
+  - 新增 `desktop/src/main/ipc/auth.js`：`registerAuthIpc`，6 个 IPC channel（getStatus/register/login/logout/useOffline/switchUser），登录成功后开发模式 `webContents.reload()`、打包后 `app.relaunch()`。
+  - 修改 `desktop/src/main/cloud/cloudClient.js`：新增 `createAuthCloudClient()`，注入 `getActiveAccessToken` 作为 `getToken`。
+  - 修改 `desktop/src/main.js`：import `userScope`，启动时 `initUserScope(getBaseFileRoot)`，`getUserFileRoot()` 改为动态读 `userScope.getActiveUserRoot()`，注册 `registerAuthIpc` 并注入 `getMainWindow`/`refreshEnv`。
+  - 修改 `desktop/src/preload.js`：新增 `window.ipm.auth` 命名空间（getStatus/register/login/logout/useOffline/switchUser）。
+  - 新增 `desktop/src/ui/components/auth/LoginPage.jsx`：全屏深色 Linear 风格登录/注册页，含邀请码/邮箱/密码/昵称表单 + 错误提示 + "离线使用"入口。
+  - 修改 `desktop/src/ui/App.jsx`：auth 状态判断（`needsAuth` 时显示 LoginPage），`onOfflineChosen` 直接切换到离线模式。
+  - 修改 `desktop/src/ui/components/Sidebar.jsx`：用户区改为可交互的账号菜单（显示云端账号名/邮箱 或 "离线模式"，支持切换账号/退出登录/从离线进入登录）。
 
 ---
 
-### Phase C5 — 显式提交 / 拉取
+### Phase C4 — 成员加入与拉取副本
 
-**Status:** `PLANNED`
+**Status:** `DONE`（2026-06-07，workspace 浏览/加入/拉取 + 50MB 阈值占位 + CloudProjectsPage + 端到端验证通过）
 
-**目标**：完成多人协作的最小闭环：A 提交，B 拉取；B 修改，A 拉取。
+**目标**：第二个成员可加入云端项目，并在本地生成工作副本。
+
+**前置**：C3.5 Auth 完成（JWT 鉴权 + Per-User 数据隔离）。
 
 **工作清单**
 
 写/改：
-1. Desktop：本地变更扫描。
-2. Desktop：待提交 UI。
-3. Desktop：提交说明。
-4. Cloud API：创建新 version。
-5. Desktop：拉取远端版本。
-6. Desktop：应用无冲突变更。
+1. Cloud API：`GET /api/workspaces`（org 内列表 + 我的角色 + 成员数）。
+2. Cloud API：`POST /api/workspaces/:id/join`（同 org 成员直接加入，editor 角色，幂等）。
+3. Cloud API：`GET /api/workspaces/:id/versions/latest`（最新版本清单 + entries）。
+4. Cloud API：`POST /api/objects/download-urls`（签名 GET URL 用于下载 blob）。
+5. OSS client：`getSignedGetUrl`（签名 GET URL 生成）。
+6. Desktop：`pullWorkspace.js` 拉取编排器（获取清单 → 建目录 → 下载小文件 → 占位大文件 → 写 `cloud.json`）。
+7. Desktop：`downloadOnDemand.js`（读取 `.ipmcloud` 占位 → 获取下载 URL → 流式写文件 → 删占位）。
+8. Desktop：`createLocalCloudProject`（自动创建 blank 模板本地项目 + 名称去重 + 注册 state）。
+9. Desktop IPC：`cloud/listWorkspaces`、`cloud/joinWorkspace`、`cloud/pull`、`cloud/cancelPull`、`cloud/downloadFile` + `cloud:pullProgress` 推送。
+10. Desktop preload：`window.ipm.cloud` 新增 `listWorkspaces/joinWorkspace/pull/cancelPull/downloadFile/onPullProgress`。
+11. UI：`CloudProjectsPage.jsx`（云端项目列表、加入/拉取/打开按钮、拉取进度条）。
+12. UI：Sidebar 新增「协作项目」导航项（仅登录用户可见）。
 
-**提交清单展示**
+**下载策略**
 
-- 新增文件；
-- 修改文件；
-- 删除文件；
-- 移动/重命名文件；
-- 目录结构变化；
-- 可能冲突文件。
+| 文件大小 | 行为 |
+|----------|------|
+| ≤ 50 MB | 拉取时立即下载到本地 |
+| > 50 MB | 生成 `.ipmcloud` 占位文件（记录 sha256/sizeBytes/mimeType/originalName），按需下载 |
+
+**占位文件格式**
+
+```json
+{
+  "kind": "ipm-cloud-placeholder",
+  "schemaVersion": 1,
+  "sha256": "abc123...",
+  "sizeBytes": 123456789,
+  "mimeType": "application/pdf",
+  "originalName": "大型报告.pdf",
+  "path": "/收到资料/大型报告.pdf"
+}
+```
 
 **验证方法**
 
-1. 用户 A 新增文件并提交。
-2. 用户 B 手动拉取后看到文件。
-3. 用户 B 本地未提交文件不会被静默覆盖。
+1. 用户 B 注册后可看到用户 A 发布的所有 org 内项目。✅
+2. 用户 B 可加入项目（幂等，重复加入不报错）。✅
+3. 用户 B 可获取最新版本清单（entries 含 path/sha256/sizeBytes）。✅
+4. 下载签名 URL 有效（HTTP 200 + 正确文件内容）。✅
+5. `pullWorkspace` 端到端：15 个文件中 9 个立即下载、6 个生成占位，5 个文件夹正确创建，`cloud.json` 写入且 `pulledCopy: true`。✅
+6. `downloadPlaceholder` 端到端：占位文件解析 → 获取下载 URL → 下载真实文件 → 删除占位。✅
+7. Renderer vite build 通过，CloudProjectsPage 字符串在 bundle 中。✅
+8. 桌面端实际启动测试：登录 → 协作项目列表 → 加入 → 拉取。✅
 
 **不做**
 
-- 不自动后台实时同步。
-- 不做文件内部 diff。
+- 不做增量同步（拉取更新留给 C5）。
+- 不做冲突检测（C6）。
+- 不做成员管理 UI（C9）。
+- 不做完善的占位文件浏览器 UI（后续优化）。
 
 **变更日志**
 
-- 待实现。
+- **C4 主体**（2026-06-07）：
+  - 修改 `cloud/server/src/modules/workspaces/routes.ts`：新增 `GET /api/workspaces`（org 内列表，含 `memberCount`/`myRole`/`currentVersionNumber`，按 `updated_at DESC` 排序）、`POST /api/workspaces/:id/join`（org 校验 + 幂等 + event 记录）、`GET /api/workspaces/:id/versions/latest`（成员校验 + 最新 version entries + objects sha256 join）。
+  - 修改 `cloud/server/src/modules/objects/routes.ts`：新增 `POST /api/objects/download-urls`（批量 sha256 → 签名 GET URL，15min 有效，返回 missing 列表）。
+  - 修改 `cloud/server/src/infra/oss/ossClient.ts`：新增 `getSignedGetUrl(objectKey, expiresSeconds)`。
+  - 新增 `desktop/src/main/cloud/pullWorkspace.js`：拉取编排器（fetchManifest → createFolders → partitionByThreshold → downloadSmallFiles → placeholderLargeFiles → writeCloudBinding），支持 `shouldCancel`/`onProgress`，默认阈值 50MB。
+  - 新增 `desktop/src/main/cloud/downloadOnDemand.js`：`downloadPlaceholder`（读 `.ipmcloud` → `POST /api/objects/download-urls` → 流式下载到临时文件 → rename → 删占位）；`isPlaceholderPath`/`readPlaceholder` 辅助函数。
+  - 修改 `desktop/src/main/ipc/cloud.js`：新增 `cloud/listWorkspaces`/`cloud/joinWorkspace`/`cloud/pull`/`cloud/cancelPull`/`cloud/downloadFile` 5 个 IPC handler；pull 流程先 join（幂等）→ `createLocalCloudProject`（blank 模板 + 名称去重）→ `pullWorkspace` 编排；离线模式下所有云端操作返回 `OFFLINE` 错误码。
+  - 修改 `desktop/src/main.js`：新增 `createLocalCloudProject`（`sanitizeProjectName` + 去重 + `ensureProjectStructure(blank)` + `syncStructureJson` + 注册 state status），传入 `registerCloudIpc`。
+  - 修改 `desktop/src/preload.js`：`window.ipm.cloud` 新增 `listWorkspaces`/`joinWorkspace`/`pull`/`cancelPull`/`downloadFile`/`onPullProgress`。
+  - 新增 `desktop/src/ui/components/cloud-projects/CloudProjectsPage.jsx`：Linear 风格云端项目列表页（加载/空/错误状态），每个 workspace 卡片显示名称/domain 标签/版本号/成员数/我的角色，操作按钮按状态切换（未加入→加入 / 已加入→拉取副本 / 已拉取→打开本地副本），拉取时显示进度条（step label + 百分比）。
+  - 修改 `desktop/src/ui/App.jsx`：import `CloudProjectsPage`，`displayNav === 'cloud-projects'` 路由分支，`fadeEligible` 新增 `'cloud-projects'`。
+  - 修改 `desktop/src/ui/components/Sidebar.jsx`：新增 `Cloud` icon import，登录状态下显示「协作项目」导航项（`nav='cloud-projects'`）。
+
+  **Bug 修复记录**（2026-06-07）：
+
+  | # | 现象 | 原因 | 修复 | 涉及文件 |
+  |---|------|------|------|----------|
+  | B1 | 登录成功后桌面端白屏，terminal 进程退出 | 开发模式下 `app.relaunch()` + `app.exit(0)` 杀死了 `electron-forge start` 管理的进程，forge 不知道如何重启裸 Electron binary | `!app.isPackaged` 时改用 `webContents.reload()` 软重启；打包后仍走 `app.relaunch()` | `desktop/src/main/ipc/auth.js` |
+  | B2 | 首次启动时 legacy 迁移报 `ENOTEMPTY: directory not empty, rmdir '_app/sandbox/skills'` | `fs.renameSync` 对已有同名目标目录失败，`_app/sandbox/skills` 被其他模块占用无法删除 | 逐目录检查 dest 是否已存在（跳过）；rename 失败 fallback 到 `cpSync` + 静默忽略 `rmSync` 失败 | `desktop/src/main/cloud/userScope.js` |
+  | B3 | PowerShell 测试 `POST /api/workspaces/:id/join` 返回 415 Unsupported Media Type | Fastify 对无 body + 无 `Content-Type` 的 POST 请求返回 415 | 测试时显式添加 `-ContentType 'application/json' -Body '{}'`；后端路由无需修改 | 测试脚本 |
+  | B4 | esbuild parse-check 报告 `auth.js` 和 `cloud.js` 出现 "PARSE_ERROR" | 检测脚本用 regex 匹配 `error:` 字符串，命中了转译后代码中的合法字面量（如 `console.error:` 输出） | 确认为误报（esbuild exit code 0），调整检测逻辑；实际模块无语法错误 | 检测脚本 |
+  | B5 | `npx vite build --config vite.main.config.mjs` 产出 153 字节的空壳 `main.js` | `vite.main.config.mjs` 没有显式 `build.lib.entry`，entry 由 `electron-forge` 运行时动态注入，独立执行 vite build 时找不到入口 | 改用 esbuild 直接 parse-check 单个主进程模块验证语法；renderer build 正常走 `vite build`（从 `index.html` 入口） | 验证方式调整 |
+
+  **用户反馈与待解决问题**（2026-06-07）：
+
+  | # | 类型 | 内容 | 状态 |
+  |---|------|------|------|
+  | F1 | UI/UX | 当前 `CloudProjectsPage` 仅为简陋的列表页（用于验证 API pipeline），云端项目的创建/加入/管理/成员权限等完整 UI 尚未设计 | 留待后续阶段（建议 C5 或独立 UI 设计阶段）|
+  | F2 | 功能缺失 | 已拉取的协作项目在「我的数据」中没有云端绑定状态标识（如云图标、版本号） | `已解决`（C5：SyncStatusBar 显示绑定/版本/同步状态；HeaderBar 已有云图标）|
+  | F3 | 功能缺失 | 文件浏览器中 `.ipmcloud` 占位文件没有特殊 UI（应显示云下载图标 + 文件大小 + 点击触发下载） | 留待后续（C5 已在 diff/状态层正确折叠占位为「未改动」，文件浏览器图标化未做）|
+  | F4 | 功能缺失 | 发布后的增量更新（push 新版本）和拉取更新（pull latest）流程尚未实现 | `已解决`（C5 核心：pushSync + pullUpdate 全链路）|
+  | F5 | 功能缺失 | 云端项目成员管理 UI（角色显示/邀请/移除/权限控制） | 后续 Workspace 治理阶段 |
+
+---
+
+### Phase C5 — 显式同步与里程碑版本
+
+**Status:** `DONE`（2026-06-08，文件级增量 push/pull + 软删除 + 文件夹保护 + Milestone + 24 项端到端验证通过）
+
+**目标**：完成多人协作的同步闭环：在现有文件夹结构下增量推/拉文件，软删除标记，管理者里程碑版本。
+
+**协作模型（非 git）**：
+- **日常同步 ≠ 版本**：每次提交仍创建 `versions` 行（便于 diff/回溯），但只有 `type='milestone'` 对用户可见；`type='sync'` 是高频默认。
+- **冲突仅在「同路径文件双方都改了」**：文件夹下增减文件不算冲突。
+- **删除是软标记**：删除文件变成 `status='soft_deleted'`（OSS blob 保留），不物理删除。
+- **文件夹结构 owner 保护**：仅 owner 可改 canonical 文件夹集；非 owner 落在新文件夹的文件被「忽略」不推送。
+- **半自动 + 全量**：进入项目扫描检测变更并提示；用户确认后全部变更一起同步。
+
+**三方 diff**：`base`（`meta/cloud-baseline.json`，上次同步状态）vs `local`（实时扫描）vs `cloud`（最新版本）。`base↔local` 得本地变更，`base↔cloud` 得云端变更，双方都改同一路径即冲突。
+
+**验证方法**
+
+1. A 发布 → B 拉取副本。✅
+2. B 增/改/删 → pushSync 提交 v2。✅
+3. A pullUpdate 合并 B 的变更，软删除文件本地保留并打 tag。✅
+4. 管理者提升 milestone，版本列表可见。✅
+5. 基线落后时 push 被 `REMOTE_AHEAD` 拒绝；冲突文件检测且本地不被覆盖。✅
+
+**不做（留待 C6）**
+
+- 冲突解决 UI（C5 仅检测 + 提示 + 不覆盖）。
+- 单文件 / 整体版本回溯。
+- 文件夹结构变更审核流（非 owner 直接忽略）。
+- 不自动后台实时同步；不做文件内部 diff。
+
+**变更日志**
+
+- **C5 主体**（2026-06-08）：
+
+  **Cloud Server：**
+  - 新增 `src/infra/db/migrations/0003_sync.sql`：`versions` 加 `type`（sync/milestone）+ `label`；`version_entries` 加 `status`（active/soft_deleted）+ `deleted_by` + `deleted_at`；新建 `workspace_folders`（owner 保护的 canonical 文件夹集）。
+  - 修改 `src/modules/versions/routes.ts`：commit 接受 `type`/`label`/`baseVersionId`，entry 接受 `status`/`deletedAt`；提交时锁 workspace 行做 `baseVersionId` 乐观并发校验（不匹配返回 409 `REMOTE_AHEAD`）；`milestone` 类型要求 owner；新增 `GET /versions`（列版本，`?type=milestone` 筛选）、`POST /versions/:vid/promote`（owner 提升里程碑）。
+  - 修改 `src/modules/workspaces/routes.ts`：`/versions/latest` 返回 entry 的 `status`/`deletedBy`/`deletedByName`/`deletedAt` 及 version 的 `type`/`label`；新增 `GET /sync-status`（轻量版本号比对）、`GET /folders`（成员读 canonical 文件夹）、`POST /folders`（owner 全量替换文件夹集）。
+
+  **Desktop 主进程：**
+  - 新增 `src/main/cloud/cloudConstants.js`：抽出 `PLACEHOLDER_SUFFIX` / `DEFAULT_LARGE_FILE_THRESHOLD`，打破 syncEngine ↔ pullWorkspace 的循环依赖。
+  - 新增 `src/main/cloud/cloudBaseline.js`：`meta/cloud-baseline.json` 读写（diff 基线），`readBaseline`/`writeBaseline`/`baselineFileMap`。
+  - 新增 `src/main/cloud/syncEngine.js`：纯函数 `computeSyncPlan`（无 I/O），三方 diff，输出 `toPush`/`toPull`/`conflicts`/`ignored`/`summary`；折叠 `.ipmcloud` 占位为「未改动」；文件夹保护按角色分流。
+  - 新增 `src/main/cloud/pushSync.js`：`computeWorkspaceSyncPlan`（预览）+ `pushSync`（scan→diff→`REMOTE_AHEAD`/冲突守卫→上传新增/修改 blob→提交 merged manifest 为 sync 版本→重写 binding+baseline，owner 刷新 folders）。
+  - 修改 `src/main/cloud/pullWorkspace.js`：拉取跳过 soft_deleted；写初始 baseline；新增 `pullUpdate`（增量拉取：下载新增/修改、>50MB 占位、建新文件夹、远端软删除写入 `cloud.json.extra.remoteDeleted` 且保留本地文件、推进 baseline）。
+  - 新增 `src/main/cloud/syncStatus.js`：`checkLocalChanges`（无哈希 mtime/size 初筛）+ `checkRemoteChanges`（版本号比对）+ `getSyncSummary`。
+  - 修改 `src/main/cloud/publishWorkspace.js`：发布后写 `cloud-baseline.json` + `POST /folders` 初始化 canonical 文件夹（owner）。
+  - 修改 `src/main/ipc/cloud.js`：新增 `cloud/getSyncStatus`、`cloud/computeSyncPlan`、`cloud/pushSync`、`cloud/pullUpdate`、`cloud/cancelSync`、`cloud/createMilestone`、`cloud/listVersions` + `cloud:syncProgress` 推送；离线模式统一 `OFFLINE`。
+  - 修改 `src/preload.js`：`cloud` 命名空间新增上述 7 个方法 + `onSyncProgress`。
+
+  **Desktop UI（Linear 风格）：**
+  - 新增 `components/cloud-projects/SyncStatusBar.jsx`：绑定项目顶部条，轮询同步状态，显示「N 个本地变更待同步 / 云端有更新 / 已同步」，驱动同步、拉取更新、发布版本（owner）。
+  - 新增 `components/cloud-projects/SyncPreviewModal.jsx`：push 预览弹窗（新增/修改/标记删除/被忽略分组 + 冲突红色提示 + `REMOTE_AHEAD` 提示 + 同步说明 + 进度）。
+  - 新增 `components/cloud-projects/MilestoneModal.jsx`：owner 里程碑命名弹窗。
+  - 修改 `components/ProjectManager.jsx`：HeaderBar 下挂载 `SyncStatusBar`（绑定的标准项目）。
+  - 修改 `components/cloud-projects/CloudProjectsPage.jsx`：每个项目卡片增加「版本」按钮，展开 milestone 历史（`listVersions?type=milestone`）。
+
+  **验证：**
+  - Cloud Server `tsc --noEmit` 通过；`db:migrate` 应用 `0003_sync.sql`（migrationCount=3）；`/health` OSS+DB ok。
+  - syncEngine 纯函数单测：14 项断言（push/pull 拆分、both_modified 冲突、owner/editor 文件夹保护、远端软删除、占位等于未改动）全通过。
+  - 端到端（Node ESM，真实后端 + OSS）：A 发布 → B 拉取 → B 增/改/删 push v2 → A pullUpdate 合并 + 软删除 tag + 本地保留 → milestone 提升与列表 → `REMOTE_AHEAD` 拒绝 → 冲突检测且本地不被覆盖，共 24 项断言全通过；服务端全程 200。
+  - 渲染层 `vite build` 通过；新增/修改文件 0 lint error。
+
+- **C5 Bug 修复**（2026-06-08，用户集成测试后发现 3 个 bug，同日修复 + 10 项回归通过）：
+
+  | # | 现象 | 根因 | 修复 |
+  |---|------|------|------|
+  | B1 | Bob 拉取案件D 后，`SyncStatusBar` 立刻显示「15 个本地变更待同步」，实际未做任何改动 | `pullWorkspace` / `pullUpdate` 写 baseline 时用了**云端原始 mtime**（文件上传时刻），但本地文件的磁盘 mtime 是**下载时刻** → `syncStatus` 的 mtime/size 比对误判所有文件都"改了" | `pullWorkspace.js`：初始 pull 和增量 pullUpdate 完成后**重新扫描本地目录**，用真实磁盘 mtime/size 写 baseline（软删除条目仍从云端 manifest 取） |
+  | B2 | Bob 在已有文件夹 `/过程文档/` 下新增文件，同步预览显示「已忽略（新文件夹需管理者创建）」 | 案件D 是 C3 时期发布的旧项目，`workspace_folders` 表为空（C5 才引入此表）→ 空集被当成"所有文件夹都不合法" → 非 owner 的**所有**文件全进 `ignored.newFolderFiles` | `syncEngine.js`：新增 `skipFolderProtection` 标志——当 `cloudFolders` 为空时，**跳过全部文件夹保护检查**，所有文件夹视为合法（向后兼容 C3/C4 旧项目） |
+  | B3 | Alice 是案件D 的 owner，但推送时被视为 editor（导致不会调用 `POST /folders` 初始化文件夹表，进一步加剧 B2） | 旧 binding（`meta/cloud.json`）没有 `role` 字段（C5 才开始写入），`/versions/latest` 也不返回 `myRole`，fallback 默认 `'editor'` | 服务端 `GET /sync-status` 新增返回 `myRole`（从 `workspace_members` 查询）；`computeWorkspaceSyncPlan` 优先使用服务端返回角色；`getSyncSummary` 透传 `myRole`；IPC `cloud/getSyncStatus` 使用服务端角色 |
+
+  **修改文件：**
+  - `cloud/server/src/modules/workspaces/routes.ts` — `sync-status` 端点返回 `myRole`
+  - `desktop/src/main/cloud/pullWorkspace.js` — 初始 pull + pullUpdate 完成后重新扫描写 baseline
+  - `desktop/src/main/cloud/syncEngine.js` — 空 `cloudFolders` 跳过文件夹保护 + 跳过文件夹变更 ignored
+  - `desktop/src/main/cloud/pushSync.js` — `computeWorkspaceSyncPlan` 角色优先取 `statusRes.myRole`
+  - `desktop/src/main/cloud/syncStatus.js` — `checkRemoteChanges` / `getSyncSummary` 传递 `myRole`
+  - `desktop/src/main/ipc/cloud.js` — `cloud/getSyncStatus` 使用 `summary.myRole`
+
+- **C5 Bug 修复 #2**（2026-06-08，用户报告 Alice 创建新项目后看不到 Bob 的同步内容）：
+
+  | # | 现象 | 根因 | 修复 |
+  |---|------|------|------|
+  | B4 | Alice 创建新云端项目并发布 → Bob 加入、拉取、新增文件并 push（显示 v2）→ Alice 回到项目查看同步状态，完全看不到「云端有新更新」 | `cloud/publish` IPC handler 仍使用 C3 遗留的 `createDevCloudClient()`（硬编码 `X-Dev-User-Id: 00000000-...0001`），导致 workspace 的 owner 是 **dev user** 而非 Alice 的真实 userId → Alice 的 JWT 请求 `/sync-status` 时服务端查 `workspace_members` 找不到 Alice → 返回 403 → `getSyncSummary` 的 `.catch()` 静默吞掉错误并返回 `{ hasRemoteChanges: false }` → UI 显示「已与云端同步」 | 多层修复：**① IPC `cloud/publish`** 改用 `createAuthCloudClient()`，传入 `currentUser.orgId/userId/displayName`，确保 workspace 以真实用户身份创建 → `workspace_members` 中 owner = Alice 真实 userId **② `publishWorkspace.js`** 移除对 `CLOUD_DEV_CONFIG` 的依赖，改从调用方接收 `orgId/userId/userDisplayName` **③ 服务端 `POST /api/workspaces`** `orgId` 改为可选，优先使用 JWT 中的 `orgId`（向后兼容） **④ `getSyncSummary`** 不再静默 `.catch()` 吞掉错误，改为返回 `remoteError` 字段并 `console.error` 记录 **⑤ `SyncStatusBar`** 新增错误状态渲染（红色警告 + 重试提示），不再在 API 失败时错误显示「已同步」 **⑥ `cloudClient.js`** `_resolveAuthHeaders` 不再 try-catch 吞掉 token 解析异常 |
+
+  **修改文件：**
+  - `desktop/src/main/ipc/cloud.js` — `cloud/publish` 改用 `createAuthCloudClient` + 传入真实用户信息
+  - `desktop/src/main/cloud/publishWorkspace.js` — 移除 `CLOUD_DEV_CONFIG` import，接收 `orgId/userId/userDisplayName` 参数
+  - `cloud/server/src/modules/workspaces/routes.ts` — `createWorkspaceSchema.orgId` 改为 optional，服务端优先使用 JWT orgId
+  - `desktop/src/main/cloud/syncStatus.js` — `getSyncSummary` 不再 `.catch` 吞错，返回 `remoteError` 字段
+  - `desktop/src/main/cloud/cloudClient.js` — `_resolveAuthHeaders` 移除 token 异常静默处理
+  - `desktop/src/ui/components/cloud-projects/SyncStatusBar.jsx` — 新增 `AlertTriangle` 错误状态 UI + `remoteCheckFailed` 处理
+
+  **验证：** 回归测试 10 项全通过（baseline mtime ≈ disk mtime、空 folders 不阻塞 push、删除 binding.role 后仍检测 owner）。
 
 ---
 
 ### Phase C6 — 简化冲突与单文件恢复
 
-**Status:** `PLANNED`
+**Status:** `DONE`
 
 **目标**：实现适合 IPM 场景的简单冲突处理和基础版本回溯。
 
@@ -508,13 +696,33 @@ events
 
 **变更日志**
 
-- 待实现。
+- 2026-06-09 完成 C6 第一版：
+  - 冲突处理采用“自动保留双方版本”：`pullUpdate` 遇到同路径双方修改时，保留本地原文件，将云端版本另存为同目录冲突副本（`原文件名（云端冲突副本-v{版本号}-{时间}）.ext`），并做同名自动递增。
+  - baseline 安全策略：冲突原路径推进到云端最新 entry，冲突副本不写入 baseline，因此恢复/冲突副本会作为本地变更等待用户确认后同步。
+  - 服务端新增文件历史与恢复下载 API：`GET /api/workspaces/:id/file-history?path=...`、`POST /api/workspaces/:id/versions/:vid/file-download`；复用 `version_entries -> objects -> OSS`，无需新 migration。
+  - 服务端新增冲突审计事件：`POST /api/workspaces/:id/conflict-events` 写入 `version.conflict_auto_kept_both`。
+  - 桌面新增 `cloud/listFileHistory`、`cloud/restoreFileFromVersion` IPC；恢复单文件只写本地并备份当前文件，不自动创建云端版本。
+  - UI 新增冲突副本提示/详情弹窗；已绑定云端项目的文件右键菜单新增“查看历史/恢复文件”。
+
+  **修改文件：**
+  - `cloud/server/src/modules/versions/routes.ts` — 文件历史、指定版本单文件下载、冲突事件 API。
+  - `desktop/src/main/cloud/pullWorkspace.js` — C6 冲突副本命名/下载/占位、baseline 策略、冲突事件上报。
+  - `desktop/src/main/cloud/fileRestore.js` — 单文件恢复到本地、恢复前备份、大文件占位。
+  - `desktop/src/main/ipc/cloud.js` / `desktop/src/preload.js` — C6 IPC 暴露。
+  - `desktop/src/ui/components/cloud-projects/ConflictCopiesModal.jsx` — 冲突副本说明弹窗。
+  - `desktop/src/ui/components/cloud-projects/FileHistoryRestoreModal.jsx` — 历史版本恢复弹窗。
+  - `desktop/src/ui/components/cloud-projects/SyncStatusBar.jsx` — 拉取后展示“已保留冲突副本”。
+  - `desktop/src/ui/components/project-manager/hooks/useContextMenu.js` / `desktop/src/ui/components/ProjectManager.jsx` — 文件右键恢复入口。
+
+  **验证：**
+  - `cloud/server npm run typecheck` 通过。
+  - `desktop npm run lint` 通过（当前脚本为占位）。
 
 ---
 
 ### Phase C7 — Skill Registry 与官方市场
 
-**Status:** `PLANNED`
+**Status:** `DONE`（2026-06-10，组织内 Skill Registry + 市场发布/安装/更新闭环）
 
 **目标**：建设 IPM 自身 Agent 生态的云端基础，让 Skill 从本地导入升级为可发现、可安装、可更新的市场能力。
 
@@ -549,9 +757,9 @@ README.md
 
 **验证方法**
 
-1. 官方 Skill 可上传到 registry。
-2. Desktop 可从市场安装 Skill。
-3. 新会话可加载安装后的 Skill。
+1. 组织成员可上传 Skill 到 registry。✅
+2. Desktop 可从组织市场安装 / 更新 Skill。✅
+3. 新会话可加载安装后的 Skill。✅（安装后触发 reload，并提示下次新对话生效）
 
 **不做**
 
@@ -561,74 +769,137 @@ README.md
 
 **变更日志**
 
-- 待实现。
+- **2026-06-10 完成 C7 第一版**：
+  - 新增 `cloud/server/src/infra/db/migrations/0004_skills.sql`：建立 `skills`、`skill_versions`、`skill_installs` 三张表；同组织 `slug` 唯一，同 Skill 版本号唯一，删除态预留 `status='archived'`。
+  - 新增 `cloud/server/src/modules/skills/routes.ts` 并在 `app.ts` 注册：提供组织内 Skill 列表、详情、上传签名 URL、发布新 Skill、发布新版本、下载签名 URL、记录安装、查询已安装 Skill。
+  - 新增 `desktop/src/main/cloud/skillPackage.js`：以 `SKILL.md` 为核心，将 Skill 目录打包为 `.ipmskill` JSON 包，计算 sha256，下载安装时校验 hash，并安全解包到当前用户 Skill 目录。
+  - 扩展 `desktop/src/main/ipc/skills.js` 与 `desktop/src/preload.js`：新增 `registryList`、`registryGet`、`registryPublish`、`registryPublishVersion`、`registryInstall` 通道。
+  - 扩展 `useKnowClawPersist.jsx`：封装发布 / 安装动作，安装成功后调用现有 `reloadSkills` 并刷新本地 Skill 列表，保持“下次新对话生效”的语义。
+  - 新增 `SkillMarketplacePanel.jsx`：在技能管理侧栏展示组织市场 Skill，显示发布者、版本、安装状态、可更新状态，支持安装 / 更新。
+  - 新增 `PublishSkillModal.jsx`：从用户 / 导入 / 工作空间 Skill 中选择一个发布到组织市场，可填写版本号和描述；内置 Skill 不允许直接发布。
+  - 修改 `SkillManagerPanel.jsx`：增加“本地 / 组织市场”Tab；本地能力保持原有导入、启用/禁用、删除。
+  - 同名安装复用现有冲突策略：默认不覆盖，返回冲突；UI 提供“覆盖安装”与“改名安装”两种处理。
+  - 验证：`cloud/server npm run typecheck` 与 `npm run build` 通过；`desktop npm run lint` 为占位脚本（输出 `No linting configured`）；`desktop npm run package` 已通过 Vite main/preload/renderer 构建阶段，最终 packaging 因访问 `20.205.243.166:443` 超时失败；IDE lints 对本次新增/修改文件未报错。
+
+- **C7-B1 Skill 包上传 SignatureDoesNotMatch 修复**（2026-06-10）：
+  - 问题：发布 Skill 时 OSS 返回 `SignatureDoesNotMatch`。根因是服务端 `getSignedPutUrl()` 签入的 `Content-Type` 为 `application/octet-stream`，但桌面端 Skill 包上传实际发送 `application/json`；阿里云 OSS 会把 `Content-Type` 纳入 PUT URL 签名计算。
+  - 修复：`desktop/src/main/cloud/skillPackage.js` 的 `putBufferToSignedUrl()` 改为发送 `Content-Type: application/octet-stream`，与服务端签名保持一致。
 
 ---
 
-### Phase C8 — 企业 Skill 分发
+### Phase C8 — Skill 审核与访问控制
 
-**Status:** `PLANNED`
+**Status:** `DONE`（2026-06-10，提交待审 + owner/admin 审核 + 全组织/指定用户可见）
 
-**目标**：支持企业将指定 Skill 分发给成员或项目，形成类 Workbuddy 企业版的能力下发机制。
+**目标**：把 C7 的“组织成员发布后立即可见”升级为企业治理流程：普通成员提交 Skill 后进入待审核，`owner/admin` 审核通过并设置可见范围后，目标成员才能在市场看到、下载和安装。
 
 **工作清单**
 
 写/改：
-1. 企业私有 Skill。
-2. 默认安装 Skill。
-3. 禁用未审核 Skill。
-4. 版本锁定。
-5. 项目级 Skill 配置。
-6. Desktop 显示“由企业管理”的 Skill 状态。
+1. Skill 提交后进入 `pending_review`。
+2. `owner/admin` 可查看审核队列。
+3. `owner/admin` 可审核通过 / 拒绝。
+4. 审核通过后设置可见范围：全组织 / 指定用户。
+5. 普通市场只展示 `approved` 且当前用户有访问授权的 Skill。
+6. 下载 / 安装 API 后端强校验访问授权，不能通过已知 ID 绕过市场。
 
 **验证方法**
 
-1. 管理员给组织下发一个 Skill。
-2. 成员 Desktop 登录后可见并自动安装。
-3. 被锁定版本不会自动升级。
+1. Bob 作为 member 提交 Skill 后，普通组织市场不可见。✅
+2. Alice 作为 owner/admin 能在“审核管理”看到待审核 Skill。✅
+3. Alice 拒绝后，普通市场仍不可见。✅
+4. Alice 通过并设置“全组织可见”后，组织成员能看到并安装。✅
+5. Alice 通过并设置“指定用户可见”后，仅目标用户可见。✅
+6. 未授权用户即使知道 Skill ID，也无法下载包或记录安装。✅
 
 **不做**
 
+- 不做默认安装 / 强制安装。
+- 不做版本锁定。
+- 不做项目级 / 部门级分发。
 - 不做复杂审批流。
 - 不做脚本沙盒增强。
 
 **变更日志**
 
-- 待实现。
+- **2026-06-10 完成 C8 第一版**：
+  - 新增 `cloud/server/src/infra/db/migrations/0005_skill_review.sql`：扩展 `skills.status` 为 `pending_review / approved / rejected / archived`，新增 `reviewed_by`、`reviewed_at`、`review_note`，新增 `skill_access_grants` 授权表；兼容迁移 C7 的 `active` 为 `approved`，并为既有 Skill 写入全组织可见授权。
+  - 修改 `cloud/server/src/modules/auth/routes.ts`：登录、注册、刷新、`/api/auth/me` 返回 `orgRole`。
+  - 修改 `desktop/src/main/cloud/userScope.js`、`desktop/src/main/ipc/auth.js`：本地当前用户保存并暴露 `orgRole`，已有登录用户启动时会 best-effort 调用 `/api/auth/me` 刷新角色。
+  - 修改 `cloud/server/src/modules/skills/routes.ts`：`POST /api/skills` 和新版本提交改为 `pending_review`；普通市场 `GET /api/skills` 只返回已审核且当前用户有授权的 Skill；详情、下载、安装增加访问控制。
+  - 新增管理员 API：`GET /api/skills/admin/review-queue`、`GET /api/skills/admin/org-users`、`POST /api/skills/:id/review`、`GET/POST /api/skills/:id/access`；后端用 `org_members.role IN ('owner','admin')` 强校验。
+  - 扩展 `desktop/src/main/ipc/skills.js` 与 `desktop/src/preload.js`：接入审核队列、组织成员、审核通过/拒绝、访问范围读取与设置。
+  - 修改 `desktop/src/ui/hooks/useKnowClawPersist.jsx`：封装 C8 审核管理动作，并将发布成功文案改为“已提交审核”。
+  - 修改 `SkillManagerPanel.jsx`：owner/admin 显示第三个 Tab“审核管理”；普通成员仍只看到“本地 / 组织市场”。
+  - 修改 `PublishSkillModal.jsx`、`SkillMarketplacePanel.jsx`：发布改为提交审核文案；市场空态改为“暂无已审核且对你可见的 Skill”。
+  - 新增 `SkillReviewAdminPanel.jsx` 与 `SkillAccessModal.jsx`：支持审核队列、通过并授权、拒绝、调整已通过 Skill 的可见范围。
+  - 验证：`cloud/server npm run typecheck` 通过；`cloud/server npm run build` 通过；`cloud/server npm run db:migrate` 成功应用 `0005_skill_review.sql`；`desktop npm run lint` 为占位脚本；`desktop npm run package` 完整通过。
 
 ---
 
-### Phase C9 — 企业权限、配额与保留策略
+### Phase C9 — 企业 AI 配置模板分发
 
-**Status:** `PLANNED`
+**Status:** `DONE`
 
-**目标**：补齐企业版基础管理能力，让云端协作具备可控的权限、存储和审计边界。
+**目标**：让组织 `owner/admin` 可以把当前 Desktop 中已调好的 AI 相关配置保存为企业配置模板，生成仅同组织可用的配置码；普通成员输入配置码后预览并覆盖本机 AI 设置，快速获得统一的企业 AI 使用环境。
+
+**产品边界**
+
+- C9 管理的是“AI 配置分发”，不是 workspace 成员与权限治理。
+- 配置模板直接保存到 PostgreSQL，不走 OSS。
+- 配置内容包含敏感凭证（如 API Key），导入后会保存到成员本机 Desktop。
+- 成员导入时采用覆盖策略，不做复杂合并。
+- 配置码仅同组织账号可使用，外部组织或未登录用户不可导入。
 
 **工作清单**
 
 写/改：
-1. workspace role：owner / editor / viewer。
-2. 项目成员管理。
-3. 存储配额。
-4. 大文件版本保留策略。
-5. 回收站保留策略。
-6. 基础审计日志。
-7. Desktop 设置页展示企业策略。
+1. 新增 `org_config_templates` 表：保存企业配置模板，字段包括 `org_id`、`template_type='ai_settings'`、`name`、`description`、`config_json`、`code`、`status`、`max_uses`、`used_count`、`expires_at`、`created_by`、`created_at`、`updated_at`、`rotated_at`。
+2. 新增 `org_config_template_uses` 表：记录谁在什么时候导入过配置，用于管理员查看使用记录。
+3. 后端新增企业配置模板 API：
+   - owner/admin 创建模板：从 Desktop 当前设置提交 `prefs.ai`、`prefs.searchApi`。
+   - owner/admin 列出模板、停用模板、刷新配置码、查看使用记录。
+   - 普通成员通过配置码预览模板。
+   - 普通成员确认导入配置码，服务端校验组织、状态、过期时间、使用次数后返回配置 JSON 并记录使用。
+4. Desktop 主进程扩展 `prefs` IPC：
+   - 读取当前 AI 设置并保存为企业模板。
+   - 输入配置码预览企业配置。
+   - 确认后覆盖本地 `prefs.ai` 与 `prefs.searchApi`。
+5. `SettingsPage` 新增“企业 AI 配置”区域：
+   - owner/admin 可保存当前 AI 配置为企业模板。
+   - owner/admin 可查看模板列表、复制配置码、刷新配置码、停用模板、查看使用次数和使用记录。
+   - 所有登录成员可输入配置码、预览配置内容、确认覆盖导入。
+6. UI 明确提示：模板包含 API Key 等敏感凭证，导入后会保存在本机配置中。
 
 **验证方法**
 
-1. viewer 无法提交变更。
-2. 超出配额时阻止上传并提示。
-3. 管理员可设置历史版本保留数量。
+1. 管理员保存当前 AI 配置为企业模板后，生成配置码。
+2. 管理员可刷新配置码，旧配置码失效，新配置码可用。
+3. 管理员可设置最大使用次数；超过次数后成员无法继续导入。
+4. 管理员可停用模板；停用后配置码不可预览或导入。
+5. 同组织 member 输入配置码后可预览配置，并确认覆盖本地 `prefs.ai` / `prefs.searchApi`。
+6. 非同组织用户、未登录用户、过期配置码、停用配置码都无法导入。
+7. 管理员可看到模板使用次数与导入记录。
 
 **不做**
 
 - 不做完整 Admin Web Console。
-- 不做精细到字段级的权限。
+- 不做 workspace 成员管理、workspace owner 转移、项目权限治理。
+- 不做存储配额、大文件版本保留、回收站策略。
+- 不做模板合并策略；导入即覆盖本地 AI 配置。
+- 不做云端代理调用；API Key 仍会随模板导入保存到成员本机。
+- 不做 Skill 组合包、分类偏好、MCP 配置分发；`template_type` 只为后续扩展预留。
 
 **变更日志**
 
-- 待实现。
+- 2026-06-12：完成 C9 企业 AI 配置模板分发。
+  - 数据库：新增 `0006_org_config_templates.sql`，创建 `org_config_templates` 与 `org_config_template_uses`，支持配置码、状态、最大使用次数、过期时间、刷新时间与导入记录。
+  - 后端：新增 `cloud/server/src/modules/org-configs/routes.ts` 并注册到 `app.ts`；owner/admin 可创建、列出、刷新配置码、停用模板、查看使用记录；同组织成员可预览和导入配置码。
+  - 安全与规则：配置码只在同组织内可用；停用、过期、超出最大使用次数会返回明确错误；导入时用事务更新 `used_count` 并写入使用记录。
+  - Desktop：扩展 `prefs` IPC 与 `preload`，支持创建模板、模板管理、配置码预览和导入；导入后只覆盖本地 `prefs.ai` 与 `prefs.searchApi`。
+  - UI：`SettingsPage` 新增“企业 AI 配置”卡片；普通成员可输入配置码、预览配置摘要并确认覆盖导入；owner/admin 可保存当前 AI 设置为模板、复制/刷新配置码、停用模板、查看使用记录。
+  - 提示：UI 明确标注模板可能包含 API Key，导入后会保存到成员本机。
+  - 验证：`cloud/server npm run typecheck` 通过；`cloud/server npm run build` 通过；`cloud/server npm run db:migrate` 成功应用 `0006_org_config_templates.sql`；`desktop npm run lint` 为占位脚本；`desktop npx vite build --config vite.renderer.config.mjs` 通过；`desktop npm run package` 的 Vite main/preload/renderer 构建阶段通过，最终 Electron Forge packaging 因外部网络 `connect ETIMEDOUT 20.205.243.166:443` 失败。
 
 ---
 
@@ -789,6 +1060,7 @@ v2.1 第一阶段最小可验收闭环：
 - C1
 - C2
 - C3
+- C3.5
 - C4
 - C5
 - C6
@@ -838,13 +1110,14 @@ v2.1 第一阶段最小可验收闭环：
 | C0 后端骨架与云端基础设施 | `DONE` | Cursor | 2026-06-03 | Fastify + PostgreSQL + OSS client 占位 + Docker Compose 验证完成 |
 | C1 数据模型 | `DONE` | Cursor | 2026-06-04 | Migration + runner + self-check 全部验证通过 |
 | C2 Desktop Cloud Binding | `DONE` | Cursor | 2026-06-05 | cloud 模块 + IPC + 离线扫描/绑定验证通过 |
-| C3 发布本地项目 | `DONE` | 本次 | 见 Phase C3 变更日志 | 全链路打通；修复 OSS 签名 Bug |
-| C4 成员加入与拉取 | `PLANNED` | TBD | — | 验证多人协作 |
-| C5 显式提交/拉取 | `PLANNED` | TBD | — | 核心协作闭环 |
-| C6 冲突与恢复 | `PLANNED` | TBD | — | 安全感闭环 |
-| C7 Skill Registry | `PLANNED` | TBD | — | 先做自身生态 |
-| C8 企业 Skill 分发 | `PLANNED` | TBD | — | 类 Workbuddy 能力 |
-| C9 企业权限与配额 | `PLANNED` | TBD | — | 企业版基础 |
+| C3 发布本地项目 | `DONE` | Cursor | 2026-06-05 | 全链路打通；修复 OSS 签名 Bug |
+| C3.5 真实鉴权（Auth） | `DONE` | Cursor | 2026-06-07 | JWT + 邀请码 + Per-User 数据隔离 + 登录 UI |
+| C4 成员加入与拉取 | `DONE` | Cursor | 2026-06-07 | workspace 浏览/加入/拉取 + 50MB 阈值占位 + CloudProjectsPage |
+| C5 显式同步与里程碑版本 | `DONE` | Cursor | 2026-06-08 | 三方 diff + 增量 push/pull + 软删除 + 文件夹保护 + Milestone + 同步 UI；24 项 e2e 通过 |
+| C6 冲突与恢复 | `DONE` | Cursor | 2026-06-09 | 自动保留冲突副本 + 单文件历史恢复到本地 |
+| C7 Skill Registry | `DONE` | Cursor | 2026-06-10 | 组织内市场发布 / 安装 / 更新闭环 |
+| C8 Skill 审核与访问控制 | `DONE` | Cursor | 2026-06-10 | 提交待审 + owner/admin 审核 + 可见范围授权 |
+| C9 企业 AI 配置模板分发 | `DONE` | Cursor | 2026-06-12 | 管理员保存 AI 配置模板，成员通过配置码预览并覆盖导入 |
 | C10 NAS / 本地共享盘 | `PLANNED` | TBD | — | 外部资料源第一站 |
 | C11 飞书连接器 | `PLANNED` | TBD | — | 飞书 OpenAPI |
 | C12 微盘连接器 | `PLANNED` | TBD | — | 企业授权更重 |

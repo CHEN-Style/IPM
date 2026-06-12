@@ -39,6 +39,21 @@ contextBridge.exposeInMainWorld('ipm', {
       return () => ipcRenderer.removeListener('prefs:updated', handler);
     },
     testSearchApi: (config) => ipcRenderer.invoke('prefs/testSearchApi', config),
+    orgConfig: {
+      createTemplate: (payload) =>
+        ipcRenderer.invoke('prefs/orgConfig/createTemplate', {
+          name: typeof payload?.name === 'string' ? payload.name : undefined,
+          description: typeof payload?.description === 'string' ? payload.description : undefined,
+          maxUses: Number.isInteger(payload?.maxUses) ? payload.maxUses : null,
+          expiresAt: typeof payload?.expiresAt === 'string' ? payload.expiresAt : null,
+        }),
+      listTemplates: () => ipcRenderer.invoke('prefs/orgConfig/listTemplates'),
+      rotateCode: (id) => ipcRenderer.invoke('prefs/orgConfig/rotateCode', { id }),
+      disableTemplate: (id) => ipcRenderer.invoke('prefs/orgConfig/disableTemplate', { id }),
+      listUses: (id) => ipcRenderer.invoke('prefs/orgConfig/listUses', { id }),
+      previewCode: (code) => ipcRenderer.invoke('prefs/orgConfig/previewCode', { code }),
+      importCode: (code) => ipcRenderer.invoke('prefs/orgConfig/importCode', { code }),
+    },
     getDataDir: () => ipcRenderer.invoke('prefs/getDataDir'),
     chooseDataDir: () => ipcRenderer.invoke('prefs/chooseDataDir'),
     setDataDir: (newPath) => ipcRenderer.invoke('prefs/setDataDir', { newPath }),
@@ -630,6 +645,53 @@ contextBridge.exposeInMainWorld('ipm', {
     // { ok: false, canceled: true } when the user dismisses the dialog.
     chooseDir: () =>
       ipcRenderer.invoke('knowclaw:chooseSkillDir'),
+    registryList: (opts) =>
+      ipcRenderer.invoke('knowclaw:registryListSkills', {
+        q: typeof opts?.q === 'string' ? opts.q : undefined,
+      }),
+    registryGet: (id) =>
+      ipcRenderer.invoke('knowclaw:registryGetSkill', { id }),
+    registryPublish: (payload) =>
+      ipcRenderer.invoke('knowclaw:registryPublishSkill', {
+        skillDir: typeof payload?.skillDir === 'string' ? payload.skillDir : undefined,
+        version: typeof payload?.version === 'string' ? payload.version : undefined,
+        description: typeof payload?.description === 'string' ? payload.description : undefined,
+        cwd: typeof payload?.cwd === 'string' ? payload.cwd : undefined,
+      }),
+    registryPublishVersion: (payload) =>
+      ipcRenderer.invoke('knowclaw:registryPublishVersion', {
+        id: typeof payload?.id === 'string' ? payload.id : undefined,
+        skillDir: typeof payload?.skillDir === 'string' ? payload.skillDir : undefined,
+        version: typeof payload?.version === 'string' ? payload.version : undefined,
+        cwd: typeof payload?.cwd === 'string' ? payload.cwd : undefined,
+      }),
+    registryInstall: (payload) =>
+      ipcRenderer.invoke('knowclaw:registryInstallSkill', {
+        id: typeof payload?.id === 'string' ? payload.id : undefined,
+        versionId: typeof payload?.versionId === 'string' ? payload.versionId : undefined,
+        overwrite: Boolean(payload?.overwrite),
+        newName: typeof payload?.newName === 'string' ? payload.newName : undefined,
+      }),
+    registryAdminListReviewQueue: (opts) =>
+      ipcRenderer.invoke('knowclaw:registryAdminListReviewQueue', {
+        status: typeof opts?.status === 'string' ? opts.status : undefined,
+      }),
+    registryAdminListOrgUsers: () =>
+      ipcRenderer.invoke('knowclaw:registryAdminListOrgUsers'),
+    registryAdminReview: (payload) =>
+      ipcRenderer.invoke('knowclaw:registryAdminReviewSkill', {
+        id: typeof payload?.id === 'string' ? payload.id : undefined,
+        decision: typeof payload?.decision === 'string' ? payload.decision : undefined,
+        note: typeof payload?.note === 'string' ? payload.note : undefined,
+        grants: Array.isArray(payload?.grants) ? payload.grants : undefined,
+      }),
+    registryAdminGetAccess: (id) =>
+      ipcRenderer.invoke('knowclaw:registryAdminGetAccess', { id }),
+    registryAdminSetAccess: (payload) =>
+      ipcRenderer.invoke('knowclaw:registryAdminSetAccess', {
+        id: typeof payload?.id === 'string' ? payload.id : undefined,
+        grants: Array.isArray(payload?.grants) ? payload.grants : [],
+      }),
   },
 
   // ── C2: Cloud binding + local workspace scan ───────────────────
@@ -658,5 +720,44 @@ contextBridge.exposeInMainWorld('ipm', {
       ipcRenderer.on('cloud:publishProgress', handler);
       return () => ipcRenderer.removeListener('cloud:publishProgress', handler);
     },
+    // C4: member join + pull copy
+    listWorkspaces: () => ipcRenderer.invoke('cloud/listWorkspaces'),
+    joinWorkspace: (params) => ipcRenderer.invoke('cloud/joinWorkspace', params || {}),
+    pull: (params) => ipcRenderer.invoke('cloud/pull', params || {}),
+    cancelPull: (params) => ipcRenderer.invoke('cloud/cancelPull', params || {}),
+    downloadFile: (params) => ipcRenderer.invoke('cloud/downloadFile', params || {}),
+    onPullProgress: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const handler = (_evt, data) => callback(data);
+      ipcRenderer.on('cloud:pullProgress', handler);
+      return () => ipcRenderer.removeListener('cloud:pullProgress', handler);
+    },
+    // C5: explicit push/pull sync + milestone versions
+    getSyncStatus: (params) => ipcRenderer.invoke('cloud/getSyncStatus', params || {}),
+    computeSyncPlan: (params) => ipcRenderer.invoke('cloud/computeSyncPlan', params || {}),
+    pushSync: (params) => ipcRenderer.invoke('cloud/pushSync', params || {}),
+    pullUpdate: (params) => ipcRenderer.invoke('cloud/pullUpdate', params || {}),
+    cancelSync: (params) => ipcRenderer.invoke('cloud/cancelSync', params || {}),
+    createMilestone: (params) => ipcRenderer.invoke('cloud/createMilestone', params || {}),
+    listVersions: (params) => ipcRenderer.invoke('cloud/listVersions', params || {}),
+    // C6: conflict recovery + single-file restore
+    listFileHistory: (params) => ipcRenderer.invoke('cloud/listFileHistory', params || {}),
+    restoreFileFromVersion: (params) => ipcRenderer.invoke('cloud/restoreFileFromVersion', params || {}),
+    onSyncProgress: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const handler = (_evt, data) => callback(data);
+      ipcRenderer.on('cloud:syncProgress', handler);
+      return () => ipcRenderer.removeListener('cloud:syncProgress', handler);
+    },
+  },
+
+  // ── C3.5: Authentication ───────────────────────────────────────
+  auth: {
+    getStatus: () => ipcRenderer.invoke('auth/getStatus'),
+    register: (params) => ipcRenderer.invoke('auth/register', params || {}),
+    login: (params) => ipcRenderer.invoke('auth/login', params || {}),
+    logout: () => ipcRenderer.invoke('auth/logout'),
+    useOffline: () => ipcRenderer.invoke('auth/useOffline'),
+    switchUser: () => ipcRenderer.invoke('auth/switchUser'),
   },
 });

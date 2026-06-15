@@ -17,9 +17,11 @@ import {
   FolderKanban,
   X,
   CornerDownLeft,
+  Building2,
 } from 'lucide-react';
 import appIconUrl from '../../../assets/icon.png';
 import CloudActivityPanel from './CloudActivityPanel.jsx';
+import { useAuth } from '../contexts/AuthContext.jsx';
 
 /**
  * KnowClaw brand mark, inline SVG version used by the sidebar nav row.
@@ -93,6 +95,8 @@ const Sidebar = ({
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [userName, setUserName] = useState('');
   const [authInfo, setAuthInfo] = useState(null); // { loggedIn, offline, user }
+  // H2 (U3): single auth source from App-level context (drives org-role gated nav).
+  const auth = useAuth();
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const menuAnchorRef = useRef(null);
   const accountAnchorRef = useRef(null);
@@ -515,6 +519,18 @@ const Sidebar = ({
               navDirectWhenCollapsed
               onClick={() => navSelectDirect('cloud-projects')}
               dataTrack="nav-cloud-projects"
+            />
+          )}
+          {/* H2: enterprise console. Owner/admin only (orgRole via AuthContext). */}
+          {auth.loggedIn && (auth.orgRole === 'owner' || auth.orgRole === 'admin') && (
+            <NavItem
+              icon={<Building2 size={17} />}
+              label="企业管理"
+              active={activeNav === 'enterprise-console'}
+              collapsed={isCollapsed}
+              navDirectWhenCollapsed
+              onClick={() => navSelectDirect('enterprise-console')}
+              dataTrack="nav-enterprise-console"
             />
           )}
         </nav>

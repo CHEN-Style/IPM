@@ -13,11 +13,15 @@
     "db:migrate:prod": "node dist/infra/db/migrate-cli.js",
     "db:check": "tsx src/infra/db/self-check-cli.ts",
     "db:seed": "tsx src/infra/db/seed-cli.ts",
-    "invite:create": "tsx src/modules/auth/invite-cli.ts"
+    "invite:create": "tsx src/modules/auth/invite-cli.ts",
+    "platform": "tsx src/modules/platform/platform-cli.ts",
+    "h8:gate": "node scripts/h8-release-gate.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
     "@fastify/helmet": "^13.0.2",
+    "@fastify/rate-limit": "^11.0.0",
+    "@fastify/static": "^8.3.0",
     "ali-oss": "^6.23.0",
     "bcryptjs": "^3.0.2",
     "dotenv": "^17.4.2",

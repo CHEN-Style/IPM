@@ -23,7 +23,8 @@ import useClassifyPipeline from './project-manager/hooks/useClassifyPipeline.js'
 import ClassifyTraceView from './project-manager/ClassifyTraceView.jsx';
 import PreferencesPage from './project-manager/PreferencesPage.jsx';
 import CreateKnowledgeModal from './project-manager/CreateKnowledgeModal.jsx';
-import SyncStatusBar from './cloud-projects/SyncStatusBar.jsx';
+import SyncDrawer from './cloud-projects/SyncDrawer.jsx';
+import useSyncStatus, { deriveCloudChip } from './cloud-projects/useSyncStatus.js';
 import FileHistoryRestoreModal from './cloud-projects/FileHistoryRestoreModal.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { useCloudPublish } from '../hooks/useCloudPublish.jsx';
@@ -452,6 +453,59 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
   const isAttachedCwd = Boolean(currentProjectMeta?.attached);
   const isAttachedBroken = Boolean(currentProjectMeta?.broken);
 
+  // ── H4.5: unified cloud sync state (chip + drawer + inline badges) ──
+  // The old full-width SyncStatusBar banner is gone; its data now feeds the
+  // header chip, the right-hand sync drawer and the per-file badges.
+  const cloudEligible = cwd.type === 'project' && !isStudy && !isAttachedCwd;
+  const currentBound = cloudEligible ? Boolean(cloudBindings[cwd.name]?.bound) : false;
+  const currentPublishing = cloudEligible ? cloudLockedNames.has(cwd.name) : false;
+  const [syncDrawerOpen, setSyncDrawerOpen] = useState(false);
+  const {
+    status: syncStatus,
+    loading: syncStatusLoading,
+    plan: syncPlan,
+    refresh: refreshSyncStatus,
+    planLoading: syncPlanLoading,
+  } = useSyncStatus({
+    projectName: cloudEligible ? cwd.name : '',
+    domain: normalizedDomain,
+    enabled: cloudEligible && currentBound,
+  });
+  // Close the drawer when leaving the project (or the binding goes away).
+  useEffect(() => {
+    if (!cloudEligible || !currentBound) setSyncDrawerOpen(false);
+  }, [cloudEligible, currentBound, cwd.name]);
+
+  const cloudChip = useMemo(() => {
+    if (!cloudEligible) return null;
+    return deriveCloudChip({
+      bound: currentBound,
+      publishing: currentPublishing,
+      status: syncStatus,
+      plan: syncPlan,
+    });
+  }, [cloudEligible, currentBound, currentPublishing, syncStatus, syncPlan]);
+
+  const handleCloudChipClick = useCallback(() => {
+    if (!cloudEligible || !cwd.name) return;
+    if (currentPublishing) { cloud.reopenModal?.(`${normalizedDomain}:${cwd.name}`); return; }
+    if (!currentBound) { handlePublishProject(cwd.name); return; }
+    setSyncDrawerOpen((v) => !v);
+  }, [cloudEligible, currentBound, currentPublishing, cwd.name, normalizedDomain, cloud, handlePublishProject]);
+
+  // Per-file inline sync badges, keyed by project-root-relative posix path
+  // (leading slash, matching the sync plan's manifest paths).
+  const syncBadges = useMemo(() => {
+    if (!cloudEligible || !currentBound) return null;
+    const map = {};
+    if (syncPlan) {
+      for (const f of syncPlan.toPush?.newFiles || []) map[f.path] = 'new';
+      for (const f of syncPlan.toPush?.updatedFiles || []) map[f.path] = 'mod';
+      for (const c of syncPlan.conflicts || []) map[c.path] = 'conflict';
+    }
+    return map;
+  }, [cloudEligible, currentBound, syncPlan]);
+
   const handleRefreshAttached = useCallback(async () => {
     if (!currentProjectMeta || !currentProjectMeta.attached) return;
     const api = isCases ? window.ipm?.cases?.refreshAttached : window.ipm?.projects?.refreshAttached;
@@ -827,21 +881,11 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
         isAttachedBroken={isAttachedBroken}
         onRefreshAttached={handleRefreshAttached}
         onRelocateAttached={handleRelocateAttached}
-        showCloudPublish={cwd.type === 'project' && !cwd.relPath && !isStudy && !isAttachedCwd}
-        cloudPublishing={cwd.type === 'project' ? cloudLockedNames.has(cwd.name) : false}
-        cloudBound={cwd.type === 'project' ? Boolean(cloudBindings[cwd.name]?.bound) : false}
-        cloudVersionNumber={cwd.type === 'project' ? (cloudBindings[cwd.name]?.versionNumber ?? null) : null}
-        onPublishCurrent={() => { if (cwd.type === 'project' && cwd.name) handlePublishProject(cwd.name); }}
+        showCloudPublish={cloudEligible && (currentBound || currentPublishing || !cwd.relPath)}
+        cloudChip={cloudChip}
+        cloudPanelOpen={syncDrawerOpen}
+        onCloudChipClick={handleCloudChipClick}
       />
-
-      {/* C5: sync banner for a bound project (push/pull/milestone) */}
-      {cwd.type === 'project' && !isStudy && !isAttachedCwd && cloudBindings[cwd.name]?.bound && (
-        <SyncStatusBar
-          projectName={cwd.name}
-          domain={normalizedDomain}
-          onAfterSync={() => { void fetchBinding(cwd.name); void refreshEntries?.(); }}
-        />
-      )}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto" onContextMenu={handleBlankContextMenu}>
@@ -928,6 +972,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
             tree={tree}
             onToggleTree={toggleTreeDir}
             onLoadTree={ensureTreeNode}
+            syncBadges={syncBadges}
           />
         )}
       </div>
@@ -1262,6 +1307,24 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
       />
 
     </div>
+
+    {/* H4.5: cloud sync drawer (status / versions), opened from the header
+        chip. Mounted whenever the project is bound so the squeeze layout can
+        animate its width open/closed. */}
+    {cloudEligible && currentBound && (
+      <SyncDrawer
+        open={syncDrawerOpen}
+        projectName={cwd.name}
+        domain={normalizedDomain}
+        status={syncStatus}
+        statusLoading={syncStatusLoading}
+        plan={syncPlan}
+        planLoading={syncPlanLoading}
+        onRefresh={refreshSyncStatus}
+        onAfterSync={() => { void fetchBinding(cwd.name); void refreshEntries?.(); }}
+        onClose={() => setSyncDrawerOpen(false)}
+      />
+    )}
 
     {createKnowledgeTarget && (
       <CreateKnowledgeModal

@@ -50,6 +50,15 @@ contextBridge.exposeInMainWorld('ipm', {
       listTemplates: () => ipcRenderer.invoke('prefs/orgConfig/listTemplates'),
       rotateCode: (id) => ipcRenderer.invoke('prefs/orgConfig/rotateCode', { id }),
       disableTemplate: (id) => ipcRenderer.invoke('prefs/orgConfig/disableTemplate', { id }),
+      enableTemplate: (id) => ipcRenderer.invoke('prefs/orgConfig/enableTemplate', { id }),
+      updateTemplate: (id, patch) =>
+        ipcRenderer.invoke('prefs/orgConfig/updateTemplate', {
+          id,
+          name: typeof patch?.name === 'string' ? patch.name : undefined,
+          description: typeof patch?.description === 'string' ? patch.description : undefined,
+          maxUses: patch?.maxUses === null || Number.isInteger(patch?.maxUses) ? patch.maxUses : undefined,
+          expiresAt: patch?.expiresAt === null || typeof patch?.expiresAt === 'string' ? patch.expiresAt : undefined,
+        }),
       listUses: (id) => ipcRenderer.invoke('prefs/orgConfig/listUses', { id }),
       previewCode: (code) => ipcRenderer.invoke('prefs/orgConfig/previewCode', { code }),
       importCode: (code) => ipcRenderer.invoke('prefs/orgConfig/importCode', { code }),
@@ -692,6 +701,22 @@ contextBridge.exposeInMainWorld('ipm', {
         id: typeof payload?.id === 'string' ? payload.id : undefined,
         grants: Array.isArray(payload?.grants) ? payload.grants : [],
       }),
+    // H5: skill governance additions.
+    registryListMine: () =>
+      ipcRenderer.invoke('knowclaw:registryListMine'),
+    registryAdminOverview: () =>
+      ipcRenderer.invoke('knowclaw:registryAdminOverview'),
+    registryListInstallers: (id) =>
+      ipcRenderer.invoke('knowclaw:registryListInstallers', { id }),
+    registryPreview: (payload) =>
+      ipcRenderer.invoke('knowclaw:registryPreviewSkill', {
+        id: typeof payload?.id === 'string' ? payload.id : undefined,
+        versionId: typeof payload?.versionId === 'string' ? payload.versionId : undefined,
+      }),
+    registryArchive: (id) =>
+      ipcRenderer.invoke('knowclaw:registryArchiveSkill', { id }),
+    registryUnarchive: (id) =>
+      ipcRenderer.invoke('knowclaw:registryUnarchiveSkill', { id }),
   },
 
   // ── C2: Cloud binding + local workspace scan ───────────────────
@@ -749,6 +774,18 @@ contextBridge.exposeInMainWorld('ipm', {
       ipcRenderer.on('cloud:syncProgress', handler);
       return () => ipcRenderer.removeListener('cloud:syncProgress', handler);
     },
+    // H4: cloud project management hub (visibility / invites / members)
+    listPublicWorkspaces: () => ipcRenderer.invoke('cloud/listPublicWorkspaces'),
+    joinByCode: (params) => ipcRenderer.invoke('cloud/joinByCode', params || {}),
+    getWorkspaceOverview: (params) => ipcRenderer.invoke('cloud/getWorkspaceOverview', params || {}),
+    listWorkspaceMembers: (params) => ipcRenderer.invoke('cloud/listWorkspaceMembers', params || {}),
+    setMemberRole: (params) => ipcRenderer.invoke('cloud/setMemberRole', params || {}),
+    removeMember: (params) => ipcRenderer.invoke('cloud/removeMember', params || {}),
+    transferOwner: (params) => ipcRenderer.invoke('cloud/transferOwner', params || {}),
+    setVisibility: (params) => ipcRenderer.invoke('cloud/setVisibility', params || {}),
+    listInvites: (params) => ipcRenderer.invoke('cloud/listInvites', params || {}),
+    createInvite: (params) => ipcRenderer.invoke('cloud/createInvite', params || {}),
+    revokeInvite: (params) => ipcRenderer.invoke('cloud/revokeInvite', params || {}),
   },
 
   // ── C3.5: Authentication ───────────────────────────────────────
@@ -759,5 +796,26 @@ contextBridge.exposeInMainWorld('ipm', {
     logout: () => ipcRenderer.invoke('auth/logout'),
     useOffline: () => ipcRenderer.invoke('auth/useOffline'),
     switchUser: () => ipcRenderer.invoke('auth/switchUser'),
+  },
+
+  // H2: enterprise console — org members & invite management.
+  org: {
+    getInfo: () => ipcRenderer.invoke('org/getInfo'),
+    listMembers: () => ipcRenderer.invoke('org/listMembers'),
+    setMemberRole: (params) => ipcRenderer.invoke('org/setMemberRole', params || {}),
+    disableMember: (params) => ipcRenderer.invoke('org/disableMember', params || {}),
+    restoreMember: (params) => ipcRenderer.invoke('org/restoreMember', params || {}),
+    listInvites: () => ipcRenderer.invoke('org/listInvites'),
+    createInvite: (params) => ipcRenderer.invoke('org/createInvite', params || {}),
+    revokeInvite: (params) => ipcRenderer.invoke('org/revokeInvite', params || {}),
+    // H7: enterprise stats & audit
+    getStats: () => ipcRenderer.invoke('org/getStats'),
+    listEvents: (params) => ipcRenderer.invoke('org/listEvents', params || {}),
+    // H3: workspace governance
+    listWorkspaces: () => ipcRenderer.invoke('org/listWorkspaces'),
+    getWorkspaceDetail: (params) => ipcRenderer.invoke('org/getWorkspaceDetail', params || {}),
+    setWorkspaceStatus: (params) => ipcRenderer.invoke('org/setWorkspaceStatus', params || {}),
+    transferWorkspaceOwner: (params) => ipcRenderer.invoke('org/transferWorkspaceOwner', params || {}),
+    removeWorkspaceMember: (params) => ipcRenderer.invoke('org/removeWorkspaceMember', params || {}),
   },
 });

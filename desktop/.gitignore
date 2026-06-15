@@ -87,6 +87,9 @@ typings/
 
 # Vite
 .vite/
+# Standalone renderer build output (e.g. `vite build --config vite.renderer.config.mjs`,
+# used by the H8 release gate smoke). Not a packaging artifact; never committed.
+dist/
 
 # Electron-Forge
 out/

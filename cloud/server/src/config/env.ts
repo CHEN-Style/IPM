@@ -22,6 +22,21 @@ const envSchema = z.object({
   JWT_ACCESS_EXPIRES: z.string().default('2h'),
   JWT_REFRESH_EXPIRES: z.string().default('30d'),
 
+  // H1 (audit A7): brute-force protection on auth entry points. H8 makes the
+  // limit tunable so automated regression (which legitimately issues many
+  // register/login calls from one IP) can run against a relaxed server while
+  // production keeps the strict default. `AUTH_RATE_LIMIT_MAX=0` disables auth
+  // rate limiting entirely (test/dev only — never set 0 in production).
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(0).default(20),
+  AUTH_RATE_LIMIT_WINDOW: z.string().default('1 minute'),
+
+  // H6 Config Center: at-rest encryption key for org config templates
+  // (`org_config_templates.config_json`, which may hold provider API keys).
+  // Expected to be 32 bytes encoded as base64/hex; a shorter value is accepted
+  // and stretched via scrypt. In development a fixed insecure key is derived so
+  // a fresh checkout works; production must set a strong unique value.
+  CONFIG_ENC_KEY: z.string().min(1).default('dev-insecure-config-enc-key-change-me'),
+
   OSS_REGION: optionalNonEmptyString,
   OSS_BUCKET: optionalNonEmptyString,
   OSS_ACCESS_KEY_ID: optionalNonEmptyString,
@@ -41,6 +56,14 @@ if (env.NODE_ENV === 'production') {
     throw new Error(
       'JWT_SECRET / JWT_REFRESH_SECRET must be set to strong unique values in production.',
     );
+  }
+  if (env.CONFIG_ENC_KEY.startsWith('dev-insecure')) {
+    throw new Error(
+      'CONFIG_ENC_KEY must be set to a strong unique value in production.',
+    );
+  }
+  if (env.AUTH_RATE_LIMIT_MAX === 0) {
+    throw new Error('AUTH_RATE_LIMIT_MAX=0 (disabled) is not allowed in production.');
   }
 }
 

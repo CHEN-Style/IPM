@@ -1712,6 +1712,27 @@ export function KnowClawPersistProvider({ children }) {
     }
   }, []);
 
+  // H5: the caller's own registry submissions (any review status).
+  const listMineRegistrySkills = useCallback(async () => {
+    try {
+      return await window.ipm?.skills?.registryListMine?.()
+        || { ok: false, skills: [], error: 'skills IPC unavailable' };
+    } catch (err) {
+      return { ok: false, skills: [], error: String(err?.message || err) };
+    }
+  }, []);
+
+  // H5: download a version package and return SKILL.md + manifest without
+  // installing (market detail preview).
+  const previewRegistrySkill = useCallback(async (payload) => {
+    try {
+      return await window.ipm?.skills?.registryPreview?.(payload || {})
+        || { ok: false, error: 'skills IPC unavailable' };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }, []);
+
   // SK4: `opts.cwd` lets the main process resolve workspace-root
   // candidates; `opts.scope` ('workspace' | 'user') pins the deletion
   // when both copies share a name. Default policy (no scope) is
@@ -2216,6 +2237,8 @@ export function KnowClawPersistProvider({ children }) {
     reviewRegistrySkill,
     getRegistrySkillAccess,
     setRegistrySkillAccess,
+    listMineRegistrySkills,
+    previewRegistrySkill,
     setPlanMode,
     replyAskUser,
     cancelAskUser,
@@ -2243,6 +2266,7 @@ export function KnowClawPersistProvider({ children }) {
     listRegistrySkills, getRegistrySkill, publishRegistrySkill, installRegistrySkill,
     listSkillReviewQueue, listOrgUsersForSkills, reviewRegistrySkill,
     getRegistrySkillAccess, setRegistrySkillAccess,
+    listMineRegistrySkills, previewRegistrySkill,
     setPlanMode, replyAskUser, cancelAskUser, skipAskUser, startExecuting,
     loadWorkspaceTree, uploadToWorkspace,
   ]);

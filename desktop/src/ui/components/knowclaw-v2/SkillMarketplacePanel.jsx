@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Download, Loader2, RefreshCw, Search, UploadCloud } from 'lucide-react';
+import SkillMarketDetailModal from './SkillMarketDetailModal.jsx';
 
 function truncate(text, max = 72) {
   const s = String(text || '');
@@ -13,6 +14,8 @@ function isValidSkillName(s) {
 const SkillMarketplacePanel = ({
   listRegistrySkills,
   installRegistrySkill,
+  getRegistrySkill,
+  previewRegistrySkill,
   onPublish,
   onInstalled,
   cwd,
@@ -24,6 +27,8 @@ const SkillMarketplacePanel = ({
   const [busyId, setBusyId] = useState(null);
   const [conflict, setConflict] = useState(null);
   const [rename, setRename] = useState('');
+  // H5: market row click opens a detail modal (SKILL.md preview + versions).
+  const [detailTarget, setDetailTarget] = useState(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -172,7 +177,12 @@ const SkillMarketplacePanel = ({
               const canUpdate = Boolean(s.updateAvailable);
               const buttonLabel = canUpdate ? '更新' : installed ? '已安装' : '安装';
               return (
-                <li key={s.id} className="p-2 rounded-lg border border-slate-100 bg-white hover:border-slate-200">
+                <li
+                  key={s.id}
+                  className="p-2 rounded-lg border border-slate-100 bg-white hover:border-slate-200 cursor-pointer"
+                  onClick={() => setDetailTarget(s)}
+                  title="点击查看详情"
+                >
                   <div className="flex items-start gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
@@ -192,7 +202,7 @@ const SkillMarketplacePanel = ({
                     </div>
                     <button
                       type="button"
-                      onClick={() => installOne(s)}
+                      onClick={(e) => { e.stopPropagation(); void installOne(s); }}
                       disabled={busyId === s.id || (installed && !canUpdate)}
                       className={`h-7 px-2 rounded-md text-[11px] font-medium flex items-center gap-1 ${
                         canUpdate
@@ -212,6 +222,19 @@ const SkillMarketplacePanel = ({
           </ul>
         )}
       </div>
+
+      <SkillMarketDetailModal
+        open={Boolean(detailTarget)}
+        skill={detailTarget}
+        getRegistrySkill={getRegistrySkill}
+        previewRegistrySkill={previewRegistrySkill}
+        installBusy={Boolean(detailTarget && busyId === detailTarget.id)}
+        onClose={() => setDetailTarget(null)}
+        onInstall={async (s) => {
+          await installOne(s);
+          setDetailTarget(null);
+        }}
+      />
     </div>
   );
 };

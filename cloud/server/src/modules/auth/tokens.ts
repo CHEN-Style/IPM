@@ -11,7 +11,8 @@ import { pool } from '../../infra/db/postgres.js';
 
 export interface AccessTokenPayload {
   sub: string; // user id
-  orgId: string;
+  // H1: platform admins may have no org membership; their tokens carry null.
+  orgId: string | null;
   email: string;
 }
 

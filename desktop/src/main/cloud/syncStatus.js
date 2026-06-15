@@ -120,6 +120,8 @@ export async function checkRemoteChanges({ projectDir, cloudClient }) {
     remoteVersionNumber: res?.currentVersionNumber ?? null,
     localVersionNumber: baseline?.versionNumber ?? binding.lastSyncedVersionNumber ?? null,
     myRole: res?.myRole || null,
+    // H3: 'archived' drives the read-only banner in the sync UI.
+    workspaceStatus: res?.workspaceStatus || null,
   };
 }
 
@@ -149,6 +151,7 @@ export async function getSyncSummary({ projectDir, cloudClient }) {
     remoteVersionNumber: remoteRes.remoteVersionNumber ?? null,
     localVersionNumber: remoteRes.localVersionNumber ?? null,
     myRole: remoteRes.myRole ?? null,
+    workspaceStatus: remoteRes.workspaceStatus ?? null,
     remoteError,
   };
 }

@@ -165,10 +165,17 @@ export async function publishWorkspace(opts) {
         })),
       });
       const urlBySha = new Map((urlRes.urls || []).map((u) => [u.sha256, u]));
+      // H1: the server no longer signs PUT URLs for blobs that became
+      // available between check and upload-urls (anti-overwrite guard).
+      const alreadyAvailable = new Set(urlRes.alreadyAvailable || []);
 
       let uploaded = 0;
       for (const entry of toUpload) {
         checkCancel();
+        if (alreadyAvailable.has(entry.sha256)) {
+          uploaded += 1;
+          continue;
+        }
         const urlInfo = urlBySha.get(entry.sha256);
         if (!urlInfo) throw new Error(`缺少上传 URL: ${entry.path}`);
         const absPath = joinProjectPath(projectDir, entry.path);

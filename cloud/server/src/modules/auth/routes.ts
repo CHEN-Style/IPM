@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { pool } from '../../infra/db/postgres.js';
+import { env } from '../../config/env.js';
 import {
   signAccessToken,
   issueRefreshToken,
@@ -13,6 +14,27 @@ import {
 } from './tokens.js';
 
 const BCRYPT_ROUNDS = 10;
+
+// H1 (audit A7): brute-force protection on the public auth entry points. H8
+// makes this tunable via env (AUTH_RATE_LIMIT_MAX / AUTH_RATE_LIMIT_WINDOW);
+// max=0 disables it entirely so the regression gate can issue many auth calls.
+const AUTH_RATE_LIMIT =
+  env.AUTH_RATE_LIMIT_MAX > 0
+    ? {
+        config: {
+          rateLimit: {
+            max: env.AUTH_RATE_LIMIT_MAX,
+            timeWindow: env.AUTH_RATE_LIMIT_WINDOW,
+            errorResponseBuilder: () => ({
+              statusCode: 429,
+              ok: false,
+              code: 'RATE_LIMITED',
+              error: '操作过于频繁，请稍后再试。',
+            }),
+          },
+        },
+      }
+    : {};
 
 const registerSchema = z.object({
   inviteCode: z.string().min(1).max(64),
@@ -39,7 +61,7 @@ interface UserRow {
   password_hash: string | null;
 }
 
-function publicUser(row: UserRow, orgId: string, orgRole?: string) {
+function publicUser(row: UserRow, orgId: string | null, orgRole?: string) {
   return {
     id: row.id,
     email: row.email,
@@ -50,13 +72,34 @@ function publicUser(row: UserRow, orgId: string, orgRole?: string) {
   };
 }
 
+/**
+ * H1: resolve the user's active org membership together with the org status.
+ * Returns null when the user has no active membership.
+ */
+async function resolveOrgMembership(userId: string) {
+  const res = await pool.query<{ org_id: string; role: string; org_status: string }>(
+    `SELECT m.org_id, m.role, o.status AS org_status
+       FROM org_members m
+       JOIN orgs o ON o.id = m.org_id
+      WHERE m.user_id = $1 AND m.status = 'active'
+      ORDER BY m.joined_at NULLS LAST LIMIT 1`,
+    [userId],
+  );
+  return res.rows[0] ?? null;
+}
+
+async function isPlatformAdminUser(userId: string): Promise<boolean> {
+  const res = await pool.query(`SELECT 1 FROM platform_admins WHERE user_id = $1`, [userId]);
+  return (res.rowCount ?? 0) > 0;
+}
+
 export async function registerAuthRoutes(app: FastifyInstance) {
   app.get('/auth/status', async () => {
     return { ok: true, module: 'auth', status: 'ready' };
   });
 
   // ── Register with an invite code ───────────────────────────────────
-  app.post('/api/auth/register', async (request, reply) => {
+  app.post('/api/auth/register', AUTH_RATE_LIMIT, async (request, reply) => {
     const parsed = registerSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ ok: false, error: 'Invalid body', details: parsed.error.flatten() });
@@ -76,8 +119,9 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         max_uses: number;
         used_count: number;
         expires_at: string | null;
+        revoked_at: string | null;
       }>(
-        `SELECT id, org_id, role, max_uses, used_count, expires_at
+        `SELECT id, org_id, role, max_uses, used_count, expires_at, revoked_at
            FROM invite_codes WHERE code = $1 FOR UPDATE`,
         [inviteCode.trim()],
       );
@@ -86,6 +130,10 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         return reply.code(400).send({ ok: false, error: '邀请码无效。' });
       }
       const inv = invite.rows[0];
+      if (inv.revoked_at) {
+        await client.query('ROLLBACK');
+        return reply.code(400).send({ ok: false, code: 'INVITE_REVOKED', error: '邀请码已被撤销。' });
+      }
       if (inv.expires_at && new Date(inv.expires_at).getTime() < Date.now()) {
         await client.query('ROLLBACK');
         return reply.code(400).send({ ok: false, error: '邀请码已过期。' });
@@ -152,7 +200,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   });
 
   // ── Login with email + password ────────────────────────────────────
-  app.post('/api/auth/login', async (request, reply) => {
+  app.post('/api/auth/login', AUTH_RATE_LIMIT, async (request, reply) => {
     const parsed = loginSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ ok: false, error: 'Invalid body', details: parsed.error.flatten() });
@@ -177,15 +225,21 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       return reply.code(401).send({ ok: false, error: '邮箱或密码错误。' });
     }
 
-    // Resolve the user's org (single-org assumption in C4).
-    const orgRes = await pool.query<{ org_id: string; role: string }>(
-      `SELECT org_id, role FROM org_members WHERE user_id = $1 AND status = 'active'
-        ORDER BY joined_at NULLS LAST LIMIT 1`,
-      [user.id],
-    );
-    const orgId = orgRes.rows[0]?.org_id;
-    if (!orgId) {
-      return reply.code(403).send({ ok: false, error: '账号未关联任何组织。' });
+    // Resolve the user's org (single-org assumption in C4). H1: platform
+    // admins are allowed to log in without an org membership.
+    const membership = await resolveOrgMembership(user.id);
+    let orgId: string | null = membership?.org_id ?? null;
+    let orgRole: string | undefined = membership?.role;
+    if (membership && membership.org_status !== 'active') {
+      return reply.code(403).send({ ok: false, code: 'ORG_DISABLED', error: '企业已被停用，请联系平台管理员。' });
+    }
+    if (!membership) {
+      if (await isPlatformAdminUser(user.id)) {
+        orgId = null;
+        orgRole = 'platform_admin';
+      } else {
+        return reply.code(403).send({ ok: false, code: 'NO_ORG', error: '账号未关联任何组织。' });
+      }
     }
 
     await pool.query(`UPDATE users SET last_login_at = now() WHERE id = $1`, [user.id]);
@@ -198,12 +252,12 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       ok: true,
       accessToken,
       refreshToken,
-      user: publicUser(user, orgId, orgRes.rows[0]?.role),
+      user: publicUser(user, orgId, orgRole),
     });
   });
 
   // ── Refresh access token ───────────────────────────────────────────
-  app.post('/api/auth/refresh', async (request, reply) => {
+  app.post('/api/auth/refresh', AUTH_RATE_LIMIT, async (request, reply) => {
     const parsed = refreshSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ ok: false, error: 'Invalid body' });
@@ -224,14 +278,19 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       return reply.code(401).send({ ok: false, error: '账号不可用。' });
     }
 
-    const orgRes = await pool.query<{ org_id: string; role: string }>(
-      `SELECT org_id, role FROM org_members WHERE user_id = $1 AND status = 'active'
-        ORDER BY joined_at NULLS LAST LIMIT 1`,
-      [user.id],
-    );
-    const orgId = orgRes.rows[0]?.org_id;
-    if (!orgId) {
-      return reply.code(403).send({ ok: false, error: '账号未关联任何组织。' });
+    const membership = await resolveOrgMembership(user.id);
+    let orgId: string | null = membership?.org_id ?? null;
+    let orgRole: string | undefined = membership?.role;
+    if (membership && membership.org_status !== 'active') {
+      return reply.code(403).send({ ok: false, code: 'ORG_DISABLED', error: '企业已被停用，请联系平台管理员。' });
+    }
+    if (!membership) {
+      if (await isPlatformAdminUser(user.id)) {
+        orgId = null;
+        orgRole = 'platform_admin';
+      } else {
+        return reply.code(403).send({ ok: false, code: 'NO_ORG', error: '账号未关联任何组织。' });
+      }
     }
 
     // Rotate: revoke the old refresh token, issue a new pair.
@@ -244,7 +303,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       ok: true,
       accessToken,
       refreshToken,
-      user: publicUser(user, orgId, orgRes.rows[0]?.role),
+      user: publicUser(user, orgId, orgRole),
     });
   });
 

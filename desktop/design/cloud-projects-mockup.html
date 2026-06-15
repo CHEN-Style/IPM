@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>云端项目 · UI/UX 设计稿(H4 · Linear 风格)</title>
+<style>
+  :root {
+    --bg: #fcfcfc;
+    --bg-hover: #f6f6f7;
+    --bg-active: #f0f0f2;
+    --border: #ececee;
+    --border-soft: #f2f2f4;
+    --text-1: #18181b;
+    --text-2: #52525b;
+    --text-3: #8f8f98;
+    --text-4: #b4b4bc;
+    --accent: #5e6ad2;
+    --accent-soft: #eef0fb;
+    --green: #2e9e6b;
+    --amber: #c08a26;
+    --red: #c5483e;
+    --radius: 6px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 13px;
+    color: var(--text-1);
+    background: #e9ebef;
+    -webkit-font-smoothing: antialiased;
+  }
+  .frame { display: flex; height: 100vh; min-height: 720px; overflow: hidden; }
+
+  /* ── IPM 暗色 Sidebar(现状还原) ── */
+  .sidebar {
+    width: 200px; background: #1a1a1a; color: #d4d4d4;
+    display: flex; flex-direction: column; flex-shrink: 0; padding: 14px 8px 10px;
+  }
+  .sidebar .brand { font-size: 13px; font-weight: 600; color: #e5e5e5; padding: 4px 10px 14px; letter-spacing: 0.02em; }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 7px;
+    font-size: 13px; color: #a3a3a3; cursor: pointer; margin-bottom: 1px; transition: background 0.12s, color 0.12s;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.04); color: #d4d4d4; }
+  .nav-item.active { background: rgba(255,255,255,0.07); color: #f5f5f5; }
+  .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.85; }
+  .sidebar .spacer { flex: 1; }
+  .sidebar .account { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-top: 1px solid #2a2a2a; margin-top: 8px; }
+  .sidebar .account .avatar { width: 24px; height: 24px; border-radius: 50%; background: #5e6ad2; color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+  .sidebar .account .meta .n { font-size: 12px; color: #e5e5e5; }
+  .sidebar .account .meta .e { font-size: 10px; color: #737373; }
+
+  /* ── 主区域:Linear 风格,全宽,无卡片容器 ── */
+  .main { flex: 1; background: var(--bg); overflow-y: auto; display: flex; flex-direction: column; }
+
+  /* 顶栏:面包屑 + 右侧动作 */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 20px; height: 44px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    background: var(--bg);
+  }
+  .crumb { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; }
+  .crumb .sep { color: var(--text-4); font-weight: 400; }
+  .crumb .link { color: var(--text-3); cursor: pointer; font-weight: 400; }
+  .crumb .link:hover { color: var(--text-1); }
+  .topbar .actions { display: flex; align-items: center; gap: 6px; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: transparent; border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 4px 10px; font-size: 12px; font-weight: 500; color: var(--text-2);
+    cursor: pointer; font-family: inherit; transition: all 0.1s; white-space: nowrap;
+  }
+  .btn:hover { background: var(--bg-hover); color: var(--text-1); }
+  .btn svg { width: 13px; height: 13px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #5560c4; }
+  .btn.danger { background: var(--red); border-color: var(--red); color: #fff; }
+  .btn.danger:hover { background: #b03d34; }
+  .btn.ghost { border-color: transparent; color: var(--text-3); }
+  .btn.ghost:hover { background: var(--bg-hover); color: var(--text-1); }
+
+  /* 过滤行:pill tabs(Linear 的 All projects / In Progress) */
+  .filterbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .pills { display: flex; align-items: center; gap: 4px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 6px; font-size: 12px; color: var(--text-3);
+    cursor: pointer; border: 1px solid transparent; transition: all 0.1s; user-select: none; white-space: nowrap;
+  }
+  .pill:hover { color: var(--text-1); background: var(--bg-hover); }
+  .pill.on { background: var(--bg-active); border-color: var(--border); color: var(--text-1); font-weight: 500; }
+  .pill .n { font-size: 11px; color: var(--text-4); }
+  .pill.on .n { color: var(--text-3); }
+  .filterbar .right { display: flex; align-items: center; gap: 6px; }
+  .search-mini { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 12px; padding: 3px 8px; border-radius: 6px; cursor: text; border: 1px solid transparent; }
+  .search-mini:hover { background: var(--bg-hover); }
+  .search-mini svg { width: 13px; height: 13px; }
+  .search-mini input { border: 0; outline: 0; background: transparent; font-family: inherit; font-size: 12px; width: 110px; color: var(--text-1); }
+
+  /* 列表 */
+  .listwrap { flex: 1; }
+  .colhead {
+    display: flex; align-items: center; padding: 6px 20px;
+    font-size: 11.5px; color: var(--text-4); border-bottom: 1px solid var(--border-soft);
+    user-select: none; white-space: nowrap;
+  }
+  .row {
+    display: flex; align-items: center; padding: 0 20px; height: 46px;
+    border-bottom: 1px solid var(--border-soft); cursor: pointer; transition: background 0.08s;
+    white-space: nowrap;
+  }
+  .row:hover { background: var(--bg-hover); }
+  .row:hover .hov { opacity: 1; }
+  .hov { opacity: 0; transition: opacity 0.1s; }
+
+  /* 列宽 */
+  .c-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+  .c-role { width: 90px; flex-shrink: 0; }
+  .c-vis { width: 80px; flex-shrink: 0; }
+  .c-members { width: 64px; flex-shrink: 0; }
+  .c-ver { width: 64px; flex-shrink: 0; }
+  .c-sync { width: 110px; flex-shrink: 0; }
+  .c-status { width: 150px; flex-shrink: 0; }
+  .c-act { width: 32px; flex-shrink: 0; display: flex; justify-content: flex-end; }
+
+  .glyph { width: 18px; height: 18px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .glyph svg { width: 15px; height: 15px; }
+  .glyph.projects { color: #6e79d6; }
+  .glyph.cases { color: #b65fb4; }
+  .glyph.study { color: #3aa99a; }
+  .row .nm { font-size: 13px; font-weight: 500; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; }
+  .row .nm-sub { font-size: 12px; color: var(--text-4); font-weight: 400; margin-left: 2px; }
+  .row.muted .nm, .row.muted .cell, .row.muted .nm-sub { color: var(--text-4); }
+  .row.muted .glyph { opacity: 0.5; }
+  .cell { font-size: 12px; color: var(--text-3); }
+
+  /* 微型标签:极克制,描边 pill */
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; color: var(--text-3); padding: 1px 7px;
+    border: 1px solid var(--border); border-radius: 999px; background: #fff; white-space: nowrap;
+  }
+  .chip svg { width: 10px; height: 10px; }
+  .chip.owner { color: var(--amber); border-color: #eadfc3; }
+  .chip.editor { color: var(--accent); border-color: #dadef4; }
+  .chip.viewer { color: var(--text-3); }
+  .chip.public { color: var(--green); border-color: #cfe7db; }
+  .chip.archived { color: var(--amber); border-color: #eadfc3; }
+
+  /* 状态:小圆点 + 文本(Linear health) */
+  .health { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+  .health .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .health.ok .dot { background: var(--green); }
+  .health.ok { color: var(--green); }
+  .health.pending .dot { background: var(--accent); }
+  .health.pending { color: var(--accent); }
+  .health.idle .dot { background: #d4d4d8; }
+  .health.idle { color: var(--text-3); }
+  .health.warn .dot { background: var(--amber); }
+  .health.warn { color: var(--amber); }
+
+  .avatar-s {
+    width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 600; color: #fff;
+  }
+  .icon-btn {
+    width: 24px; height: 24px; border-radius: 5px; border: 0; background: transparent;
+    color: var(--text-3); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+    transition: all 0.1s; font-family: inherit;
+  }
+  .icon-btn:hover { background: var(--bg-active); color: var(--text-1); }
+  .icon-btn svg { width: 14px; height: 14px; }
+
+  .foot-note { padding: 10px 20px; font-size: 11.5px; color: var(--text-4); }
+
+  /* ── 公开项目列表 ── */
+  .pub-row { height: 52px; }
+  .pub-row .desc { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
+  .c-pubmeta { width: 200px; flex-shrink: 0; display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-3); }
+  .c-pubact { width: 96px; flex-shrink: 0; display: flex; justify-content: flex-end; }
+  .joined { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-3); }
+  .joined svg { width: 12px; height: 12px; color: var(--green); }
+  .hintline {
+    display: flex; align-items: center; gap: 7px; padding: 8px 20px;
+    font-size: 12px; color: var(--text-3); border-bottom: 1px solid var(--border-soft); background: #fafafb;
+  }
+  .hintline svg { width: 13px; height: 13px; flex-shrink: 0; color: var(--text-4); }
+
+  /* ── 详情页(Linear 项目 Overview 布局) ── */
+  .detail-body { flex: 1; display: flex; min-height: 0; }
+  .detail-main { flex: 1; min-width: 0; overflow-y: auto; padding: 28px 40px 60px; }
+  .detail-main .inner { max-width: 660px; }
+  .detail-rail {
+    width: 264px; flex-shrink: 0; border-left: 1px solid var(--border);
+    overflow-y: auto; padding: 18px 18px 40px; background: var(--bg);
+  }
+
+  .d-glyph { width: 36px; height: 36px; border-radius: 8px; background: var(--bg-active); display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
+  .d-glyph svg { width: 18px; height: 18px; }
+  .detail-main h1 { font-size: 21px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
+  .detail-main .summary { font-size: 13px; color: var(--text-3); margin-top: 6px; }
+
+  /* 最新动态(Latest update 样式) */
+  .update-box { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-top: 22px; }
+  .update-box .head { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-3); }
+  .update-box .head .who { color: var(--text-2); font-weight: 500; }
+  .update-box .body { font-size: 13px; color: var(--text-2); margin-top: 7px; line-height: 1.55; }
+
+  .d-section { margin-top: 28px; }
+  .d-section > .label {
+    font-size: 12px; font-weight: 500; color: var(--text-3); padding-bottom: 7px;
+    border-bottom: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: space-between;
+  }
+  .d-section > .label .more { font-size: 11.5px; color: var(--text-4); cursor: pointer; font-weight: 400; }
+  .d-section > .label .more:hover { color: var(--text-1); }
+
+  .li-row {
+    display: flex; align-items: center; gap: 10px; padding: 9px 2px;
+    border-bottom: 1px solid var(--border-soft); font-size: 12.5px; white-space: nowrap;
+  }
+  .li-row:last-child { border-bottom: 0; }
+  .li-row:hover { background: var(--bg-hover); }
+  .li-row:hover .hov { opacity: 1; }
+  .vnum { font-family: "SF Mono", "JetBrains Mono", Consolas, monospace; font-size: 11.5px; color: var(--text-3); width: 44px; flex-shrink: 0; }
+  .vnum.ms { color: var(--amber); }
+  .li-row .msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+  .li-row .meta { font-size: 11.5px; color: var(--text-4); flex-shrink: 0; }
+
+  /* 右栏属性 */
+  .rail-section { margin-bottom: 4px; }
+  .rail-section + .rail-section { border-top: 1px solid var(--border-soft); padding-top: 14px; margin-top: 14px; }
+  .rail-section .h { font-size: 12px; font-weight: 500; color: var(--text-3); margin-bottom: 10px; }
+  .prop { display: flex; align-items: center; min-height: 28px; gap: 8px; }
+  .prop .k { width: 76px; flex-shrink: 0; font-size: 12px; color: var(--text-4); }
+  .prop .v { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); min-width: 0; }
+  .prop .v .avatar-s { width: 16px; height: 16px; font-size: 8px; }
+  .rail-link { display: block; font-size: 12px; color: var(--text-3); padding: 5px 0; cursor: pointer; }
+  .rail-link:hover { color: var(--accent); }
+
+  /* 成员/邀请码列表(详情 Tab,沿用全宽行) */
+  .member-line { height: 48px; cursor: default; }
+  .member-line .who { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+  .member-line .who .nm2 { font-size: 13px; font-weight: 500; }
+  .member-line .who .em { font-size: 12px; color: var(--text-4); margin-left: 6px; }
+  .member-line .via { font-size: 11.5px; color: var(--text-4); width: 170px; flex-shrink: 0; }
+  .member-line .c-chip { width: 80px; flex-shrink: 0; }
+  .avatar-m {
+    width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 600; color: #fff;
+  }
+  .code {
+    font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+    font-size: 12px; font-weight: 500; letter-spacing: 0.03em; color: var(--text-1); white-space: nowrap;
+  }
+  .invite-line { height: 44px; cursor: default; }
+  .invite-line .c-code { width: 190px; flex-shrink: 0; display: flex; align-items: center; gap: 7px; }
+  .invite-line .c-usage { width: 110px; flex-shrink: 0; font-size: 12px; color: var(--text-3); }
+  .invite-line .c-exp { width: 130px; flex-shrink: 0; font-size: 12px; color: var(--text-3); }
+  .invite-line .c-by { flex: 1; font-size: 12px; color: var(--text-4); }
+  .invite-line.revoked .code { text-decoration: line-through; color: var(--text-4); }
+  .invite-line.revoked { opacity: 0.55; }
+  .ghost-danger { border: 0; background: transparent; font-size: 12px; color: var(--text-4); cursor: pointer; font-family: inherit; padding: 3px 8px; border-radius: 5px; }
+  .ghost-danger:hover { color: var(--red); background: #faf0ef; }
+
+  /* 设置行 */
+  .setting-line { display: flex; align-items: flex-start; justify-content: space-between; gap: 32px; padding: 16px 0; border-bottom: 1px solid var(--border-soft); }
+  .setting-line .t { font-size: 13px; font-weight: 500; }
+  .setting-line .d { font-size: 12.5px; color: var(--text-3); margin-top: 4px; line-height: 1.6; max-width: 560px; }
+
+  /* ── 菜单 ── */
+  .menu {
+    position: fixed; min-width: 180px; background: #fff;
+    border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+    padding: 4px; z-index: 50; display: none;
+  }
+  .menu.open { display: block; }
+  .menu .mi {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 6px 8px; border: 0; background: transparent; border-radius: 5px;
+    font-size: 12.5px; color: var(--text-2); cursor: pointer; font-family: inherit;
+    transition: background 0.08s; text-align: left; white-space: nowrap;
+  }
+  .menu .mi:hover { background: var(--bg-hover); color: var(--text-1); }
+  .menu .mi.danger { color: var(--red); }
+  .menu .mi.danger:hover { background: #faf0ef; }
+  .menu .sep { height: 1px; background: var(--border-soft); margin: 4px 6px; }
+  .menu .mi svg { width: 13px; height: 13px; flex-shrink: 0; color: var(--text-3); }
+  .menu .mi.danger svg { color: var(--red); }
+
+  /* ── 弹窗 ── */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.25);
+    display: none; align-items: flex-start; justify-content: center; z-index: 100; padding-top: 14vh;
+  }
+  .overlay.open { display: flex; }
+  .modal {
+    width: 420px; background: #fff; border-radius: 10px; border: 1px solid var(--border);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.16); overflow: hidden;
+    animation: pop 0.14s ease-out;
+  }
+  @keyframes pop { from { transform: translateY(-4px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .modal .m-head { padding: 16px 18px 0; }
+  .modal .m-head h3 { font-size: 14px; font-weight: 600; }
+  .modal .m-head p { font-size: 12px; color: var(--text-3); margin-top: 3px; }
+  .modal .m-body { padding: 14px 18px 2px; }
+  .modal .m-foot { display: flex; justify-content: flex-end; gap: 7px; padding: 14px 18px; }
+  .field-label { font-size: 11.5px; font-weight: 500; color: var(--text-3); margin-bottom: 6px; display: block; }
+  .input {
+    width: 100%; border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 6px 9px; font-size: 13px; font-family: inherit; color: var(--text-1);
+    outline: none; transition: border-color 0.1s; background: #fff;
+  }
+  .input:focus { border-color: #b9bfe8; box-shadow: 0 0 0 2px var(--accent-soft); }
+  .input.code-input {
+    font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+    font-size: 14px; letter-spacing: 0.06em; text-align: center; padding: 9px;
+  }
+  .form-row { display: flex; gap: 10px; margin-bottom: 14px; }
+  .form-row .col { flex: 1; }
+  .note-box {
+    border: 1px solid var(--border); border-left: 2px solid var(--text-4);
+    border-radius: var(--radius); padding: 9px 12px; font-size: 12px; color: var(--text-2);
+    line-height: 1.6; margin-top: 4px; background: #fafafb;
+  }
+  .note-box.warn { border-left-color: var(--red); }
+  .note-box.ok { border-left-color: var(--green); }
+  .note-box b { color: var(--text-1); }
+  .code-result {
+    display: none; border: 1px solid var(--border); background: #fafafb;
+    border-radius: 8px; padding: 14px; text-align: center; margin-bottom: 4px;
+  }
+  .code-result.show { display: block; }
+  .code-result .big {
+    font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+    font-size: 17px; font-weight: 600; letter-spacing: 0.06em; color: var(--text-1);
+  }
+  .code-result .hint { font-size: 11.5px; color: var(--text-3); margin-top: 6px; }
+  .code-result .btn { margin-top: 10px; }
+
+  .view { display: none; }
+  .view.on { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .subview { display: none; }
+  .subview.on { display: block; }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(6px);
+    background: #18181b; color: #fff; font-size: 12px; padding: 7px 14px;
+    border-radius: 7px; opacity: 0; transition: all 0.18s; pointer-events: none; z-index: 200;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="frame">
+  <!-- 左侧:现有暗色 Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">IPM</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>总览</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12H2M5.5 5h13l3.5 7v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5z"/></svg>我的资料</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>知识库</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>KnowClaw</div>
+    <div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.5 19a4.5 4.5 0 1 0-1.8-8.6 6 6 0 1 0-11.2 3A4 4 0 0 0 6 19h11.5z"/></svg>协作项目</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h1m4 0h1"/></svg>企业管理</div>
+    <div class="spacer"></div>
+    <div class="account">
+      <div class="avatar">王</div>
+      <div class="meta"><div class="n">王律师</div><div class="e">wang@hengrui.law</div></div>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ════════════ 视图 1:列表 ════════════ -->
+    <div class="view on" id="view-list">
+
+      <div class="topbar">
+        <div class="crumb">云端项目</div>
+        <div class="actions">
+          <button class="btn" onclick="openModal('modal-join-code')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            凭邀请码加入
+          </button>
+        </div>
+      </div>
+
+      <div class="filterbar">
+        <div class="pills">
+          <span class="pill on" id="pill-mine" onclick="switchTopTab('mine')">我的项目 <span class="n">5</span></span>
+          <span class="pill" id="pill-public" onclick="switchTopTab('public')">公开项目 <span class="n">3</span></span>
+          <span style="width:1px;height:14px;background:var(--border);margin:0 6px"></span>
+          <span class="pill on">全部</span>
+          <span class="pill">我创建的 <span class="n">3</span></span>
+          <span class="pill">我参与的 <span class="n">2</span></span>
+        </div>
+        <div class="right">
+          <div class="search-mini">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input placeholder="搜索…">
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 我的项目 ── -->
+      <div class="subview on listwrap" id="sub-mine">
+        <div class="colhead">
+          <span class="c-name">名称</span>
+          <span class="c-role">角色</span>
+          <span class="c-vis">可见性</span>
+          <span class="c-members">成员</span>
+          <span class="c-ver">版本</span>
+          <span class="c-sync">最近同步</span>
+          <span class="c-status">状态</span>
+          <span class="c-act"></span>
+        </div>
+
+        <!-- 我创建 · 私有 → 详情 -->
+        <div class="row" onclick="showDetail()">
+          <div class="c-name">
+            <span class="glyph projects"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+            <span class="nm">XX 集团并购重组专项</span>
+          </div>
+          <span class="c-role"><span class="chip owner">Owner</span></span>
+          <span class="c-vis"><span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>私有</span></span>
+          <span class="c-members cell">8</span>
+          <span class="c-ver cell">v42</span>
+          <span class="c-sync cell">12 分钟前</span>
+          <span class="c-status"><span class="health ok"><span class="dot"></span>已同步</span></span>
+          <span class="c-act hov"><button class="icon-btn" onclick="event.stopPropagation(); showDetail()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+        </div>
+
+        <!-- 我创建 · 公开 -->
+        <div class="row">
+          <div class="c-name">
+            <span class="glyph cases"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16M2 8h20v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/></svg></span>
+            <span class="nm">劳动争议案例库</span>
+          </div>
+          <span class="c-role"><span class="chip owner">Owner</span></span>
+          <span class="c-vis"><span class="chip public"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 0 20 15.3 15.3 0 0 1 0-20z"/></svg>公开</span></span>
+          <span class="c-members cell">15</span>
+          <span class="c-ver cell">v128</span>
+          <span class="c-sync cell">3 天前</span>
+          <span class="c-status"><span class="health pending"><span class="dot"></span>2 个变更待同步</span></span>
+          <span class="c-act hov"><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+        </div>
+
+        <!-- 我参与 · Editor -->
+        <div class="row">
+          <div class="c-name">
+            <span class="glyph study"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5"/></svg></span>
+            <span class="nm">新法规研习资料</span>
+            <span class="nm-sub">· 孙雨晴</span>
+          </div>
+          <span class="c-role"><span class="chip editor">协作</span></span>
+          <span class="c-vis"><span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>私有</span></span>
+          <span class="c-members cell">5</span>
+          <span class="c-ver cell">v12</span>
+          <span class="c-sync cell">昨天</span>
+          <span class="c-status"><span class="health ok"><span class="dot"></span>已同步</span></span>
+          <span class="c-act hov"><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+        </div>
+
+        <!-- 我参与 · 只读 -->
+        <div class="row">
+          <div class="c-name">
+            <span class="glyph projects"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+            <span class="nm">模板文书库</span>
+            <span class="nm-sub">· 李文博</span>
+          </div>
+          <span class="c-role"><span class="chip viewer">只读</span></span>
+          <span class="c-vis"><span class="chip public"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 0 20 15.3 15.3 0 0 1 0-20z"/></svg>公开</span></span>
+          <span class="c-members cell">22</span>
+          <span class="c-ver cell">v56</span>
+          <span class="c-sync cell">2 小时前</span>
+          <span class="c-status"><span class="health idle"><span class="dot"></span>只读 · 可拉取</span></span>
+          <span class="c-act hov"><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+        </div>
+
+        <!-- 我创建 · 已归档 -->
+        <div class="row muted">
+          <div class="c-name">
+            <span class="glyph projects"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+            <span class="nm">2025 年度合规审查</span>
+          </div>
+          <span class="c-role"><span class="chip">Owner</span></span>
+          <span class="c-vis"><span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>私有</span></span>
+          <span class="c-members cell">11</span>
+          <span class="c-ver cell">v96</span>
+          <span class="c-sync cell">03-02</span>
+          <span class="c-status"><span class="health warn"><span class="dot"></span>已归档 · 只读</span></span>
+          <span class="c-act hov"><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+        </div>
+
+        <p class="foot-note">点击行进入项目管理(Owner)或查看项目信息(参与者) · 新发布的项目默认私有 · 文件查看与同步在「我的资料」中进行</p>
+      </div>
+
+      <!-- ── 公开项目 ── -->
+      <div class="subview listwrap" id="sub-public">
+        <div class="hintline">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4m0-4h.01"/></svg>
+          公开项目对企业内全部成员可见;加入后默认只读,协作权限需项目 Owner 开通
+        </div>
+        <div class="colhead">
+          <span class="c-name">名称</span>
+          <span class="c-pubmeta">Owner</span>
+          <span class="c-members">成员</span>
+          <span class="c-ver">版本</span>
+          <span class="c-sync">最近更新</span>
+          <span class="c-pubact"></span>
+        </div>
+
+        <div class="row pub-row">
+          <div class="c-name" style="flex-direction:column;align-items:flex-start;justify-content:center;gap:1px">
+            <span style="display:flex;align-items:center;gap:10px;max-width:100%">
+              <span class="glyph projects"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+              <span class="nm">模板文书库</span>
+            </span>
+            <span class="desc" style="padding-left:28px">所内通用合同、起诉状、答辩状等标准文书模板</span>
+          </div>
+          <span class="c-pubmeta"><span class="avatar-s" style="background:#0e7490">李</span>李文博</span>
+          <span class="c-members cell">22</span>
+          <span class="c-ver cell">v56</span>
+          <span class="c-sync cell">2 小时前</span>
+          <span class="c-pubact"><span class="joined"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>已加入</span></span>
+        </div>
+
+        <div class="row pub-row">
+          <div class="c-name" style="flex-direction:column;align-items:flex-start;justify-content:center;gap:1px">
+            <span style="display:flex;align-items:center;gap:10px;max-width:100%">
+              <span class="glyph cases"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16M2 8h20v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/></svg></span>
+              <span class="nm">判例检索方法论</span>
+            </span>
+            <span class="desc" style="padding-left:28px">类案检索路径、关键词库与裁判观点归纳方法</span>
+          </div>
+          <span class="c-pubmeta"><span class="avatar-s" style="background:#be185d">周</span>周建国</span>
+          <span class="c-members cell">9</span>
+          <span class="c-ver cell">v31</span>
+          <span class="c-sync cell">昨天</span>
+          <span class="c-pubact hov"><button class="btn" onclick="toast('已以只读身份加入「判例检索方法论」')">加入(只读)</button></span>
+        </div>
+
+        <div class="row pub-row">
+          <div class="c-name" style="flex-direction:column;align-items:flex-start;justify-content:center;gap:1px">
+            <span style="display:flex;align-items:center;gap:10px;max-width:100%">
+              <span class="glyph study"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5"/></svg></span>
+              <span class="nm">行业监管动态汇编</span>
+            </span>
+            <span class="desc" style="padding-left:28px">金融、医疗、数据合规等领域监管动态月度整理</span>
+          </div>
+          <span class="c-pubmeta"><span class="avatar-s" style="background:#15803d">孙</span>孙雨晴</span>
+          <span class="c-members cell">14</span>
+          <span class="c-ver cell">v18</span>
+          <span class="c-sync cell">5 天前</span>
+          <span class="c-pubact hov"><button class="btn" onclick="toast('已以只读身份加入「行业监管动态汇编」')">加入(只读)</button></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════ 视图 2:项目详情(Owner) ════════════ -->
+    <div class="view" id="view-detail">
+
+      <div class="topbar">
+        <div class="crumb">
+          <span class="link" onclick="showList()">云端项目</span>
+          <span class="sep">›</span>
+          XX 集团并购重组专项
+        </div>
+        <div class="actions">
+          <button class="btn ghost" onclick="toast('跳转到「我的资料」对应项目')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12H2M5.5 5h13l3.5 7v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5z"/></svg>
+            在我的资料中打开
+          </button>
+        </div>
+      </div>
+
+      <div class="filterbar">
+        <div class="pills">
+          <span class="pill on" onclick="switchDetailTab(this,'dt-overview')">概览</span>
+          <span class="pill" onclick="switchDetailTab(this,'dt-members')">成员 <span class="n">8</span></span>
+          <span class="pill" onclick="switchDetailTab(this,'dt-invites')">邀请码 <span class="n">2</span></span>
+          <span class="pill" onclick="switchDetailTab(this,'dt-settings')">设置</span>
+        </div>
+        <div class="right">
+          <button class="btn primary" onclick="openModal('modal-create-invite')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            生成邀请码
+          </button>
+        </div>
+      </div>
+
+      <!-- ── Tab:概览(主栏 + 右栏) ── -->
+      <div class="subview on" id="dt-overview" style="flex:1;min-height:0">
+        <div class="detail-body">
+          <div class="detail-main">
+            <div class="inner">
+              <div class="d-glyph projects" style="color:#6e79d6"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+              <h1>XX 集团并购重组专项</h1>
+              <div class="summary">并购交易尽调、交割文件与法律意见书协作空间</div>
+
+              <div class="update-box">
+                <div class="head">
+                  <span class="health ok"><span class="dot"></span>已与云端同步</span>
+                  <span style="color:var(--text-4)">·</span>
+                  <span class="who">陈思琪</span>
+                  <span>12 分钟前推送了 v42</span>
+                </div>
+                <div class="body">同步:更新尽调清单与三份补充协议</div>
+              </div>
+
+              <div class="d-section">
+                <div class="label">最近版本 <span class="more">完整历史在「我的资料」中查看</span></div>
+                <div class="li-row"><span class="vnum">v42</span><span class="msg">同步:更新尽调清单与三份补充协议</span><span class="meta">陈思琪 · 12 分钟前</span></div>
+                <div class="li-row"><span class="vnum ms">v40 ★</span><span class="msg">里程碑:第一轮交割文件定稿</span><span class="meta">王律师 · 2 天前</span></div>
+                <div class="li-row"><span class="vnum">v39</span><span class="msg">同步:法务意见书修订</span><span class="meta">孙雨晴 · 3 天前</span></div>
+                <div class="li-row"><span class="vnum">v38</span><span class="msg">同步:新增反垄断申报材料目录</span><span class="meta">陈思琪 · 5 天前</span></div>
+              </div>
+
+              <div class="d-section">
+                <div class="label">动态</div>
+                <div class="li-row"><span class="msg"><b style="font-weight:500">王律师</b> 给 孙雨晴 开通了协作权限</span><span class="meta">1 小时前</span></div>
+                <div class="li-row"><span class="msg"><b style="font-weight:500">李文博</b> 凭邀请码加入了项目</span><span class="meta">昨天</span></div>
+                <div class="li-row"><span class="msg"><b style="font-weight:500">王律师</b> 生成了邀请码 IPMP-7K2M-9QXR</span><span class="meta">3 天前</span></div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="detail-rail">
+            <div class="rail-section">
+              <div class="h">属性</div>
+              <div class="prop"><span class="k">可见性</span><span class="v"><span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>私有</span></span></div>
+              <div class="prop"><span class="k">状态</span><span class="v"><span class="health ok"><span class="dot"></span>正常</span></span></div>
+              <div class="prop"><span class="k">Owner</span><span class="v"><span class="avatar-s" style="background:#5e6ad2">王</span>王律师(我)</span></div>
+              <div class="prop"><span class="k">类型</span><span class="v">项目 · projects</span></div>
+              <div class="prop"><span class="k">创建于</span><span class="v">2026-02-10</span></div>
+            </div>
+            <div class="rail-section">
+              <div class="h">数据</div>
+              <div class="prop"><span class="k">成员</span><span class="v">8(协作 5 · 只读 3)</span></div>
+              <div class="prop"><span class="k">当前版本</span><span class="v">v42</span></div>
+              <div class="prop"><span class="k">文件</span><span class="v">316 个</span></div>
+              <div class="prop"><span class="k">存储量</span><span class="v">1.8 GB</span></div>
+              <div class="prop"><span class="k">邀请码</span><span class="v">2 个有效</span></div>
+            </div>
+            <div class="rail-section">
+              <div class="h">操作</div>
+              <span class="rail-link" onclick="openModal('modal-make-public')">设为公开…</span>
+              <span class="rail-link" onclick="toast('打开成员选择')">转移 Owner…</span>
+            </div>
+          </aside>
+        </div>
+      </div>
+
+      <!-- ── Tab:成员 ── -->
+      <div class="subview listwrap" id="dt-members">
+        <div class="colhead">
+          <span class="c-name" style="flex:1">成员</span>
+          <span class="via" style="width:170px;flex-shrink:0">加入方式</span>
+          <span class="c-chip" style="width:80px;flex-shrink:0">权限</span>
+          <span class="c-act"></span>
+        </div>
+
+        <div class="row member-line">
+          <div class="who"><span class="avatar-m" style="background:#5e6ad2">王</span><span><span class="nm2">王律师(我)</span><span class="em">wang@hengrui.law</span></span></div>
+          <span class="via">创建者</span>
+          <span class="c-chip"><span class="chip owner">Owner</span></span>
+          <span class="c-act"></span>
+        </div>
+        <div class="row member-line">
+          <div class="who"><span class="avatar-m" style="background:#7c3aed">陈</span><span><span class="nm2">陈思琪</span><span class="em">chen@hengrui.law</span></span></div>
+          <span class="via">邀请码 · 2026-03-12</span>
+          <span class="c-chip"><span class="chip editor">协作</span></span>
+          <span class="c-act hov"><button class="icon-btn" onclick="toggleMenu(this,'menu-editor')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+        </div>
+        <div class="row member-line">
+          <div class="who"><span class="avatar-m" style="background:#0e7490">李</span><span><span class="nm2">李文博</span><span class="em">li@hengrui.law</span></span></div>
+          <span class="via">邀请码 · 2026-03-15</span>
+          <span class="c-chip"><span class="chip editor">协作</span></span>
+          <span class="c-act hov"><button class="icon-btn" onclick="toggleMenu(this,'menu-editor')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+        </div>
+        <div class="row member-line">
+          <div class="who"><span class="avatar-m" style="background:#15803d">孙</span><span><span class="nm2">孙雨晴</span><span class="em">sun@hengrui.law</span></span></div>
+          <span class="via">邀请码 · 2026-04-02</span>
+          <span class="c-chip"><span class="chip viewer">只读</span></span>
+          <span class="c-act hov"><button class="icon-btn" onclick="toggleMenu(this,'menu-viewer')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+        </div>
+
+        <p class="foot-note">「协作」可推送修改;「只读」仅可拉取查看 · 移出成员不影响其企业账号与本地文件</p>
+      </div>
+
+      <!-- ── Tab:邀请码 ── -->
+      <div class="subview listwrap" id="dt-invites">
+        <div class="hintline">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4m0-4h.01"/></svg>
+          凭邀请码加入的成员直接获得协作(写)权限,请只发给信任的同事
+        </div>
+        <div class="colhead">
+          <span class="c-code" style="width:190px;flex-shrink:0">邀请码</span>
+          <span class="c-usage" style="width:110px;flex-shrink:0">用量</span>
+          <span class="c-exp" style="width:130px;flex-shrink:0">有效期</span>
+          <span class="c-by" style="flex:1">创建</span>
+          <span class="c-act" style="width:60px"></span>
+        </div>
+
+        <div class="row invite-line">
+          <span class="c-code"><span class="code">IPMP-7K2M-9QXR</span>
+            <button class="icon-btn" title="复制" onclick="toast('已复制邀请码')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+          </span>
+          <span class="c-usage">2 / 10</span>
+          <span class="c-exp">2026-07-12 过期</span>
+          <span class="c-by">王律师 · 3 天前</span>
+          <span class="c-act hov" style="width:60px;display:flex;justify-content:flex-end"><button class="ghost-danger" onclick="openModal('modal-revoke-invite')">撤销</button></span>
+        </div>
+        <div class="row invite-line">
+          <span class="c-code"><span class="code">IPMP-3FWN-D8HT</span>
+            <button class="icon-btn" title="复制" onclick="toast('已复制邀请码')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+          </span>
+          <span class="c-usage">0 / 1</span>
+          <span class="c-exp">不过期</span>
+          <span class="c-by">王律师 · 1 周前</span>
+          <span class="c-act hov" style="width:60px;display:flex;justify-content:flex-end"><button class="ghost-danger" onclick="openModal('modal-revoke-invite')">撤销</button></span>
+        </div>
+        <div class="row invite-line revoked">
+          <span class="c-code"><span class="code">IPMP-VV4C-K2LP</span></span>
+          <span class="c-usage">3 / 5</span>
+          <span class="c-exp" style="color:var(--red)">已撤销</span>
+          <span class="c-by">王律师 · 2 周前</span>
+          <span class="c-act" style="width:60px"></span>
+        </div>
+
+        <p class="foot-note">撤销后邀请码立即失效 · 已通过该码加入的成员不受影响,可在「成员」中单独管理</p>
+      </div>
+
+      <!-- ── Tab:设置 ── -->
+      <div class="subview" id="dt-settings">
+        <div class="detail-main" style="overflow:visible">
+          <div class="inner">
+            <div class="setting-line">
+              <div>
+                <div class="t">项目可见性</div>
+                <div class="d">当前为<b style="color:var(--text-1)">私有</b>:只有项目成员可以看到此项目,其他人需凭邀请码加入。设为公开后,企业内所有成员可在「公开项目」中看到并以只读身份自助加入,协作权限仍需你手动开通,可随时改回。</div>
+              </div>
+              <button class="btn" onclick="openModal('modal-make-public')" style="flex-shrink:0">设为公开…</button>
+            </div>
+            <div class="setting-line">
+              <div>
+                <div class="t">转移项目 Owner</div>
+                <div class="d">将项目所有权转移给其他成员,你将降为协作权限。转移后由新 Owner 管理成员、邀请码与项目设置。</div>
+              </div>
+              <button class="btn" onclick="toast('打开成员选择')" style="flex-shrink:0">转移 Owner…</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── 成员菜单 ───────── -->
+    <div class="menu" id="menu-viewer">
+      <button class="mi" onclick="toast('已开通协作权限'); closeMenus()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+        开通协作权限
+      </button>
+      <div class="sep"></div>
+      <button class="mi danger" onclick="openModal('modal-remove-member'); closeMenus()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m17 8 5 5m0-5-5 5"/></svg>
+        移出项目
+      </button>
+    </div>
+    <div class="menu" id="menu-editor">
+      <button class="mi" onclick="toast('已调整为只读权限'); closeMenus()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        调整为只读
+      </button>
+      <button class="mi" onclick="toast('打开转移 Owner 确认'); closeMenus()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7"/></svg>
+        设为项目 Owner
+      </button>
+      <div class="sep"></div>
+      <button class="mi danger" onclick="openModal('modal-remove-member'); closeMenus()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m17 8 5 5m0-5-5 5"/></svg>
+        移出项目
+      </button>
+    </div>
+
+    <!-- ───────── 弹窗 ───────── -->
+    <div class="overlay" id="modal-join-code">
+      <div class="modal">
+        <div class="m-head"><h3>凭邀请码加入项目</h3><p>输入项目 Owner 发给你的邀请码,加入后即可协作</p></div>
+        <div class="m-body">
+          <input class="input code-input" placeholder="IPMP-XXXX-XXXX" maxlength="14" style="margin-bottom:12px">
+          <div class="note-box ok" style="display:none" id="join-preview">将加入「<b>XX 集团并购重组专项</b>」(Owner:王律师),并获得协作权限。</div>
+        </div>
+        <div class="m-foot">
+          <button class="btn" onclick="closeModal('modal-join-code')">取消</button>
+          <button class="btn primary" onclick="closeModal('modal-join-code'); toast('已加入「XX 集团并购重组专项」')">加入项目</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay" id="modal-create-invite">
+      <div class="modal">
+        <div class="m-head"><h3>生成项目邀请码</h3><p>凭码加入的成员获得协作(写)权限</p></div>
+        <div class="m-body">
+          <div class="form-row" id="invite-form">
+            <div class="col"><span class="field-label">可用次数</span><input class="input" value="10" type="number" min="1"></div>
+            <div class="col"><span class="field-label">有效期(天,留空不过期)</span><input class="input" value="30" type="number" min="1"></div>
+          </div>
+          <div class="code-result" id="invite-result">
+            <div class="big">IPMP-7K2M-9QXR</div>
+            <div class="hint">可用 10 次 · 30 天内有效 · 撤销后立即失效</div>
+            <button class="btn" onclick="toast('已复制邀请码')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              复制邀请码
+            </button>
+          </div>
+        </div>
+        <div class="m-foot">
+          <button class="btn" onclick="closeModal('modal-create-invite')">关闭</button>
+          <button class="btn primary" id="invite-gen-btn" onclick="genInvite()">生成</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay" id="modal-revoke-invite">
+      <div class="modal">
+        <div class="m-head"><h3>撤销邀请码 IPMP-7K2M-9QXR?</h3><p>已使用 2 / 10 次</p></div>
+        <div class="m-body">
+          <div class="note-box warn">撤销后此码<b>立即失效</b>,无法再用于加入项目。已通过该码加入的 2 名成员不受影响。</div>
+        </div>
+        <div class="m-foot">
+          <button class="btn" onclick="closeModal('modal-revoke-invite')">取消</button>
+          <button class="btn danger" onclick="closeModal('modal-revoke-invite'); toast('邀请码已撤销')">确认撤销</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay" id="modal-make-public">
+      <div class="modal">
+        <div class="m-head"><h3>将「XX 集团并购重组专项」设为公开?</h3><p>当前为私有项目 · 8 名成员</p></div>
+        <div class="m-body">
+          <div class="note-box">设为公开后,<b>企业内所有成员</b>都能看到此项目,并可自助以<b>只读</b>身份加入(可拉取查看,不能修改)。协作权限仍需你在成员管理中手动开通。可随时改回私有,已加入成员保留。</div>
+        </div>
+        <div class="m-foot">
+          <button class="btn" onclick="closeModal('modal-make-public')">取消</button>
+          <button class="btn primary" onclick="closeModal('modal-make-public'); toast('项目已设为公开')">确认公开</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay" id="modal-remove-member">
+      <div class="modal">
+        <div class="m-head"><h3>将 孙雨晴 移出此项目?</h3><p>XX 集团并购重组专项 · 只读</p></div>
+        <div class="m-body">
+          <div class="note-box warn">移出后该成员<b>立即</b>无法访问此项目;其企业账号与本地文件不受影响,之后可凭邀请码或公开渠道重新加入。</div>
+        </div>
+        <div class="m-foot">
+          <button class="btn" onclick="closeModal('modal-remove-member')">取消</button>
+          <button class="btn danger" onclick="closeModal('modal-remove-member'); toast('已将 孙雨晴 移出项目')">确认移出</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+  </main>
+</div>
+
+<script>
+  // 我的项目 / 公开项目
+  function switchTopTab(key) {
+    document.getElementById('pill-mine').classList.toggle('on', key === 'mine');
+    document.getElementById('pill-public').classList.toggle('on', key === 'public');
+    document.getElementById('sub-mine').classList.toggle('on', key === 'mine');
+    document.getElementById('sub-public').classList.toggle('on', key === 'public');
+  }
+
+  // 列表 ⇄ 详情
+  function showDetail() {
+    document.getElementById('view-list').classList.remove('on');
+    document.getElementById('view-detail').classList.add('on');
+  }
+  function showList() {
+    document.getElementById('view-detail').classList.remove('on');
+    document.getElementById('view-list').classList.add('on');
+  }
+
+  // 详情 Tab
+  function switchDetailTab(pill, id) {
+    document.querySelectorAll('#view-detail .filterbar .pill').forEach(p => p.classList.remove('on'));
+    pill.classList.add('on');
+    ['dt-overview', 'dt-members', 'dt-invites', 'dt-settings'].forEach(v => {
+      document.getElementById(v).classList.toggle('on', v === id);
+    });
+  }
+
+  // 菜单
+  function closeMenus() { document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open')); }
+  function toggleMenu(btn, id) {
+    const menu = document.getElementById(id);
+    const wasOpen = menu.classList.contains('open');
+    closeMenus();
+    if (wasOpen) return;
+    const r = btn.getBoundingClientRect();
+    menu.style.top = (r.bottom + 4) + 'px';
+    menu.style.left = Math.min(r.left, window.innerWidth - 200) + 'px';
+    menu.classList.add('open');
+  }
+  document.addEventListener('click', (e) => { if (!e.target.closest('.menu') && !e.target.closest('.icon-btn')) closeMenus(); });
+
+  // 弹窗
+  function openModal(id) {
+    document.getElementById(id).classList.add('open');
+    if (id === 'modal-create-invite') {
+      document.getElementById('invite-result').classList.remove('show');
+      document.getElementById('invite-form').style.display = 'flex';
+      document.getElementById('invite-gen-btn').style.display = '';
+    }
+  }
+  function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+  document.querySelectorAll('.overlay').forEach(o => o.addEventListener('mousedown', (e) => { if (e.target === o) o.classList.remove('open'); }));
+
+  function genInvite() {
+    document.getElementById('invite-form').style.display = 'none';
+    document.getElementById('invite-gen-btn').style.display = 'none';
+    document.getElementById('invite-result').classList.add('show');
+  }
+
+  document.querySelector('#modal-join-code .code-input').addEventListener('input', function () {
+    document.getElementById('join-preview').style.display = this.value.length >= 14 ? 'block' : 'none';
+  });
+
+  function toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(t._timer); t._timer = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+</script>
+</body>
+</html>

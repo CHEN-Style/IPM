@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>企业管理 · 云端项目 UI/UX 设计稿(H3)</title>
+<style>
+  :root {
+    --bg-page: #f8f9fb;
+    --bg-card: #ffffff;
+    --border: #e8eaf0;
+    --border-soft: #f1f5f9;
+    --accent: #3e4b9c;
+    --accent-soft: rgba(62, 75, 156, 0.08);
+    --text-1: #1e293b;
+    --text-2: #475569;
+    --text-3: #64748b;
+    --text-4: #94a3b8;
+    --text-5: #b6bdc9;
+    --green: #2d7a5f;
+    --green-bg: #ecfdf5;
+    --red: #b91c1c;
+    --red-bg: #fef2f2;
+    --amber: #b45309;
+    --amber-bg: #fef3c7;
+    --indigo: #3730a3;
+    --indigo-bg: #e0e7ff;
+    --slate-bg: #f1f5f9;
+    --shadow-menu: 0 4px 24px rgba(15, 23, 42, 0.12), 0 1px 3px rgba(15, 23, 42, 0.08);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 13px;
+    color: var(--text-1);
+    background: #e9ebef;
+    -webkit-font-smoothing: antialiased;
+  }
+  .frame { display: flex; height: 100vh; min-height: 720px; overflow: hidden; }
+  .sidebar {
+    width: 200px; background: #1a1a1a; color: #d4d4d4;
+    display: flex; flex-direction: column; flex-shrink: 0; padding: 14px 8px 10px;
+  }
+  .sidebar .brand { font-size: 13px; font-weight: 600; color: #e5e5e5; padding: 4px 10px 14px; letter-spacing: 0.02em; }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 7px;
+    font-size: 13px; color: #a3a3a3; cursor: pointer; margin-bottom: 1px; transition: background 0.12s, color 0.12s;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.04); color: #d4d4d4; }
+  .nav-item.active { background: rgba(255,255,255,0.07); color: #f5f5f5; }
+  .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.85; }
+  .sidebar .spacer { flex: 1; }
+  .sidebar .account { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-top: 1px solid #2a2a2a; margin-top: 8px; }
+  .sidebar .account .avatar { width: 24px; height: 24px; border-radius: 50%; background: #3e4b9c; color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+  .sidebar .account .meta .n { font-size: 12px; color: #e5e5e5; }
+  .sidebar .account .meta .e { font-size: 10px; color: #737373; }
+
+  .main { flex: 1; background: var(--bg-page); overflow-y: auto; position: relative; }
+  .container { max-width: 1080px; margin: 0 auto; padding: 28px 36px 60px; }
+
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 4px; }
+  .page-head .left { display: flex; align-items: center; gap: 12px; }
+  .org-glyph { width: 40px; height: 40px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; }
+  .page-head h1 { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
+  .page-head .sub { font-size: 12.5px; color: var(--text-3); margin-top: 2px; }
+  .badge-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 999px; background: var(--green-bg); color: var(--green); }
+  .badge-status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+  .head-meta { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--text-4); padding-top: 10px; }
+  .head-meta b { color: var(--text-2); font-weight: 600; }
+
+  .tabs { display: flex; align-items: center; gap: 22px; border-bottom: 1px solid var(--border); margin-top: 22px; }
+  .tab { position: relative; padding: 9px 1px 11px; cursor: pointer; font-size: 13px; color: var(--text-3); display: flex; align-items: center; gap: 6px; transition: color 0.12s; user-select: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab:hover { color: var(--text-1); }
+  .tab.active { color: var(--text-1); font-weight: 600; border-bottom-color: var(--accent); }
+  .tab.soon { color: var(--text-5); cursor: default; }
+  .tab.soon:hover { color: var(--text-5); }
+  .tab .soon-pill { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: var(--slate-bg); color: var(--text-4); font-weight: 500; }
+  .tab .count { font-size: 11px; color: var(--text-4); font-weight: 500; }
+  .tab.active .count { color: var(--accent); }
+
+  .stat-strip { display: flex; gap: 10px; margin-top: 18px; }
+  .stat { flex: 1; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 13px 16px; }
+  .stat .k { font-size: 11px; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-4); }
+  .stat .v { font-size: 22px; font-weight: 600; margin-top: 4px; letter-spacing: -0.02em; }
+  .stat .v small { font-size: 12px; font-weight: 400; color: var(--text-4); margin-left: 5px; }
+  .stat .v.warn { color: var(--amber); }
+
+  .toolbar { display: flex; align-items: center; gap: 10px; margin: 18px 0 14px; }
+  .seg { display: inline-flex; background: #eef0f4; border-radius: 7px; padding: 2px; }
+  .seg button { border: 0; background: transparent; font-size: 12.5px; color: var(--text-3); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-family: inherit; transition: all 0.12s; }
+  .seg button.on { background: #fff; color: var(--text-1); font-weight: 500; box-shadow: 0 1px 2px rgba(15,23,42,0.08); }
+  .search { display: flex; align-items: center; gap: 7px; background: #fff; border: 1px solid var(--border); border-radius: 7px; padding: 6px 10px; width: 220px; color: var(--text-4); transition: border-color 0.12s; }
+  .search:focus-within { border-color: #c3c9e8; }
+  .search input { border: 0; outline: 0; font-size: 12.5px; width: 100%; font-family: inherit; color: var(--text-1); background: transparent; }
+  .filter-btn { display: flex; align-items: center; gap: 6px; background: #fff; border: 1px solid var(--border); border-radius: 7px; padding: 6px 11px; font-size: 12.5px; color: var(--text-2); cursor: pointer; font-family: inherit; transition: all 0.12s; }
+  .filter-btn:hover { border-color: #d4d9e4; background: #fcfcfd; }
+  .toolbar .grow { flex: 1; }
+
+  .panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { text-align: left; font-size: 11px; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-4); padding: 9px 16px; border-bottom: 1px solid var(--border-soft); background: #fbfcfd; }
+  tbody td { padding: 11px 16px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr { transition: background 0.1s; cursor: pointer; }
+  tbody tr:hover { background: #f8fafc; }
+  tbody tr:hover .row-actions { opacity: 1; }
+
+  .ws-cell { display: flex; align-items: center; gap: 10px; }
+  .ws-glyph { width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .ws-glyph svg { width: 15px; height: 15px; }
+  .ws-glyph.projects { background: var(--accent-soft); color: var(--accent); }
+  .ws-glyph.cases { background: #fdf4ff; color: #a21caf; }
+  .ws-glyph.study { background: #f0fdfa; color: #0f766e; }
+  .ws-cell .nm { font-size: 13px; font-weight: 500; color: var(--text-1); line-height: 1.25; display: flex; align-items: center; gap: 6px; }
+  .ws-cell .dm { font-size: 11.5px; color: var(--text-4); }
+  td.dim { font-size: 12px; color: var(--text-3); }
+  .owner-cell { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-2); }
+  .avatar-xs { width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: 600; color: #fff; }
+
+  .tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 5px; }
+  .tag.st-active { background: var(--green-bg); color: var(--green); }
+  .tag.st-archived { background: var(--amber-bg); color: var(--amber); }
+  .tag.st-disabled { background: var(--red-bg); color: var(--red); }
+  .risk-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; padding: 2px 7px; border-radius: 999px; background: var(--amber-bg); color: var(--amber); }
+  .risk-chip svg { width: 11px; height: 11px; }
+  .risk-none { font-size: 12px; color: var(--text-5); }
+  tr.muted-row .nm, tr.muted-row .dm, tr.muted-row td.dim, tr.muted-row .owner-cell { color: var(--text-5); }
+  tr.muted-row .ws-glyph, tr.muted-row .avatar-xs { opacity: 0.45; }
+
+  .row-actions { opacity: 0; transition: opacity 0.12s; display: flex; justify-content: flex-end; gap: 2px; }
+  .icon-btn { width: 26px; height: 26px; border-radius: 6px; border: 0; background: transparent; color: var(--text-4); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.12s; font-family: inherit; }
+  .icon-btn:hover { background: #eef0f4; color: var(--text-1); }
+  .table-note { margin-top: 10px; font-size: 11.5px; color: var(--text-4); }
+
+  .menu { position: absolute; min-width: 180px; background: #fff; border: 1px solid var(--border); border-radius: 9px; box-shadow: var(--shadow-menu); padding: 4px; z-index: 50; display: none; }
+  .menu.open { display: block; }
+  .menu .mi { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 7px 9px; border: 0; background: transparent; border-radius: 6px; font-size: 12.5px; color: var(--text-2); cursor: pointer; font-family: inherit; transition: background 0.1s; text-align: left; }
+  .menu .mi:hover { background: #f4f5f8; color: var(--text-1); }
+  .menu .mi.danger { color: var(--red); }
+  .menu .mi.danger:hover { background: var(--red-bg); }
+  .menu .sep { height: 1px; background: var(--border-soft); margin: 4px 6px; }
+  .menu .mi .desc { font-size: 10.5px; color: var(--text-4); margin-top: 1px; }
+  .menu .mi svg { width: 13px; height: 13px; margin-top: 1px; flex-shrink: 0; }
+
+  /* ───────── 详情抽屉(右侧滑出) ───────── */
+  .drawer-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.18); z-index: 80; display: none; }
+  .drawer-overlay.open { display: block; }
+  .drawer {
+    position: fixed; top: 0; right: -560px; width: 560px; height: 100vh;
+    background: #fff; box-shadow: -8px 0 40px rgba(15,23,42,0.12); z-index: 90;
+    transition: right 0.22s ease-out; display: flex; flex-direction: column;
+  }
+  .drawer.open { right: 0; }
+  .drawer .d-head { padding: 20px 24px 0; }
+  .drawer .d-head .top { display: flex; align-items: flex-start; justify-content: space-between; }
+  .drawer .d-head .title { display: flex; align-items: center; gap: 11px; }
+  .drawer .d-head h2 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .drawer .d-head .sub { font-size: 12px; color: var(--text-4); margin-top: 2px; }
+  .drawer .d-close { width: 28px; height: 28px; border-radius: 7px; border: 0; background: transparent; color: var(--text-4); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.12s; }
+  .drawer .d-close:hover { background: var(--slate-bg); color: var(--text-1); }
+  .drawer .d-stats { display: flex; gap: 8px; margin-top: 16px; }
+  .drawer .d-stat { flex: 1; background: #fbfcfd; border: 1px solid var(--border-soft); border-radius: 8px; padding: 9px 12px; }
+  .drawer .d-stat .k { font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-4); }
+  .drawer .d-stat .v { font-size: 15px; font-weight: 600; margin-top: 2px; }
+  .drawer .d-tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--border); margin-top: 18px; }
+  .drawer .d-tab { padding: 7px 1px 9px; font-size: 12.5px; color: var(--text-3); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; user-select: none; }
+  .drawer .d-tab.active { color: var(--text-1); font-weight: 600; border-bottom-color: var(--accent); }
+  .drawer .d-body { flex: 1; overflow-y: auto; padding: 16px 24px 24px; }
+  .d-view { display: none; }
+  .d-view.on { display: block; }
+
+  .risk-card { display: flex; gap: 9px; background: var(--amber-bg); border: 1px solid #fde68a; border-radius: 9px; padding: 10px 12px; font-size: 12px; color: var(--amber); line-height: 1.55; margin-bottom: 14px; }
+  .risk-card svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; }
+
+  .d-member { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border-soft); }
+  .d-member:last-child { border-bottom: 0; }
+  .d-member:hover .row-actions { opacity: 1; }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 600; color: #fff; }
+  .d-member .info { flex: 1; min-width: 0; }
+  .d-member .nm { font-size: 13px; font-weight: 500; }
+  .d-member .em { font-size: 11.5px; color: var(--text-4); }
+  .tag.ws-owner { background: var(--amber-bg); color: var(--amber); }
+  .tag.ws-editor { background: var(--slate-bg); color: var(--text-2); }
+  .tag.org-off { background: var(--red-bg); color: var(--red); }
+  .d-member.off .nm, .d-member.off .em { color: var(--text-5); }
+  .d-member.off .avatar { opacity: 0.45; }
+
+  .d-version { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border-soft); }
+  .d-version:last-child { border-bottom: 0; }
+  .v-num { font-family: "SF Mono", "JetBrains Mono", Consolas, monospace; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 2px 8px; border-radius: 5px; flex-shrink: 0; }
+  .v-num.milestone { color: var(--amber); background: var(--amber-bg); }
+  .d-version .msg { flex: 1; font-size: 12.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .d-version .meta { font-size: 11.5px; color: var(--text-4); flex-shrink: 0; }
+
+  .d-event { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border-soft); }
+  .d-event:last-child { border-bottom: 0; }
+  .e-dot { width: 7px; height: 7px; border-radius: 50%; background: #cbd5e1; margin-top: 5px; flex-shrink: 0; }
+  .e-dot.gov { background: var(--amber); }
+  .d-event .txt { flex: 1; font-size: 12.5px; color: var(--text-2); line-height: 1.45; }
+  .d-event .txt b { font-weight: 500; color: var(--text-1); }
+  .d-event .time { font-size: 11.5px; color: var(--text-4); flex-shrink: 0; }
+
+  .overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.32); display: none; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(2px); }
+  .overlay.open { display: flex; }
+  .modal { width: 440px; background: #fff; border-radius: 12px; box-shadow: 0 24px 64px rgba(15, 23, 42, 0.24); overflow: hidden; animation: pop 0.16s ease-out; }
+  @keyframes pop { from { transform: scale(0.97); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .modal .m-head { padding: 18px 20px 0; }
+  .modal .m-head h3 { font-size: 15px; font-weight: 600; }
+  .modal .m-head p { font-size: 12.5px; color: var(--text-3); margin-top: 3px; }
+  .modal .m-body { padding: 16px 20px 4px; }
+  .modal .m-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 20px; margin-top: 8px; }
+  .btn-primary { display: inline-flex; align-items: center; gap: 6px; background: var(--accent); color: #fff; border: 0; border-radius: 7px; padding: 7px 14px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: background 0.12s; }
+  .btn-primary:hover { background: #34407e; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary { background: #fff; border: 1px solid var(--border); border-radius: 7px; padding: 7px 14px; font-size: 13px; color: var(--text-2); cursor: pointer; font-family: inherit; transition: all 0.12s; }
+  .btn-secondary:hover { background: #f8fafc; }
+  .btn-danger { background: var(--red); color: #fff; border: 0; border-radius: 7px; padding: 7px 14px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: background 0.12s; }
+  .btn-danger:hover { background: #991b1b; }
+  .btn-amber { background: var(--amber); color: #fff; border: 0; border-radius: 7px; padding: 7px 14px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: background 0.12s; }
+  .btn-amber:hover { background: #92400e; }
+  .warn-box { display: flex; gap: 9px; background: var(--red-bg); border: 1px solid #fecaca; border-radius: 9px; padding: 11px 12px; font-size: 12.5px; color: var(--red); line-height: 1.55; margin-top: 4px; }
+  .info-box { display: flex; gap: 9px; background: var(--amber-bg); border: 1px solid #fde68a; border-radius: 9px; padding: 11px 12px; font-size: 12.5px; color: var(--amber); line-height: 1.55; margin-top: 4px; }
+  .field-label { font-size: 11px; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-4); margin-bottom: 7px; display: block; }
+  .pick-list { border: 1px solid var(--border); border-radius: 9px; max-height: 218px; overflow-y: auto; margin-bottom: 12px; }
+  .pick-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; border-bottom: 1px solid var(--border-soft); transition: background 0.1s; }
+  .pick-item:last-child { border-bottom: 0; }
+  .pick-item:hover { background: #f8fafc; }
+  .pick-item.selected { background: var(--accent-soft); }
+  .pick-item .radio { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid #cbd5e1; flex-shrink: 0; transition: all 0.12s; }
+  .pick-item.selected .radio { border-color: var(--accent); border-width: 4.5px; }
+  .pick-item .nm { font-size: 13px; font-weight: 500; }
+  .pick-item .em { font-size: 11.5px; color: var(--text-4); }
+
+  .toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(8px); background: #1e293b; color: #fff; font-size: 12.5px; padding: 8px 16px; border-radius: 8px; opacity: 0; transition: all 0.2s; pointer-events: none; z-index: 200; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="frame">
+  <!-- 左侧:现有暗色 Sidebar(只为还原上下文) -->
+  <aside class="sidebar">
+    <div class="brand">IPM</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>总览</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12H2M5.5 5h13l3.5 7v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5z"/></svg>我的资料</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>知识库</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>KnowClaw</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.5 19a4.5 4.5 0 1 0-1.8-8.6 6 6 0 1 0-11.2 3A4 4 0 0 0 6 19h11.5z"/></svg>协作项目</div>
+    <div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h1m4 0h1"/></svg>企业管理</div>
+    <div class="spacer"></div>
+    <div class="account">
+      <div class="avatar">王</div>
+      <div class="meta"><div class="n">王律师</div><div class="e">wang@hengrui.law</div></div>
+    </div>
+  </aside>
+
+  <!-- 主区域:企业管理 → 云端项目 Tab -->
+  <main class="main">
+    <div class="container">
+
+      <div class="page-head">
+        <div class="left">
+          <div class="org-glyph">恒</div>
+          <div>
+            <h1>恒锐律师事务所 <span class="badge-status"><span class="dot"></span>正常</span></h1>
+            <div class="sub">企业管理 · 您的角色:<b style="color:var(--amber)">Owner</b></div>
+          </div>
+        </div>
+        <div class="head-meta"><span><b>24</b> 名成员</span><span><b>12</b> 个云端项目</span><span>创建于 2026-01-15</span></div>
+      </div>
+
+      <nav class="tabs">
+        <div class="tab">成员 <span class="count">24</span></div>
+        <div class="tab active">云端项目 <span class="count">12</span></div>
+        <div class="tab soon">Skill 治理 <span class="soon-pill">规划中</span></div>
+        <div class="tab soon">配置中心 <span class="soon-pill">规划中</span></div>
+        <div class="tab soon">概览与审计 <span class="soon-pill">规划中</span></div>
+      </nav>
+
+      <!-- 统计条 -->
+      <div class="stat-strip">
+        <div class="stat"><div class="k">云端项目</div><div class="v">12 <small>全企业</small></div></div>
+        <div class="stat"><div class="k">正常协作</div><div class="v">9</div></div>
+        <div class="stat"><div class="k">已归档 / 已停用</div><div class="v">2 <small>/ 1</small></div></div>
+        <div class="stat"><div class="k">风险项目</div><div class="v warn">2 <small>需关注</small></div></div>
+      </div>
+
+      <!-- 工具条 -->
+      <div class="toolbar">
+        <div class="seg">
+          <button class="on">全部 12</button>
+          <button>正常 9</button>
+          <button>已归档 2</button>
+          <button>已停用 1</button>
+        </div>
+        <div class="search">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input placeholder="搜索项目名称…">
+        </div>
+        <button class="filter-btn">类型:全部 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div class="grow"></div>
+      </div>
+
+      <!-- 项目表格 -->
+      <div class="panel">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:30%">项目</th>
+              <th style="width:16%">Owner</th>
+              <th style="width:8%">成员</th>
+              <th style="width:8%">版本</th>
+              <th style="width:13%">最近同步</th>
+              <th style="width:11%">状态</th>
+              <th style="width:9%">风险</th>
+              <th style="width:5%"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- 行 1:正常,点击打开详情抽屉 -->
+            <tr onclick="openDrawer()">
+              <td><div class="ws-cell">
+                <div class="ws-glyph projects"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+                <div><div class="nm">XX 集团并购重组专项</div><div class="dm">项目 · projects</div></div>
+              </div></td>
+              <td><div class="owner-cell"><span class="avatar-xs" style="background:#0e7490">李</span>李文博</div></td>
+              <td class="dim">8</td>
+              <td class="dim">v42</td>
+              <td class="dim">12 分钟前</td>
+              <td><span class="tag st-active">正常</span></td>
+              <td><span class="risk-none">—</span></td>
+              <td><div class="row-actions"><button class="icon-btn" onclick="event.stopPropagation(); toggleMenu(this,'menu-active')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div></td>
+            </tr>
+            <!-- 行 2:正常 + 风险(owner 已被停用) -->
+            <tr>
+              <td><div class="ws-cell">
+                <div class="ws-glyph cases"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16M2 8h20v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/></svg></div>
+                <div><div class="nm">劳动争议案例库</div><div class="dm">案例 · cases</div></div>
+              </div></td>
+              <td><div class="owner-cell"><span class="avatar-xs" style="background:#be185d;opacity:.5">赵</span><span style="color:var(--text-4)">赵明轩(已停用)</span></div></td>
+              <td class="dim">15</td>
+              <td class="dim">v128</td>
+              <td class="dim">3 天前</td>
+              <td><span class="tag st-active">正常</span></td>
+              <td><span class="risk-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3z"/><path d="M12 9v4m0 4h.01"/></svg>Owner 已停用</span></td>
+              <td><div class="row-actions"><button class="icon-btn" onclick="event.stopPropagation(); toggleMenu(this,'menu-active')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div></td>
+            </tr>
+            <!-- 行 3:正常 + 风险(从未发布版本) -->
+            <tr>
+              <td><div class="ws-cell">
+                <div class="ws-glyph study"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5"/></svg></div>
+                <div><div class="nm">新法规研习资料</div><div class="dm">学习 · study</div></div>
+              </div></td>
+              <td><div class="owner-cell"><span class="avatar-xs" style="background:#15803d">孙</span>孙雨晴</div></td>
+              <td class="dim">2</td>
+              <td class="dim">—</td>
+              <td class="dim">—</td>
+              <td><span class="tag st-active">正常</span></td>
+              <td><span class="risk-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3z"/><path d="M12 9v4m0 4h.01"/></svg>无版本</span></td>
+              <td><div class="row-actions"><button class="icon-btn" onclick="event.stopPropagation(); toggleMenu(this,'menu-active')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div></td>
+            </tr>
+            <!-- 行 4:已归档(置灰,菜单换成恢复/停用) -->
+            <tr class="muted-row">
+              <td><div class="ws-cell">
+                <div class="ws-glyph projects"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+                <div><div class="nm">2025 年度合规审查</div><div class="dm">项目 · projects</div></div>
+              </div></td>
+              <td><div class="owner-cell"><span class="avatar-xs" style="background:#b45309">周</span>周建国</div></td>
+              <td class="dim">11</td>
+              <td class="dim">v96</td>
+              <td class="dim">2026-03-02</td>
+              <td><span class="tag st-archived">已归档 · 只读</span></td>
+              <td><span class="risk-none">—</span></td>
+              <td><div class="row-actions"><button class="icon-btn" onclick="event.stopPropagation(); toggleMenu(this,'menu-archived')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div></td>
+            </tr>
+            <!-- 行 5:已停用 -->
+            <tr class="muted-row">
+              <td><div class="ws-cell">
+                <div class="ws-glyph cases"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16M2 8h20v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/></svg></div>
+                <div><div class="nm">离职合伙人历史案卷</div><div class="dm">案例 · cases</div></div>
+              </div></td>
+              <td><div class="owner-cell"><span class="avatar-xs" style="background:#7c3aed">吴</span>吴一帆</div></td>
+              <td class="dim">4</td>
+              <td class="dim">v17</td>
+              <td class="dim">2026-01-20</td>
+              <td><span class="tag st-disabled">已停用</span></td>
+              <td><span class="risk-none">—</span></td>
+              <td><div class="row-actions"><button class="icon-btn" onclick="event.stopPropagation(); toggleMenu(this,'menu-disabled')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="table-note">点击行打开详情;行尾菜单执行治理操作。已归档 = 成员只读可拉取;已停用 = 成员完全不可访问(本地文件均不受影响)。</p>
+
+    </div>
+
+    <!-- ───────── 行操作菜单(三种状态) ───────── -->
+    <div class="menu" id="menu-active">
+      <button class="mi" onclick="openDrawer(); closeMenus()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg><span>查看详情<span class="desc">成员、版本、事件与风险</span></span></button>
+      <div class="sep"></div>
+      <button class="mi" onclick="openModal('modal-archive'); closeMenus()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/></svg><span>归档项目<span class="desc">成员只读,可拉取不可推送</span></span></button>
+      <button class="mi danger" onclick="openModal('modal-disable'); closeMenus()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg><span>停用项目<span class="desc">成员完全不可访问</span></span></button>
+    </div>
+    <div class="menu" id="menu-archived">
+      <button class="mi" onclick="openDrawer(); closeMenus()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg><span>查看详情</span></button>
+      <div class="sep"></div>
+      <button class="mi" onclick="toast('已恢复为正常协作'); closeMenus()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg><span>恢复项目<span class="desc">恢复为正常协作状态</span></span></button>
+      <button class="mi danger" onclick="openModal('modal-disable'); closeMenus()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg><span>停用项目</span></button>
+    </div>
+    <div class="menu" id="menu-disabled">
+      <button class="mi" onclick="openDrawer(); closeMenus()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg><span>查看详情</span></button>
+      <div class="sep"></div>
+      <button class="mi" onclick="toast('已恢复为正常协作'); closeMenus()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg><span>恢复项目<span class="desc">恢复为正常协作状态</span></span></button>
+    </div>
+
+    <!-- ───────── 详情抽屉 ───────── -->
+    <div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawer()"></div>
+    <aside class="drawer" id="drawer">
+      <div class="d-head">
+        <div class="top">
+          <div class="title">
+            <div class="ws-glyph projects" style="width:36px;height:36px;border-radius:9px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:17px;height:17px"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+            <div>
+              <h2>XX 集团并购重组专项 <span class="tag st-active">正常</span></h2>
+              <div class="sub">项目 · projects · 创建于 2026-02-10 · 最近同步 12 分钟前</div>
+            </div>
+          </div>
+          <button class="d-close" onclick="closeDrawer()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+        <div class="d-stats">
+          <div class="d-stat"><div class="k">成员</div><div class="v">8</div></div>
+          <div class="d-stat"><div class="k">版本</div><div class="v">v42</div></div>
+          <div class="d-stat"><div class="k">文件</div><div class="v">316</div></div>
+          <div class="d-stat"><div class="k">存储量</div><div class="v">1.8 GB</div></div>
+        </div>
+        <div class="d-tabs">
+          <div class="d-tab active" onclick="switchDView(this,'dv-members')">成员 8</div>
+          <div class="d-tab" onclick="switchDView(this,'dv-versions')">最近版本</div>
+          <div class="d-tab" onclick="switchDView(this,'dv-events')">事件</div>
+        </div>
+      </div>
+      <div class="d-body">
+        <!-- 成员视图 -->
+        <div class="d-view on" id="dv-members">
+          <div class="risk-card">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3z"/><path d="M12 9v4m0 4h.01"/></svg>
+            <div>示例风险卡:当项目 owner 的企业账号已被停用时,在此提示「建议转移 owner」。本项目无风险时不显示。</div>
+          </div>
+          <div class="d-member">
+            <span class="avatar" style="background:#0e7490">李</span>
+            <div class="info"><div class="nm">李文博</div><div class="em">li@hengrui.law</div></div>
+            <span class="tag ws-owner">项目 Owner</span>
+            <div class="row-actions"><button class="icon-btn" onclick="toggleMenu(this,'menu-owner-member')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div>
+          </div>
+          <div class="d-member">
+            <span class="avatar" style="background:#7c3aed">陈</span>
+            <div class="info"><div class="nm">陈思琪</div><div class="em">chen@hengrui.law</div></div>
+            <span class="tag ws-editor">Editor</span>
+            <div class="row-actions"><button class="icon-btn" onclick="toggleMenu(this,'menu-ws-member')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div>
+          </div>
+          <div class="d-member off">
+            <span class="avatar" style="background:#be185d">赵</span>
+            <div class="info"><div class="nm">赵明轩</div><div class="em">zhao@hengrui.law</div></div>
+            <span class="tag org-off">企业账号已停用</span>
+            <div class="row-actions"><button class="icon-btn" onclick="toggleMenu(this,'menu-ws-member')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div>
+          </div>
+          <div class="d-member">
+            <span class="avatar" style="background:#15803d">孙</span>
+            <div class="info"><div class="nm">孙雨晴</div><div class="em">sun@hengrui.law</div></div>
+            <span class="tag ws-editor">Editor</span>
+            <div class="row-actions"><button class="icon-btn" onclick="toggleMenu(this,'menu-ws-member')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div>
+          </div>
+        </div>
+        <!-- 版本视图 -->
+        <div class="d-view" id="dv-versions">
+          <div class="d-version"><span class="v-num">v42</span><span class="msg">同步:更新尽调清单与三份补充协议</span><span class="meta">陈思琪 · 12 分钟前</span></div>
+          <div class="d-version"><span class="v-num milestone">v40 ★</span><span class="msg">里程碑:第一轮交割文件定稿</span><span class="meta">李文博 · 2 天前</span></div>
+          <div class="d-version"><span class="v-num">v39</span><span class="msg">同步:法务意见书修订</span><span class="meta">孙雨晴 · 3 天前</span></div>
+          <div class="d-version"><span class="v-num">v38</span><span class="msg">同步:新增反垄断申报材料目录</span><span class="meta">陈思琪 · 5 天前</span></div>
+        </div>
+        <!-- 事件视图 -->
+        <div class="d-view" id="dv-events">
+          <div class="d-event"><span class="e-dot gov"></span><div class="txt"><b>王律师</b> 将项目 owner 由 赵明轩 转移给 李文博</div><span class="time">1 小时前</span></div>
+          <div class="d-event"><span class="e-dot"></span><div class="txt"><b>陈思琪</b> 推送了版本 v42</div><span class="time">12 分钟前</span></div>
+          <div class="d-event"><span class="e-dot"></span><div class="txt"><b>孙雨晴</b> 加入了项目</div><span class="time">昨天</span></div>
+          <div class="d-event"><span class="e-dot"></span><div class="txt"><b>李文博</b> 将 v40 设为里程碑「第一轮交割文件定稿」</div><span class="time">2 天前</span></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 抽屉内成员菜单 -->
+    <div class="menu" id="menu-ws-member">
+      <button class="mi" onclick="openModal('modal-transfer'); closeMenus()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7"/></svg><span>设为项目 Owner<span class="desc">转移项目所有权</span></span></button>
+      <div class="sep"></div>
+      <button class="mi danger" onclick="openModal('modal-remove'); closeMenus()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m17 8 5 5m0-5-5 5"/></svg><span>移出项目<span class="desc">不影响其企业账号</span></span></button>
+    </div>
+    <div class="menu" id="menu-owner-member">
+      <button class="mi" onclick="openModal('modal-transfer'); closeMenus()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7"/></svg><span>转移 Owner 给其他成员<span class="desc">owner 需先转移才能移出</span></span></button>
+    </div>
+
+    <!-- ───────── 弹窗:归档 ───────── -->
+    <div class="overlay" id="modal-archive">
+      <div class="modal">
+        <div class="m-head"><h3>归档项目「XX 集团并购重组专项」?</h3><p>项目 · 8 名成员 · 当前 v42</p></div>
+        <div class="m-body">
+          <div class="info-box">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/></svg>
+            <div>归档后项目进入<b>只读</b>状态:成员仍可拉取文件、查看版本历史,但<b>无法推送新变更</b>。本地文件不受影响,可随时恢复。</div>
+          </div>
+        </div>
+        <div class="m-foot">
+          <button class="btn-secondary" onclick="closeModal('modal-archive')">取消</button>
+          <button class="btn-amber" onclick="closeModal('modal-archive'); toast('项目已归档(只读)')">确认归档</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── 弹窗:停用 ───────── -->
+    <div class="overlay" id="modal-disable">
+      <div class="modal">
+        <div class="m-head"><h3>停用项目「XX 集团并购重组专项」?</h3><p>项目 · 8 名成员 · 当前 v42</p></div>
+        <div class="m-body">
+          <div class="warn-box">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3z"/><path d="M12 9v4m0 4h.01"/></svg>
+            <div>停用后所有成员<b>立即</b>无法推送、拉取或查看此项目,项目从成员的协作列表中消失。云端数据与成员本地文件均保留,可随时恢复。</div>
+          </div>
+        </div>
+        <div class="m-foot">
+          <button class="btn-secondary" onclick="closeModal('modal-disable')">取消</button>
+          <button class="btn-danger" onclick="closeModal('modal-disable'); toast('项目已停用')">确认停用</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── 弹窗:转移 Owner ───────── -->
+    <div class="overlay" id="modal-transfer">
+      <div class="modal">
+        <div class="m-head"><h3>转移项目 Owner</h3><p>「XX 集团并购重组专项」· 当前 owner:赵明轩(企业账号已停用)</p></div>
+        <div class="m-body">
+          <span class="field-label">选择新 Owner(项目现有成员)</span>
+          <div class="pick-list">
+            <div class="pick-item selected" onclick="pick(this)"><span class="radio"></span><span class="avatar-xs" style="background:#0e7490">李</span><div><div class="nm">李文博</div><div class="em">li@hengrui.law</div></div></div>
+            <div class="pick-item" onclick="pick(this)"><span class="radio"></span><span class="avatar-xs" style="background:#7c3aed">陈</span><div><div class="nm">陈思琪</div><div class="em">chen@hengrui.law</div></div></div>
+            <div class="pick-item" onclick="pick(this)"><span class="radio"></span><span class="avatar-xs" style="background:#15803d">孙</span><div><div class="nm">孙雨晴</div><div class="em">sun@hengrui.law</div></div></div>
+          </div>
+          <div class="info-box" style="margin-top:0">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4m0-4h.01"/></svg>
+            <div>原 owner 将降为 Editor;新 owner 获得文件夹结构调整、里程碑等项目管理权限。</div>
+          </div>
+        </div>
+        <div class="m-foot">
+          <button class="btn-secondary" onclick="closeModal('modal-transfer')">取消</button>
+          <button class="btn-primary" onclick="closeModal('modal-transfer'); toast('已将项目 owner 转移给 李文博')">确认转移</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── 弹窗:移出成员 ───────── -->
+    <div class="overlay" id="modal-remove">
+      <div class="modal" style="width:400px">
+        <div class="m-head"><h3>将 陈思琪 移出此项目?</h3><p>「XX 集团并购重组专项」· Editor</p></div>
+        <div class="m-body">
+          <div class="warn-box">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3z"/><path d="M12 9v4m0 4h.01"/></svg>
+            <div>移出后该成员<b>立即</b>无法访问此项目。其企业账号与其他项目不受影响;其本地文件保留。该成员可被重新邀请加入。</div>
+          </div>
+        </div>
+        <div class="m-foot">
+          <button class="btn-secondary" onclick="closeModal('modal-remove')">取消</button>
+          <button class="btn-danger" onclick="closeModal('modal-remove'); toast('已将 陈思琪 移出项目')">确认移出</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+  </main>
+</div>
+
+<script>
+  function closeMenus() { document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open')); }
+  function toggleMenu(btn, id) {
+    const menu = document.getElementById(id);
+    const wasOpen = menu.classList.contains('open');
+    closeMenus();
+    if (wasOpen) return;
+    const r = btn.getBoundingClientRect();
+    menu.style.top = (r.bottom + 4) + 'px';
+    menu.style.left = Math.min(r.left, window.innerWidth - 200) + 'px';
+    menu.style.position = 'fixed';
+    menu.classList.add('open');
+  }
+  document.addEventListener('click', (e) => { if (!e.target.closest('.menu') && !e.target.closest('.icon-btn')) closeMenus(); });
+
+  function openDrawer() { document.getElementById('drawer').classList.add('open'); document.getElementById('drawer-overlay').classList.add('open'); }
+  function closeDrawer() { document.getElementById('drawer').classList.remove('open'); document.getElementById('drawer-overlay').classList.remove('open'); }
+  function switchDView(tab, id) {
+    document.querySelectorAll('.d-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelectorAll('.d-view').forEach(v => v.classList.remove('on'));
+    document.getElementById(id).classList.add('on');
+  }
+  function openModal(id) { document.getElementById(id).classList.add('open'); }
+  function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+  document.querySelectorAll('.overlay').forEach(o => o.addEventListener('mousedown', (e) => { if (e.target === o) o.classList.remove('open'); }));
+  function pick(el) { el.parentElement.querySelectorAll('.pick-item').forEach(i => i.classList.remove('selected')); el.classList.add('selected'); }
+  function toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(t._timer); t._timer = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+</script>
+</body>
+</html>

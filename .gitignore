@@ -6,3 +6,6 @@ dist/
 .env
 .env.*
 !env.example
+
+# H8 release gate reports (local test artifacts, not source)
+.h8-reports/

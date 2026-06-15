@@ -22,6 +22,8 @@ import { CloudPublishProvider } from './hooks/useCloudPublish.jsx';
 import useUsageTracker from './hooks/useUsageTracker.js';
 import OnboardingScreen from './components/OnboardingScreen.jsx';
 import LoginPage from './components/auth/LoginPage.jsx';
+import EnterpriseConsolePage from './components/enterprise/EnterpriseConsolePage.jsx';
+import { AuthProvider, buildAuthValue } from './contexts/AuthContext.jsx';
 
 const App = () => {
   const [showOnboarding, setShowOnboarding] = useState(null); // null = loading, true/false = resolved
@@ -87,6 +89,17 @@ const App = () => {
     return () => { cancelled = true; };
   }, [uiMode]);
 
+  // H2 (U3): single auth source for the renderer tree via AuthContext.
+  const refreshAuth = useCallback(async () => {
+    try {
+      const res = await window.ipm?.auth?.getStatus?.();
+      if (res) setAuthStatus(res);
+    } catch {
+      // Keep the existing status on refresh failure.
+    }
+  }, []);
+  const authValue = useMemo(() => buildAuthValue(authStatus, refreshAuth), [authStatus, refreshAuth]);
+
   useEffect(() => {
     document.documentElement.classList.toggle('ui-bubble', uiMode === 'bubble');
     document.body.classList.toggle('ui-floating', uiMode === 'floating');
@@ -115,7 +128,7 @@ const App = () => {
   const [displayNav, setDisplayNav] = useState(activeNav);
   const fadeTimerRef = useRef(null);
 
-  const fadeEligible = useMemo(() => new Set(['overview', 'mydata', 'knowledge', 'knowclaw-v2', 'tutorial', 'cloud-projects']), []);
+  const fadeEligible = useMemo(() => new Set(['overview', 'mydata', 'knowledge', 'knowclaw-v2', 'tutorial', 'cloud-projects', 'enterprise-console']), []);
 
   useEffect(() => {
     if (fadeTimerRef.current) {
@@ -269,6 +282,7 @@ const App = () => {
   }
 
   return (
+    <AuthProvider value={authValue}>
     <ConfirmDialogProvider>
     <ToastProvider>
     <KnowClawPersistProvider>
@@ -330,7 +344,7 @@ const App = () => {
               }`}
             />
             {displayNav === 'settings' ? (
-            <SettingsPage currentUser={authStatus?.user || null} />
+            <SettingsPage />
             ) : displayNav === 'tutorial' ? (
             <TutorialPage />
             ) : displayNav === 'overview' ? (
@@ -345,6 +359,8 @@ const App = () => {
             <KnowClawV2Page currentUser={authStatus?.user || null} />
             ) : displayNav === 'cloud-projects' ? (
             <CloudProjectsPage onOpenLocal={(domain) => openMyDataDomain(domain || 'projects')} />
+            ) : displayNav === 'enterprise-console' ? (
+            <EnterpriseConsolePage />
             ) : displayNav === 'mydata' ? (
               <MyDataPage section={myDataSection} onSectionChange={setMyDataSection} stats={workspaceStats} onNavigate={setActiveNav} searchNavTarget={searchNavTarget} onSearchNavDone={() => setSearchNavTarget(null)} />
           ) : (
@@ -385,6 +401,7 @@ const App = () => {
     </KnowClawPersistProvider>
     </ToastProvider>
     </ConfirmDialogProvider>
+    </AuthProvider>
   );
 };
 

@@ -35,6 +35,7 @@ import {
   downloadBuffer,
   installSkillPackage,
   putBufferToSignedUrl,
+  readSkillPackage,
   sha256Of,
 } from '../cloud/skillPackage.js';
 
@@ -1112,6 +1113,88 @@ export function registerSkillsIpc({ ipcMain, readState, writeState }) {
       return await client.post(`/api/skills/${id}/access`, {
         grants: Array.isArray(payload?.grants) ? payload.grants : [],
       });
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // H5 — skill governance additions
+  // --------------------------------------------------------------------------
+
+  ipcMain.handle('knowclaw:registryListMine', async () => {
+    try {
+      const client = createAuthCloudClient();
+      return await client.get('/api/skills/mine');
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err), skills: [] };
+    }
+  });
+
+  ipcMain.handle('knowclaw:registryAdminOverview', async () => {
+    try {
+      const client = createAuthCloudClient();
+      return await client.get('/api/skills/admin/overview');
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err), skills: [] };
+    }
+  });
+
+  ipcMain.handle('knowclaw:registryListInstallers', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    try {
+      const client = createAuthCloudClient();
+      return await client.get(`/api/skills/${id}/installers`);
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err), installers: [] };
+    }
+  });
+
+  ipcMain.handle('knowclaw:registryArchiveSkill', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    try {
+      const client = createAuthCloudClient();
+      return await client.post(`/api/skills/${id}/archive`, {});
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  // Download a version package and return its SKILL.md + manifest WITHOUT
+  // installing — powers the market detail modal's preview.
+  ipcMain.handle('knowclaw:registryPreviewSkill', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    const versionId = typeof payload?.versionId === 'string' ? payload.versionId : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    if (!versionId) return { ok: false, error: 'versionId is required' };
+    try {
+      const client = createAuthCloudClient();
+      const info = await client.post(`/api/skills/${id}/versions/${versionId}/download`, {});
+      if (!info?.ok) return { ok: false, error: info?.error || '获取下载 URL 失败' };
+      const buffer = await downloadBuffer(info.downloadUrl);
+      const actualSha = sha256Of(buffer);
+      if (actualSha.toLowerCase() !== String(info.packageSha256 || '').toLowerCase()) {
+        return { ok: false, error: 'Skill 包校验失败：sha256 不匹配' };
+      }
+      const pkg = readSkillPackage(buffer);
+      const skillMdFile = (pkg.files || []).find((f) => f.path === 'SKILL.md');
+      const skillMd = skillMdFile
+        ? Buffer.from(String(skillMdFile.content || ''), skillMdFile.encoding === 'base64' ? 'base64' : 'utf-8').toString('utf-8')
+        : '';
+      return { ok: true, manifest: pkg.manifest, skillMd, version: info.version };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  ipcMain.handle('knowclaw:registryUnarchiveSkill', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    try {
+      const client = createAuthCloudClient();
+      return await client.post(`/api/skills/${id}/unarchive`, {});
     } catch (err) {
       return { ok: false, error: String(err?.message || err) };
     }

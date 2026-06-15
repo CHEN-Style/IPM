@@ -63,18 +63,20 @@ export async function runSelfCheck(): Promise<SelfCheckSummary> {
     );
 
     const sha = `selfcheck-${tag}`.padEnd(64, '0').slice(0, 64);
+    // H1: objects are org-scoped (`org_id` NOT NULL, org-scoped storage key).
     const ob = await client.query<{ id: string }>(
       `INSERT INTO objects
-         (sha256, size_bytes, mime_type, bucket, region, storage_key, status, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, 'available', $7)
+         (org_id, sha256, size_bytes, mime_type, bucket, region, storage_key, status, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'available', $8)
        RETURNING id`,
       [
+        orgId,
         sha,
         2048,
         'application/pdf',
         'ipm-cloud-dev-1',
         'oss-cn-shanghai',
-        `blobs/sha256/${sha.slice(0, 2)}/${sha}.bin`,
+        `blobs/${orgId}/sha256/${sha.slice(0, 2)}/${sha}.bin`,
         userId,
       ],
     );

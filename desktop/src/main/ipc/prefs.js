@@ -202,6 +202,38 @@ export function registerPrefsIpc({ ipcMain, readState, writeState, normalizeFloa
     }
   });
 
+  ipcMain.handle('prefs/orgConfig/enableTemplate', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    try {
+      const client = createAuthCloudClient();
+      return await client.post(`/api/org-configs/templates/${id}/enable`, {});
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  ipcMain.handle('prefs/orgConfig/updateTemplate', async (_evt, payload) => {
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    if (!id) return { ok: false, error: 'id is required' };
+    const patch = {};
+    if (typeof payload?.name === 'string') patch.name = payload.name.trim();
+    if (typeof payload?.description === 'string') patch.description = payload.description.trim();
+    if (payload?.maxUses === null || (Number.isInteger(payload?.maxUses) && payload.maxUses > 0)) {
+      patch.maxUses = payload.maxUses ?? null;
+    }
+    if (payload?.expiresAt === null || (typeof payload?.expiresAt === 'string' && payload.expiresAt)) {
+      patch.expiresAt = payload.expiresAt ?? null;
+    }
+    if (Object.keys(patch).length === 0) return { ok: false, error: 'no fields to update' };
+    try {
+      const client = createAuthCloudClient();
+      return await client.patch(`/api/org-configs/templates/${id}`, patch);
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
   ipcMain.handle('prefs/orgConfig/listUses', async (_evt, payload) => {
     const id = typeof payload?.id === 'string' ? payload.id : '';
     if (!id) return { ok: false, error: 'id is required', uses: [] };

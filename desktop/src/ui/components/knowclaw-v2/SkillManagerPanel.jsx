@@ -38,7 +38,8 @@ import {
 
 import { useConfirmDialog } from '../../hooks/useConfirmDialog.jsx';
 import SkillMarketplacePanel from './SkillMarketplacePanel.jsx';
-import SkillReviewAdminPanel from './SkillReviewAdminPanel.jsx';
+import MySubmissionsPanel from './MySubmissionsPanel.jsx';
+import { parseRegistryProvenance } from './skillDiff.js';
 
 // Visual config for the four source buckets. `key` matches SkillInfo
 // `source` field exactly so the grouping pass is a straight lookup.
@@ -90,7 +91,7 @@ function truncate(text, max = 64) {
 // One row per skill. We split it out so the per-row component can
 // own its hover state for the (otherwise visually noisy) delete
 // button without re-rendering the whole panel on hover.
-const SkillRow = ({ skill, onToggle, onDelete, onViewDetail, busy }) => {
+const SkillRow = ({ skill, onToggle, onDelete, onViewDetail, busy, updateAvailable }) => {
   const [hover, setHover] = useState(false);
   const canDelete = skill.source !== 'builtin';
   const enabled = Boolean(skill.enabled);
@@ -137,6 +138,14 @@ const SkillRow = ({ skill, onToggle, onDelete, onViewDetail, busy }) => {
                 title="只能通过 /skill:name 命令显式调用"
               >
                 manual
+              </span>
+            )}
+            {updateAvailable && (
+              <span
+                className="text-[10px] px-1 rounded bg-amber-50 text-amber-700 shrink-0"
+                title="组织市场有新版本，可到「组织市场」Tab 更新"
+              >
+                可更新
               </span>
             )}
           </div>
@@ -196,7 +205,7 @@ const SkillRow = ({ skill, onToggle, onDelete, onViewDetail, busy }) => {
 // the group is empty so the user can see the empty state in context
 // (especially relevant for 用户 / 导入 buckets that may be empty for
 // fresh installs).
-const SkillGroup = ({ config, skills, onToggle, onDelete, onViewDetail, busyName }) => {
+const SkillGroup = ({ config, skills, onToggle, onDelete, onViewDetail, busyName, updateBadges }) => {
   const [collapsed, setCollapsed] = useState(false);
   const count = skills.length;
 
@@ -228,6 +237,7 @@ const SkillGroup = ({ config, skills, onToggle, onDelete, onViewDetail, busyName
               onDelete={onDelete}
               onViewDetail={onViewDetail}
               busy={busyName === s.name}
+              updateAvailable={Boolean(updateBadges?.has?.(s.name))}
             />
           ))}
         </ul>
@@ -248,21 +258,42 @@ const SkillManagerPanel = ({
   onPublish,
   listRegistrySkills,
   installRegistrySkill,
-  listSkillReviewQueue,
-  listOrgUsersForSkills,
-  reviewRegistrySkill,
-  getRegistrySkillAccess,
-  setRegistrySkillAccess,
+  getRegistrySkill,
+  previewRegistrySkill,
+  listMineRegistrySkills,
   onRegistryInstalled,
   cwd,
-  currentUser,
 }) => {
   const confirm = useConfirmDialog();
   const [query, setQuery] = useState('');
   const [busyName, setBusyName] = useState(null);
   const [activeTab, setActiveTab] = useState('local');
   const searchInputRef = useRef(null);
-  const canAdminSkills = currentUser?.orgRole === 'owner' || currentUser?.orgRole === 'admin';
+
+  // H5: "可更新" badges on the local tab. We fetch the market list once
+  // (and again on local-tab re-entry) and cross-reference each installed
+  // registry skill's provenance (`org_registry:<id>:<versionId>`) against
+  // the server-computed `updateAvailable` flag. The result is a Set of
+  // local skill names whose registry counterpart has a newer version.
+  const [updateBadges, setUpdateBadges] = useState(() => new Set());
+  useEffect(() => {
+    if (activeTab !== 'local') return undefined;
+    let cancelled = false;
+    (async () => {
+      const res = await listRegistrySkills?.({});
+      if (cancelled || !res?.ok) return;
+      const byId = new Map((res.skills || []).map((s) => [s.id, s]));
+      const next = new Set();
+      for (const s of Array.isArray(skills) ? skills : []) {
+        const prov = parseRegistryProvenance(s.importedFrom);
+        if (!prov) continue;
+        const remote = byId.get(prov.skillId);
+        if (remote?.updateAvailable) next.add(s.name);
+      }
+      setUpdateBadges(next);
+    })();
+    return () => { cancelled = true; };
+  }, [activeTab, listRegistrySkills, skills]);
 
   // Filter + group in one pass. We rebuild the filtered map on each
   // render because both `skills` and `query` are cheap inputs and the
@@ -342,7 +373,7 @@ const SkillManagerPanel = ({
   }, [activeTab]);
 
   return (
-    <aside className="w-72 shrink-0 h-full flex flex-col border-l border-slate-100 bg-slate-50/50">
+    <aside className="w-[340px] shrink-0 h-full flex flex-col border-l border-slate-100 bg-slate-50/50">
       {/* Header */}
       <div className="shrink-0 px-3 py-3 bg-white border-b border-slate-100 flex items-center gap-2">
         <Puzzle size={16} className="text-indigo-500" />
@@ -375,36 +406,25 @@ const SkillManagerPanel = ({
 
       {/* Search */}
       <div className="shrink-0 px-3 py-2 bg-white border-b border-slate-100">
-        <div className={`grid ${canAdminSkills ? 'grid-cols-3' : 'grid-cols-2'} gap-1 p-1 mb-2 rounded-lg bg-slate-100`}>
-          <button
-            type="button"
-            onClick={() => setActiveTab('local')}
-            className={`h-7 rounded-md text-[12px] font-medium transition-colors ${
-              activeTab === 'local' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            本地
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('market')}
-            className={`h-7 rounded-md text-[12px] font-medium transition-colors ${
-              activeTab === 'market' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            组织市场
-          </button>
-          {canAdminSkills && (
+        {/* H5: admin review moved to the enterprise console「技能治理」tab;
+            members get a「我的提交」tab to track their own publications. */}
+        <div className="grid grid-cols-3 gap-1 p-1 mb-2 rounded-lg bg-slate-100">
+          {[
+            ['local', '本地'],
+            ['market', '组织市场'],
+            ['mine', '我的提交'],
+          ].map(([key, label]) => (
             <button
+              key={key}
               type="button"
-              onClick={() => setActiveTab('review')}
+              onClick={() => setActiveTab(key)}
               className={`h-7 rounded-md text-[12px] font-medium transition-colors ${
-                activeTab === 'review' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                activeTab === key ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
               }`}
             >
-              审核管理
+              {label}
             </button>
-          )}
+          ))}
         </div>
         {activeTab === 'local' && (
         <div className="relative">
@@ -433,19 +453,18 @@ const SkillManagerPanel = ({
       </div>
 
       {/* Body */}
-      {activeTab === 'review' && canAdminSkills ? (
-        <SkillReviewAdminPanel
-          listSkillReviewQueue={listSkillReviewQueue}
-          listOrgUsersForSkills={listOrgUsersForSkills}
-          reviewRegistrySkill={reviewRegistrySkill}
-          getRegistrySkillAccess={getRegistrySkillAccess}
-          setRegistrySkillAccess={setRegistrySkillAccess}
+      {activeTab === 'mine' ? (
+        <MySubmissionsPanel
+          listMineRegistrySkills={listMineRegistrySkills}
+          onSubmitNewVersion={(registrySkill) => onPublish?.(registrySkill)}
         />
       ) : activeTab === 'market' ? (
         <SkillMarketplacePanel
           listRegistrySkills={listRegistrySkills}
           installRegistrySkill={installRegistrySkill}
-          onPublish={onPublish}
+          getRegistrySkill={getRegistrySkill}
+          previewRegistrySkill={previewRegistrySkill}
+          onPublish={() => onPublish?.(null)}
           onInstalled={onRegistryInstalled}
           cwd={cwd}
         />
@@ -485,6 +504,7 @@ const SkillManagerPanel = ({
                 onDelete={handleDelete}
                 onViewDetail={onViewDetail}
                 busyName={busyName}
+                updateBadges={updateBadges}
               />
             ))
         )}

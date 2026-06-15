@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { pool } from '../../infra/db/postgres.js';
+import { encryptConfig, decryptConfig } from '../../infra/crypto.js';
 
 const configSchema = z.object({
   ai: z.record(z.string(), z.unknown()).optional(),
@@ -15,6 +16,16 @@ const createTemplateSchema = z.object({
   maxUses: z.number().int().positive().nullable().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
 });
+
+const updateTemplateSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  description: z.string().max(1000).optional(),
+  maxUses: z.number().int().positive().nullable().optional(),
+  expiresAt: z.string().datetime().nullable().optional(),
+}).refine(
+  (v) => v.name !== undefined || v.description !== undefined || v.maxUses !== undefined || v.expiresAt !== undefined,
+  'no fields to update',
+);
 
 const codeSchema = z.object({
   code: z.string().min(1).max(64),
@@ -71,7 +82,8 @@ function summarizeConfig(config: any) {
 }
 
 function mapTemplate(row: any, includeCode = true, includeConfig = false) {
-  const config = row.config_json || {};
+  // config_json is sealed at rest (H6); legacy plaintext rows pass through.
+  const config = decryptConfig<any>(row.config_json) || {};
   return {
     id: row.id,
     templateType: row.template_type,
@@ -124,7 +136,7 @@ export async function registerOrgConfigRoutes(app: FastifyInstance) {
         orgId,
         data.name.trim(),
         data.description?.trim() || '',
-        JSON.stringify(data.config),
+        JSON.stringify(encryptConfig(data.config)),
         code,
         data.maxUses ?? null,
         data.expiresAt ?? null,
@@ -200,6 +212,79 @@ export async function registerOrgConfigRoutes(app: FastifyInstance) {
       `INSERT INTO events (org_id, actor_id, event_type, payload)
        VALUES ($1, $2, 'org_config_template.disabled', $3::jsonb)`,
       [orgId, userId, JSON.stringify({ templateId: id })],
+    );
+    return reply.send({ ok: true, template: mapTemplate(res.rows[0], true, false) });
+  });
+
+  app.post('/api/org-configs/templates/:id/enable', async (request, reply) => {
+    const userId = request.userId;
+    const orgId = request.orgId;
+    if (!userId) return reply.code(401).send({ ok: false, error: 'Unauthenticated.' });
+    const member = await requireOrgAdmin(userId, orgId);
+    if (!member || !orgId) return reply.code(403).send({ ok: false, error: 'Org admin required.' });
+    const { id } = request.params as { id: string };
+    // Re-enabling is the inverse of disable; archived templates stay archived.
+    const res = await pool.query(
+      `UPDATE org_config_templates
+          SET status = 'active', updated_at = now()
+        WHERE id = $1 AND org_id = $2 AND status = 'disabled'
+        RETURNING *`,
+      [id, orgId],
+    );
+    if (res.rowCount === 0) {
+      const exists = await pool.query(
+        `SELECT status FROM org_config_templates WHERE id = $1 AND org_id = $2`,
+        [id, orgId],
+      );
+      if (exists.rowCount === 0) return reply.code(404).send({ ok: false, error: 'Template not found.' });
+      return reply.code(409).send({ ok: false, error: '仅停用状态的模板可以重新启用。' });
+    }
+    await pool.query(
+      `INSERT INTO events (org_id, actor_id, event_type, payload)
+       VALUES ($1, $2, 'org_config_template.enabled', $3::jsonb)`,
+      [orgId, userId, JSON.stringify({ templateId: id })],
+    );
+    return reply.send({ ok: true, template: mapTemplate(res.rows[0], true, false) });
+  });
+
+  app.patch('/api/org-configs/templates/:id', async (request, reply) => {
+    const userId = request.userId;
+    const orgId = request.orgId;
+    if (!userId) return reply.code(401).send({ ok: false, error: 'Unauthenticated.' });
+    const member = await requireOrgAdmin(userId, orgId);
+    if (!member || !orgId) return reply.code(403).send({ ok: false, error: 'Org admin required.' });
+    const { id } = request.params as { id: string };
+
+    const parsed = updateTemplateSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ ok: false, error: 'Invalid body', details: parsed.error.flatten() });
+    const data = parsed.data;
+
+    // Only metadata is editable; the config payload itself is immutable (rotate
+    // the source and create a new template to change distributed secrets).
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    if (data.name !== undefined) { values.push(data.name.trim()); sets.push(`name = $${values.length}`); }
+    if (data.description !== undefined) { values.push(data.description.trim()); sets.push(`description = $${values.length}`); }
+    if (data.maxUses !== undefined) { values.push(data.maxUses); sets.push(`max_uses = $${values.length}`); }
+    if (data.expiresAt !== undefined) { values.push(data.expiresAt); sets.push(`expires_at = $${values.length}`); }
+    sets.push('updated_at = now()');
+
+    values.push(id);
+    const idParam = values.length;
+    values.push(orgId);
+    const orgParam = values.length;
+    const res = await pool.query(
+      `UPDATE org_config_templates
+          SET ${sets.join(', ')}
+        WHERE id = $${idParam} AND org_id = $${orgParam} AND status <> 'archived'
+        RETURNING *`,
+      values,
+    );
+    if (res.rowCount === 0) return reply.code(404).send({ ok: false, error: 'Template not found.' });
+    await pool.query(
+      `INSERT INTO events (org_id, actor_id, event_type, payload)
+       VALUES ($1, $2, 'org_config_template.updated', $3::jsonb)`,
+      [orgId, userId, JSON.stringify({ templateId: id, fields: Object.keys(data) })],
     );
     return reply.send({ ok: true, template: mapTemplate(res.rows[0], true, false) });
   });
@@ -285,7 +370,7 @@ export async function registerOrgConfigRoutes(app: FastifyInstance) {
            FROM org_config_templates t
            LEFT JOIN users u ON u.id = t.created_by
           WHERE t.org_id = $1 AND t.code = $2 AND t.template_type = 'ai_settings'
-          FOR UPDATE`,
+          FOR UPDATE OF t`,
         [orgId, code],
       );
       const tpl = rows.rows[0];

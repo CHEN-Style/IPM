@@ -18,9 +18,10 @@ import {
   Upload,
   X,
   CornerDownLeft,
-  Cloud,
   CloudUpload,
   Loader2,
+  PanelRightOpen,
+  PanelRightClose,
 } from 'lucide-react';
 
 const DEBOUNCE_MS = 280;
@@ -70,12 +71,12 @@ const HeaderBar = ({
   isAttachedBroken,
   onRefreshAttached,
   onRelocateAttached,
-  // C3: 云端发布（仅在项目根级显示）
+  // H4.5: 云端状态 chip（替代原「云端 vN」徽标 + 「发布到云端」按钮）。
+  // cloudChip = { key, tone: 'green'|'indigo'|'amber'|'red'|'slate', text, spin? }
   showCloudPublish,
-  cloudPublishing,
-  cloudBound,
-  cloudVersionNumber,
-  onPublishCurrent,
+  cloudChip,
+  cloudPanelOpen,
+  onCloudChipClick,
 }) => {
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef(null);
@@ -499,32 +500,57 @@ const HeaderBar = ({
             >
               <Sparkles size={13} /> {aiUploadRunning ? 'AI分类中…' : 'AI分类'}
             </button>
-            {showCloudPublish && (
-              cloudPublishing ? (
-                <span
-                  className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-[#3e4b9c]/10 text-[#3e4b9c] text-xs font-medium whitespace-nowrap shrink-0"
-                  title="正在发布到云端"
-                >
-                  <Loader2 size={13} className="animate-spin" /> 发布中…
-                </span>
-              ) : cloudBound ? (
-                <span
-                  className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100 text-xs font-medium whitespace-nowrap shrink-0"
-                  title={cloudVersionNumber ? `已绑定云端 · 版本 v${cloudVersionNumber}` : '已绑定云端'}
-                >
-                  <Cloud size={13} /> 云端{cloudVersionNumber ? ` v${cloudVersionNumber}` : ''}
-                </span>
-              ) : (
+            {showCloudPublish && cloudChip && (() => {
+              // H4.5: single cloud entry — a state-coloured chip that opens the
+              // sync drawer (or the publish modal when the project is unbound).
+              const toneStyles = {
+                green: { background: '#ecfdf5', color: '#047857', border: '1px solid #cfe7db' },
+                indigo: { background: '#eceef7', color: '#3e4b9c', border: '1px solid #d8dbed' },
+                amber: { background: '#fffbeb', color: '#b45309', border: '1px solid #fde9c8' },
+                red: { background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' },
+                slate: { background: '#fff', color: '#475569', border: '1px solid #e2e8f0' },
+              };
+              const dotColors = {
+                green: '#2d7a5f', indigo: '#3e4b9c', amber: '#d97706', red: '#dc2626', slate: '#94a3b8',
+              };
+              const style = toneStyles[cloudChip.tone] || toneStyles.slate;
+              // Bound projects: the chip opens the sync panel — make that
+              // affordance explicit with a divider + panel icon, hover lift,
+              // and a pressed ring while the panel is open.
+              const opensPanel = cloudChip.key !== 'unbound' && cloudChip.key !== 'publishing';
+              const PanelIcon = cloudPanelOpen ? PanelRightClose : PanelRightOpen;
+              return (
                 <button
                   type="button"
-                  onClick={() => onPublishCurrent?.()}
-                  className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-white text-[#3e4b9c] border border-[#3e4b9c]/30 hover:bg-[#3e4b9c]/5 transition-colors text-xs font-medium whitespace-nowrap shrink-0"
-                  title="将该项目发布到云端"
+                  onClick={() => onCloudChipClick?.()}
+                  className="group inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium whitespace-nowrap shrink-0 transition-all hover:brightness-[0.97] hover:shadow-sm active:scale-[0.98]"
+                  style={{
+                    ...style,
+                    ...(opensPanel && cloudPanelOpen ? { boxShadow: '0 0 0 2px rgba(62,75,156,0.18)' } : null),
+                  }}
+                  title={cloudChip.key === 'unbound'
+                    ? '将该项目发布到云端'
+                    : cloudChip.key === 'publishing'
+                      ? '查看发布进度'
+                      : cloudPanelOpen ? '收起同步面板' : '打开同步面板：查看变更、拉取/推送、版本历史'}
                 >
-                  <CloudUpload size={13} /> 发布到云端
+                  {cloudChip.spin ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : cloudChip.key === 'unbound' ? (
+                    <CloudUpload size={13} />
+                  ) : (
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: dotColors[cloudChip.tone] || dotColors.slate }} />
+                  )}
+                  {cloudChip.text}
+                  {opensPanel && (
+                    <>
+                      <span className="w-px h-3.5 shrink-0 opacity-30" style={{ background: 'currentColor' }} />
+                      <PanelIcon size={13} className="shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
+                    </>
+                  )}
                 </button>
-              )
-            )}
+              );
+            })()}
             {isAttachedProject && (
               <button
                 type="button"

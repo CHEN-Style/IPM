@@ -119,13 +119,11 @@ const KnowClawV2Page = ({ currentUser = null }) => {
     scanExternalSkills,
     chooseSkillDir,
     listRegistrySkills,
+    getRegistrySkill,
     publishRegistrySkill,
     installRegistrySkill,
-    listSkillReviewQueue,
-    listOrgUsersForSkills,
-    reviewRegistrySkill,
-    getRegistrySkillAccess,
-    setRegistrySkillAccess,
+    listMineRegistrySkills,
+    previewRegistrySkill,
     // E.5: Plan-mode state + actions.
     planMode,
     setPlanMode,
@@ -257,6 +255,8 @@ const KnowClawV2Page = ({ currentUser = null }) => {
   // "+ 导入技能" button at the bottom of SkillManagerPanel.
   const [showImportModal, setShowImportModal] = useState(false);
   const [showPublishSkillModal, setShowPublishSkillModal] = useState(false);
+  // H5: registry skill targeted by「提交新版本」(null = fresh publish).
+  const [publishSkillTarget, setPublishSkillTarget] = useState(null);
 
   // Skill Selector: names of skills the user has pinned to the next
   // outgoing message. Cleared after each successful send (see
@@ -904,17 +904,19 @@ const KnowClawV2Page = ({ currentUser = null }) => {
           onViewDetail={(skill) => setSkillDetailTarget(skill)}
           onClose={() => setRightPanel(null)}
           onImport={() => setShowImportModal(true)}
-          onPublish={() => setShowPublishSkillModal(true)}
+          onPublish={(target) => {
+            // H5: `target` is a registry skill when invoked from「我的提交 →
+            // 提交新版本」, null for a fresh publish from the market tab.
+            setPublishSkillTarget(target || null);
+            setShowPublishSkillModal(true);
+          }}
           listRegistrySkills={listRegistrySkills}
           installRegistrySkill={installRegistrySkill}
-          listSkillReviewQueue={listSkillReviewQueue}
-          listOrgUsersForSkills={listOrgUsersForSkills}
-          reviewRegistrySkill={reviewRegistrySkill}
-          getRegistrySkillAccess={getRegistrySkillAccess}
-          setRegistrySkillAccess={setRegistrySkillAccess}
+          getRegistrySkill={getRegistrySkill}
+          previewRegistrySkill={previewRegistrySkill}
+          listMineRegistrySkills={listMineRegistrySkills}
           onRegistryInstalled={() => { void loadSkills?.(currentCwd || undefined); }}
           cwd={currentCwd || undefined}
-          currentUser={currentUser}
         />
       )}
       {/* SK1: skill detail modal — overlays everything when open. */}
@@ -950,10 +952,16 @@ const KnowClawV2Page = ({ currentUser = null }) => {
         open={showPublishSkillModal}
         skills={skills}
         cwd={currentCwd || undefined}
-        onClose={() => setShowPublishSkillModal(false)}
+        target={publishSkillTarget}
+        listMineRegistrySkills={listMineRegistrySkills}
+        onClose={() => {
+          setShowPublishSkillModal(false);
+          setPublishSkillTarget(null);
+        }}
         publishRegistrySkill={publishRegistrySkill}
         onPublished={() => {
           setShowPublishSkillModal(false);
+          setPublishSkillTarget(null);
         }}
       />
     </div>

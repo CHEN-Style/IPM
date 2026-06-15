@@ -266,10 +266,17 @@ export async function pushSync(opts) {
         })),
       });
       const urlBySha = new Map((urlRes.urls || []).map((u) => [u.sha256, u]));
+      // H1: hashes that became available between check and upload-urls get no
+      // PUT URL (anti-overwrite guard) and can simply be skipped.
+      const alreadyAvailable = new Set(urlRes.alreadyAvailable || []);
 
       let uploaded = 0;
       for (const f of needUpload) {
         checkCancel();
+        if (alreadyAvailable.has(f.sha256)) {
+          uploaded += 1;
+          continue;
+        }
         const urlInfo = urlBySha.get(f.sha256);
         if (!urlInfo) throw new Error(`缺少上传 URL: ${f.path}`);
         await uploadFileToOss(joinProjectPath(projectDir, f.path), urlInfo.uploadUrl, f.sizeBytes ?? 0);

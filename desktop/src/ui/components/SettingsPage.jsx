@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
-  CheckCircle2, Eye, EyeOff, FolderOpen, RefreshCw, Settings2, Loader2,
+  CheckCircle2, Eye, EyeOff, FolderOpen, RefreshCw, Loader2,
   Search, ExternalLink, Plus, Trash2, ChevronDown, ChevronUp, AlertCircle, X,
-  Server, Sparkles, Check, Route,
+  Server, Sparkles, Check, Route, SlidersHorizontal, Cpu, Globe, Building2, ShieldAlert,
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext.jsx';
 
 const Card = ({ title, description, children, overflowVisible = false }) => {
   return (
@@ -278,8 +279,6 @@ const resolveAssignmentSupportsImages = (item, option) => {
 
 const inputCls = 'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 transition-colors';
 const selectCls = inputCls + ' appearance-none cursor-pointer';
-
-const isOrgAdmin = (user) => user?.orgRole === 'owner' || user?.orgRole === 'admin';
 
 const formatDateTime = (value) => {
   if (!value) return '不限';
@@ -1328,44 +1327,15 @@ const SearchApiCard = () => {
   );
 };
 
-const OrgAiConfigCard = ({ currentUser, onImported }) => {
-  const canManage = isOrgAdmin(currentUser);
+// H6: member-facing only. Admins manage templates in the Enterprise Console
+// (配置中心). Here members preview a config code and import (overwrite) it.
+const OrgImportCard = ({ orgRole, onImported }) => {
+  const isMember = orgRole === 'member' || orgRole === 'admin' || orgRole === 'owner';
   const [code, setCode] = useState('');
   const [preview, setPreview] = useState(null);
   const [status, setStatus] = useState(null);
   const [previewing, setPreviewing] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [templates, setTemplates] = useState([]);
-  const [templatesLoading, setTemplatesLoading] = useState(false);
-  const [form, setForm] = useState({
-    name: '',
-    description: '',
-    maxUses: '',
-    expiresAt: '',
-  });
-  const [usesByTemplate, setUsesByTemplate] = useState({});
-  const [usesLoadingId, setUsesLoadingId] = useState(null);
-
-  const loadTemplates = useCallback(async () => {
-    if (!canManage || !window.ipm?.prefs?.orgConfig?.listTemplates) return;
-    setTemplatesLoading(true);
-    try {
-      const res = await window.ipm.prefs.orgConfig.listTemplates();
-      if (res?.ok) {
-        setTemplates(res.templates || []);
-      } else {
-        setStatus({ type: 'error', text: `加载模板失败：${res?.error || '未知错误'}` });
-      }
-    } catch (err) {
-      setStatus({ type: 'error', text: `加载模板失败：${err?.message || String(err)}` });
-    } finally {
-      setTemplatesLoading(false);
-    }
-  }, [canManage]);
-
-  useEffect(() => {
-    loadTemplates();
-  }, [loadTemplates]);
 
   const handlePreview = useCallback(async () => {
     const trimmed = code.trim();
@@ -1405,7 +1375,6 @@ const OrgAiConfigCard = ({ currentUser, onImported }) => {
         setPreview(null);
         setCode('');
         onImported?.();
-        loadTemplates();
       } else {
         setStatus({ type: 'error', text: res?.error || '导入失败。' });
       }
@@ -1414,121 +1383,28 @@ const OrgAiConfigCard = ({ currentUser, onImported }) => {
     } finally {
       setImporting(false);
     }
-  }, [code, preview, onImported, loadTemplates]);
-
-  const handleCreateTemplate = useCallback(async () => {
-    const name = form.name.trim();
-    if (!name) {
-      setStatus({ type: 'error', text: '请填写模板名称。' });
-      return;
-    }
-    const maxUsesText = form.maxUses.trim();
-    const maxUses = maxUsesText ? Number(maxUsesText) : null;
-    if (maxUsesText && (!Number.isInteger(maxUses) || maxUses <= 0)) {
-      setStatus({ type: 'error', text: '最大使用次数必须是正整数。' });
-      return;
-    }
-    setTemplatesLoading(true);
-    setStatus(null);
-    try {
-      const res = await window.ipm?.prefs?.orgConfig?.createTemplate?.({
-        name,
-        description: form.description,
-        maxUses,
-        expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
-      });
-      if (res?.ok) {
-        setStatus({ type: 'success', text: `模板已创建，配置码：${res.template?.code || ''}` });
-        setForm({ name: '', description: '', maxUses: '', expiresAt: '' });
-        await loadTemplates();
-      } else {
-        setStatus({ type: 'error', text: res?.error || '创建模板失败。' });
-      }
-    } catch (err) {
-      setStatus({ type: 'error', text: err?.message || String(err) });
-    } finally {
-      setTemplatesLoading(false);
-    }
-  }, [form, loadTemplates]);
-
-  const handleRotateCode = useCallback(async (templateId) => {
-    const ok = window.confirm('刷新后旧配置码会立即失效，确认继续？');
-    if (!ok) return;
-    setStatus(null);
-    try {
-      const res = await window.ipm?.prefs?.orgConfig?.rotateCode?.(templateId);
-      if (res?.ok) {
-        setStatus({ type: 'success', text: `配置码已刷新：${res.template?.code || ''}` });
-        await loadTemplates();
-      } else {
-        setStatus({ type: 'error', text: res?.error || '刷新失败。' });
-      }
-    } catch (err) {
-      setStatus({ type: 'error', text: err?.message || String(err) });
-    }
-  }, [loadTemplates]);
-
-  const handleDisable = useCallback(async (templateId) => {
-    const ok = window.confirm('停用后该配置码不可再预览或导入，确认继续？');
-    if (!ok) return;
-    setStatus(null);
-    try {
-      const res = await window.ipm?.prefs?.orgConfig?.disableTemplate?.(templateId);
-      if (res?.ok) {
-        setStatus({ type: 'success', text: '模板已停用。' });
-        await loadTemplates();
-      } else {
-        setStatus({ type: 'error', text: res?.error || '停用失败。' });
-      }
-    } catch (err) {
-      setStatus({ type: 'error', text: err?.message || String(err) });
-    }
-  }, [loadTemplates]);
-
-  const handleListUses = useCallback(async (templateId) => {
-    if (usesByTemplate[templateId]) {
-      setUsesByTemplate((prev) => {
-        const next = { ...prev };
-        delete next[templateId];
-        return next;
-      });
-      return;
-    }
-    setUsesLoadingId(templateId);
-    setStatus(null);
-    try {
-      const res = await window.ipm?.prefs?.orgConfig?.listUses?.(templateId);
-      if (res?.ok) {
-        setUsesByTemplate((prev) => ({ ...prev, [templateId]: res.uses || [] }));
-      } else {
-        setStatus({ type: 'error', text: res?.error || '加载使用记录失败。' });
-      }
-    } catch (err) {
-      setStatus({ type: 'error', text: err?.message || String(err) });
-    } finally {
-      setUsesLoadingId(null);
-    }
-  }, [usesByTemplate]);
-
-  const handleCopyCode = useCallback(async (text) => {
-    try {
-      await navigator.clipboard?.writeText?.(text);
-      setStatus({ type: 'success', text: '配置码已复制。' });
-    } catch {
-      setStatus({ type: 'success', text: `配置码：${text}` });
-    }
-  }, []);
+  }, [code, preview, onImported]);
 
   const previewSummary = summarizeTemplate(preview);
 
+  if (!isMember) {
+    return (
+      <Card title="企业配置" description="使用管理员分发的配置码导入企业 AI 配置。">
+        <div className="text-sm px-4 py-6 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-slate-500 text-center">
+          登录企业账户后即可在此导入企业 AI 配置。
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <Card
-      title="企业 AI 配置"
-      description="管理员可把当前 AI Provider、模型角色和搜索 API 保存为组织模板；成员可用配置码预览并覆盖导入。"
+      title="企业配置"
+      description="使用管理员分发的配置码，把企业统一的 AI Provider、模型路由与搜索 API 一键导入本机。"
     >
       <div className="space-y-5">
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 leading-relaxed">
-          企业模板可以包含 API Key。导入后，这些凭证会保存到当前电脑的本地设置中，并覆盖现有 AI 与搜索 API 配置。
+          企业模板可能包含 API Key。导入后，这些凭证会保存到当前电脑的本地设置中，并<b>覆盖</b>现有 AI 与搜索 API 配置。模板的创建与治理已迁移到企业控制台「配置中心」。
         </div>
 
         <div className="space-y-3">
@@ -1601,180 +1477,27 @@ const OrgAiConfigCard = ({ currentUser, onImported }) => {
           </div>
         )}
 
-        {canManage && (
-          <div className="pt-5 border-t border-slate-100 space-y-5">
-            <div className="space-y-3">
-              <div className="text-sm font-semibold text-slate-900">管理员：保存当前设置为模板</div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1.5">模板名称</label>
-                  <input
-                    type="text"
-                    value={form.name}
-                    onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-                    placeholder="例如 公司统一 AI 配置"
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1.5">最大使用次数</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={form.maxUses}
-                    onChange={(e) => setForm((prev) => ({ ...prev, maxUses: e.target.value }))}
-                    placeholder="留空表示不限"
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1.5">过期时间</label>
-                  <input
-                    type="datetime-local"
-                    value={form.expiresAt}
-                    onChange={(e) => setForm((prev) => ({ ...prev, expiresAt: e.target.value }))}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1.5">描述</label>
-                  <input
-                    type="text"
-                    value={form.description}
-                    onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-                    placeholder="给成员看的说明"
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleCreateTemplate}
-                disabled={templatesLoading}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {templatesLoading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                保存为企业模板
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-semibold text-slate-900">模板列表</div>
-                <button
-                  type="button"
-                  onClick={loadTemplates}
-                  disabled={templatesLoading}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {templatesLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                  刷新
-                </button>
-              </div>
-              {templates.length === 0 ? (
-                <div className="text-sm px-4 py-6 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-slate-500 text-center">
-                  暂无企业 AI 配置模板。
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {templates.map((template) => {
-                    const summary = summarizeTemplate(template);
-                    const uses = usesByTemplate[template.id];
-                    return (
-                      <div key={template.id} className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <div className="text-sm font-semibold text-slate-950 truncate">{template.name}</div>
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
-                                template.status === 'active'
-                                  ? 'bg-green-50 text-green-700 border-green-100'
-                                  : 'bg-slate-50 text-slate-500 border-slate-200'
-                              }`}>
-                                {template.status}
-                              </span>
-                            </div>
-                            {template.description && <div className="text-xs text-slate-500 mt-1">{template.description}</div>}
-                            <div className="font-mono text-xs text-slate-700 mt-2">{template.code}</div>
-                          </div>
-                          <span className="text-[11px] px-2 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                            已用 {template.usedCount || 0}{template.maxUses ? ` / ${template.maxUses}` : ''}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-600">
-                          <div className="rounded-lg bg-slate-50 px-3 py-2">{summary.providerText}</div>
-                          <div className="rounded-lg bg-slate-50 px-3 py-2">{summary.roleText}</div>
-                          <div className="rounded-lg bg-slate-50 px-3 py-2">{summary.searchText}</div>
-                          <div className="rounded-lg bg-amber-50 text-amber-800 px-3 py-2">{summary.secretText}</div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
-                          <button
-                            type="button"
-                            onClick={() => handleCopyCode(template.code)}
-                            className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors"
-                          >
-                            复制配置码
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleRotateCode(template.id)}
-                            disabled={template.status !== 'active'}
-                            className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                          >
-                            刷新配置码
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDisable(template.id)}
-                            disabled={template.status !== 'active'}
-                            className="px-3 py-1.5 rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                          >
-                            停用
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleListUses(template.id)}
-                            className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors"
-                          >
-                            {usesLoadingId === template.id ? '加载中…' : uses ? '收起使用记录' : '查看使用记录'}
-                          </button>
-                        </div>
-                        <div className="text-[11px] text-slate-400">
-                          创建：{formatDateTime(template.createdAt)} · 过期：{formatDateTime(template.expiresAt)}
-                        </div>
-                        {uses && (
-                          <div className="rounded-xl border border-slate-100 bg-slate-50 overflow-hidden">
-                            {uses.length === 0 ? (
-                              <div className="px-3 py-3 text-xs text-slate-500">暂无使用记录。</div>
-                            ) : (
-                              <div className="divide-y divide-slate-100">
-                                {uses.map((item) => (
-                                  <div key={item.id} className="px-3 py-2 text-xs flex items-center justify-between gap-3">
-                                    <span className="text-slate-700 truncate">{item.displayName || item.email || item.userId}</span>
-                                    <span className="text-slate-400 shrink-0">{formatDateTime(item.usedAt)}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        <div className="text-[11px] text-slate-400 leading-relaxed">
+          没有配置码？请联系企业管理员，在控制台「配置中心」创建模板后获取。
+        </div>
       </div>
     </Card>
   );
 };
 
-const SettingsPage = ({ currentUser = null }) => {
+const SETTINGS_NAV = [
+  { key: 'general', label: '通用', icon: SlidersHorizontal, desc: '数据目录与本地行为' },
+  { key: 'ai', label: 'AI 模型', icon: Cpu, desc: 'Provider 与模型路由' },
+  { key: 'search', label: '网页搜索', icon: Globe, desc: '搜索 API 配置' },
+  { key: 'org', label: '企业配置', icon: Building2, desc: '导入企业 AI 配置' },
+];
+
+const SettingsPage = () => {
+  const { orgRole, loggedIn } = useAuth();
   const [saving, setSaving] = useState(false);
   const [prefs, setPrefs] = useState({ floatingUploadMode: 'auto' });
   const [prefsCardKey, setPrefsCardKey] = useState(0);
+  const [section, setSection] = useState('general');
 
   useEffect(() => {
     let cancelled = false;
@@ -1806,49 +1529,94 @@ const SettingsPage = ({ currentUser = null }) => {
     }
   };
 
+  const activeNav = SETTINGS_NAV.find((n) => n.key === section) || SETTINGS_NAV[0];
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-white">
-      <header className="px-8 py-6 border-b border-slate-100 flex items-center justify-between shrink-0">
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold text-slate-900 tracking-tight truncate">偏好设置</h1>
-          <p className="text-xs text-slate-500 mt-0.5">本地优先：设置将保存到本机 userfile。</p>
+    <div className="flex-1 flex h-full bg-white min-w-0">
+      {/* ── 左侧分区导航 ── */}
+      <aside className="shrink-0 flex flex-col border-r border-slate-100 bg-slate-50/40" style={{ width: 232 }}>
+        <div className="px-5 py-5 border-b border-slate-100">
+          <h1 className="text-[15px] font-semibold text-slate-900 tracking-tight">设置</h1>
+          <p className="text-[11px] text-slate-400 mt-0.5">本地优先 · 保存到本机 userfile</p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          <Settings2 size={16} className="text-slate-400" />
+        <nav className="flex-1 px-3 py-3 space-y-0.5">
+          {SETTINGS_NAV.map((item) => {
+            const Icon = item.icon;
+            const active = section === item.key;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setSection(item.key)}
+                className="w-full flex items-start gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors"
+                style={active
+                  ? { background: '#fff', boxShadow: '0 1px 2px rgba(15,23,42,0.06)', border: '1px solid #e8eaf0' }
+                  : { border: '1px solid transparent' }}
+              >
+                <Icon size={15} className="mt-0.5 shrink-0" style={{ color: active ? '#3e4b9c' : '#94a3b8' }} />
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-medium truncate" style={{ color: active ? '#1e293b' : '#475569' }}>{item.label}</span>
+                  <span className="block text-[10.5px] truncate" style={{ color: '#94a3b8' }}>{item.desc}</span>
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+        <div className="px-5 py-3 border-t border-slate-100 text-[11px] text-slate-400">
           {saving ? '正在保存…' : '已就绪'}
         </div>
-      </header>
+      </aside>
 
-      <div className="flex-1 overflow-y-auto px-8 py-6 bg-slate-50/40">
-        <div className="grid grid-cols-1 gap-6 max-w-4xl">
-          <DataDirCard />
-          <LlmConfigCard key={`llm-${prefsCardKey}`} />
-          <SearchApiCard key={`search-${prefsCardKey}`} />
-          <OrgAiConfigCard
-            currentUser={currentUser}
-            onImported={() => setPrefsCardKey((v) => v + 1)}
-          />
-
-          <Card
-            title="悬浮窗上传文件模式（真实功能）"
-            description="决定悬浮窗里拖拽/选择文件后的行为。"
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <RadioPill
-                checked={prefs.floatingUploadMode === 'auto'}
-                label="先斩后奏模式"
-                hint="拖拽/选择文件后立即上传到当前项目 temp/，并提供 3 秒撤销。"
-                onClick={() => setFloatingUploadMode('auto')}
-              />
-              <RadioPill
-                checked={prefs.floatingUploadMode === 'confirm'}
-                label="手动确认模式"
-                hint="拖拽/选择后需要点击“确认并保存”，行为与当前一致。"
-                onClick={() => setFloatingUploadMode('confirm')}
-              />
-            </div>
-          </Card>
+      {/* ── 内容区 ── */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="px-8 py-5 border-b border-slate-100 shrink-0">
+          <h2 className="text-[17px] font-semibold text-slate-900 tracking-tight">{activeNav.label}</h2>
+          <p className="text-xs text-slate-500 mt-0.5">{activeNav.desc}</p>
+        </header>
+        <div className="flex-1 overflow-y-auto px-8 py-6 bg-slate-50/40">
+          <div className="grid grid-cols-1 gap-6 max-w-3xl">
+            {section === 'general' && (
+              <>
+                <DataDirCard />
+                <Card
+                  title="悬浮窗上传文件模式（真实功能）"
+                  description="决定悬浮窗里拖拽/选择文件后的行为。"
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <RadioPill
+                      checked={prefs.floatingUploadMode === 'auto'}
+                      label="先斩后奏模式"
+                      hint="拖拽/选择文件后立即上传到当前项目 temp/，并提供 3 秒撤销。"
+                      onClick={() => setFloatingUploadMode('auto')}
+                    />
+                    <RadioPill
+                      checked={prefs.floatingUploadMode === 'confirm'}
+                      label="手动确认模式"
+                      hint="拖拽/选择后需要点击“确认并保存”，行为与当前一致。"
+                      onClick={() => setFloatingUploadMode('confirm')}
+                    />
+                  </div>
+                </Card>
+              </>
+            )}
+            {section === 'ai' && <LlmConfigCard key={`llm-${prefsCardKey}`} />}
+            {section === 'search' && <SearchApiCard key={`search-${prefsCardKey}`} />}
+            {section === 'org' && (
+              loggedIn ? (
+                <OrgImportCard
+                  orgRole={orgRole}
+                  onImported={() => setPrefsCardKey((v) => v + 1)}
+                />
+              ) : (
+                <Card title="企业配置" description="使用管理员分发的配置码导入企业 AI 配置。">
+                  <div className="flex items-start gap-2.5 text-sm px-4 py-5 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-slate-500">
+                    <ShieldAlert size={16} className="mt-0.5 shrink-0 text-slate-400" />
+                    登录企业账户后即可在此使用配置码导入企业 AI 配置。
+                  </div>
+                </Card>
+              )
+            )}
+          </div>
         </div>
       </div>
     </div>

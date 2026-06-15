@@ -542,6 +542,80 @@ export function registerCloudIpc({ ipcMain, getWorkspaceDirOrThrow, createLocalC
     }
   });
 
+  // ── H4: cloud project management hub ──────────────────────────────
+  // Thin pass-through helpers: every handler requires login, then proxies to
+  // the corresponding server endpoint via the authenticated client.
+  const requireCloud = () => {
+    if (!userScope.isLoggedIn()) {
+      const err = new Error('离线模式下无法访问云端项目');
+      err.code = 'OFFLINE';
+      throw err;
+    }
+    return createAuthCloudClient();
+  };
+  const proxy = (fn) => async (_evt, payload) => {
+    try {
+      const client = requireCloud();
+      return await fn(client, payload || {});
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err), code: err?.code || null };
+    }
+  };
+
+  // Public (discoverable) workspaces in my org.
+  ipcMain.handle('cloud/listPublicWorkspaces', proxy(
+    (client) => client.get('/api/workspaces/public'),
+  ));
+
+  // Join a private workspace using a project invite code (grants editor).
+  ipcMain.handle('cloud/joinByCode', proxy(
+    (client, p) => client.post('/api/workspaces/join-by-code', { code: String(p.code || '').trim() }),
+  ));
+
+  // Member-visible project overview (stats, recent versions, my role).
+  ipcMain.handle('cloud/getWorkspaceOverview', proxy(
+    (client, p) => client.get(`/api/workspaces/${p.workspaceId}/overview`),
+  ));
+
+  // Member list (any member may view).
+  ipcMain.handle('cloud/listWorkspaceMembers', proxy(
+    (client, p) => client.get(`/api/workspaces/${p.workspaceId}/members`),
+  ));
+
+  // Owner self-service: viewer ↔ editor.
+  ipcMain.handle('cloud/setMemberRole', proxy(
+    (client, p) => client.post(`/api/workspaces/${p.workspaceId}/members/${p.userId}/role`, { role: p.role }),
+  ));
+
+  // Owner self-service: remove a member.
+  ipcMain.handle('cloud/removeMember', proxy(
+    (client, p) => client.post(`/api/workspaces/${p.workspaceId}/members/${p.userId}/remove`, {}),
+  ));
+
+  // Owner self-service: transfer ownership (previous owner becomes editor).
+  ipcMain.handle('cloud/transferOwner', proxy(
+    (client, p) => client.post(`/api/workspaces/${p.workspaceId}/transfer-owner`, { newOwnerId: p.newOwnerId }),
+  ));
+
+  // Owner self-service: private ↔ public.
+  ipcMain.handle('cloud/setVisibility', proxy(
+    (client, p) => client.post(`/api/workspaces/${p.workspaceId}/visibility`, { visibility: p.visibility }),
+  ));
+
+  // Owner self-service: invite codes.
+  ipcMain.handle('cloud/listInvites', proxy(
+    (client, p) => client.get(`/api/workspaces/${p.workspaceId}/invites`),
+  ));
+  ipcMain.handle('cloud/createInvite', proxy(
+    (client, p) => client.post(`/api/workspaces/${p.workspaceId}/invites`, {
+      maxUses: p.maxUses ?? 1,
+      ...(p.expiresInDays ? { expiresInDays: p.expiresInDays } : {}),
+    }),
+  ));
+  ipcMain.handle('cloud/revokeInvite', proxy(
+    (client, p) => client.post(`/api/workspaces/${p.workspaceId}/invites/${p.inviteId}/revoke`, {}),
+  ));
+
   // ── C4: on-demand download of a placeholdered large file ────────
   ipcMain.handle('cloud/downloadFile', async (evt, payload) => {
     if (!userScope.isLoggedIn()) {

@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>同步/版本/冲突 · UI/UX 设计稿(H4.5 · Linear 风格)</title>
+<style>
+  :root {
+    --bg: #fcfcfc;
+    --bg-hover: #f6f6f7;
+    --bg-active: #f0f0f2;
+    --border: #ececee;
+    --border-soft: #f2f2f4;
+    --text-1: #18181b;
+    --text-2: #52525b;
+    --text-3: #8f8f98;
+    --text-4: #b4b4bc;
+    --accent: #5e6ad2;
+    --accent-soft: #eef0fb;
+    --green: #2e9e6b;
+    --amber: #c08a26;
+    --red: #c5483e;
+    --radius: 6px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 13px;
+    color: var(--text-1);
+    background: #e9ebef;
+    -webkit-font-smoothing: antialiased;
+  }
+  .frame { display: flex; height: 100vh; min-height: 720px; overflow: hidden; }
+
+  /* ── IPM 暗色 Sidebar(现状还原) ── */
+  .sidebar {
+    width: 200px; background: #1a1a1a; color: #d4d4d4;
+    display: flex; flex-direction: column; flex-shrink: 0; padding: 14px 8px 10px;
+  }
+  .sidebar .brand { font-size: 13px; font-weight: 600; color: #e5e5e5; padding: 4px 10px 14px; letter-spacing: 0.02em; }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 7px;
+    font-size: 13px; color: #a3a3a3; cursor: pointer; margin-bottom: 1px; transition: background 0.12s, color 0.12s;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.04); color: #d4d4d4; }
+  .nav-item.active { background: rgba(255,255,255,0.07); color: #f5f5f5; }
+  .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.85; }
+  .sidebar .spacer { flex: 1; }
+  .sidebar .account { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-top: 1px solid #2a2a2a; margin-top: 8px; }
+  .sidebar .account .avatar { width: 24px; height: 24px; border-radius: 50%; background: #5e6ad2; color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+  .sidebar .account .meta .n { font-size: 12px; color: #e5e5e5; }
+  .sidebar .account .meta .e { font-size: 10px; color: #737373; }
+
+  /* ── 主区域 ── */
+  .main { flex: 1; background: #fff; overflow: hidden; display: flex; flex-direction: column; }
+
+  /* ── 「我的资料」现有 Header 还原(两行:面包屑 + 工具栏) ──
+     H4.5 不改这套结构,只把右侧的「云端 v2」静态徽标换成可点击的状态 chip,
+     并删除其下方整行的 SyncStatusBar 横幅。 */
+  .pm-head { background: #fff; border-bottom: 1px solid #e2e4eb; flex-shrink: 0; }
+  .pm-row1 { display: flex; align-items: center; gap: 10px; padding: 14px 20px 8px; min-width: 0; }
+  .pm-back {
+    width: 32px; height: 32px; border-radius: 8px; border: 0; background: transparent;
+    color: #64748b; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  }
+  .pm-back:hover { background: #f1f5f9; color: #1e293b; }
+  .pm-crumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #475569; min-width: 0; }
+  .pm-crumb svg { width: 14px; height: 14px; color: #94a3b8; flex-shrink: 0; }
+  .pm-crumb .sep { color: #cbd5e1; }
+  .pm-crumb .link { cursor: pointer; }
+  .pm-crumb .link:hover { color: #3e4b9c; }
+  .pm-crumb .cur { font-weight: 600; color: #0f172a; font-size: 14px; }
+
+  .pm-row2 { display: flex; align-items: center; gap: 8px; padding: 0 20px 12px; flex-wrap: wrap; }
+  .pm-btn {
+    display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px;
+    border-radius: 8px; border: 1px solid #e2e8f0; background: #fff; color: #334155;
+    font-size: 12px; cursor: pointer; font-family: inherit; white-space: nowrap; transition: background 0.1s;
+  }
+  .pm-btn:hover { background: #f8fafc; }
+  .pm-btn svg { width: 13px; height: 13px; }
+  .pm-btn.dark { background: #0f172a; border-color: #0f172a; color: #fff; }
+  .pm-btn.dark:hover { background: #1e293b; }
+  .pm-btn.brand { background: #3e4b9c; border-color: #3e4b9c; color: #fff; }
+  .pm-btn.brand:hover { background: #4e5bab; }
+  .pm-search {
+    display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px;
+    border-radius: 8px; border: 1px solid #e2e4eb; background: #f8f9fb; color: #94a3b8; font-size: 12px; width: 150px;
+  }
+  .pm-search svg { width: 12px; height: 12px; flex-shrink: 0; }
+  .pm-search input { border: 0; outline: 0; background: transparent; font-size: 12px; width: 100%; color: #334155; font-family: inherit; }
+  .pm-viewtoggle {
+    display: flex; align-items: center; gap: 1px; background: #f1f5f9; border: 1px solid #e2e8f0;
+    border-radius: 8px; padding: 2px;
+  }
+  .pm-viewtoggle span { width: 28px; height: 26px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: #64748b; cursor: pointer; }
+  .pm-viewtoggle span.on { background: #fff; color: #0f172a; box-shadow: 0 1px 2px rgba(15,23,42,0.08); }
+  .pm-viewtoggle svg { width: 14px; height: 14px; }
+  .pm-spacer { flex: 1; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: transparent; border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 4px 10px; font-size: 12px; font-weight: 500; color: var(--text-2);
+    cursor: pointer; font-family: inherit; transition: all 0.1s; white-space: nowrap;
+  }
+  .btn:hover { background: var(--bg-hover); color: var(--text-1); }
+  .btn svg { width: 13px; height: 13px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #5560c4; }
+  .btn.danger { background: var(--red); border-color: var(--red); color: #fff; }
+  .btn.danger:hover { background: #b03d34; }
+  .btn.ghost { border-color: transparent; color: var(--text-3); }
+  .btn.ghost:hover { background: var(--bg-hover); color: var(--text-1); }
+  .btn.sm { padding: 2px 8px; font-size: 11.5px; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+
+  /* ── 云端状态 chip(项目 header 的唯一状态入口) ── */
+  .cloud-chip {
+    display: inline-flex; align-items: center; gap: 6px; height: 32px;
+    padding: 0 11px; border-radius: 8px; font-size: 12px; font-weight: 500;
+    border: 1px solid var(--border); cursor: pointer; transition: all 0.1s; user-select: none; white-space: nowrap;
+    color: var(--text-2); background: #fff;
+  }
+  .cloud-chip:hover { background: var(--bg-hover); }
+  .cloud-chip .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: #d4d4d8; }
+  .cloud-chip.ok { color: var(--green); border-color: #cfe7db; }
+  .cloud-chip.ok .dot { background: var(--green); }
+  .cloud-chip.pending { color: var(--accent); border-color: #dadef4; }
+  .cloud-chip.pending .dot { background: var(--accent); }
+  .cloud-chip.warn { color: var(--amber); border-color: #eadfc3; }
+  .cloud-chip.warn .dot { background: var(--amber); }
+  .cloud-chip.err { color: var(--red); border-color: #ecd2cf; }
+  .cloud-chip.err .dot { background: var(--red); }
+  .cloud-chip.idle { color: var(--text-3); }
+  .cloud-chip svg { width: 12px; height: 12px; }
+
+  /* ── 演示控制条(仅设计稿用) ── */
+  .demo-strip {
+    display: flex; align-items: center; gap: 4px; padding: 7px 20px;
+    border-bottom: 1px dashed #d9d9de; background: #f7f7f9; flex-shrink: 0;
+    font-size: 11.5px; color: var(--text-4); flex-wrap: wrap;
+  }
+  .demo-strip .lbl { margin-right: 6px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 9px; border-radius: 6px; font-size: 11.5px; color: var(--text-3);
+    cursor: pointer; border: 1px solid transparent; transition: all 0.1s; user-select: none; white-space: nowrap;
+  }
+  .pill:hover { color: var(--text-1); background: var(--bg-hover); }
+  .pill.on { background: #fff; border-color: var(--border); color: var(--text-1); font-weight: 500; }
+
+  /* ── 内容主体:文件区 + 同步抽屉 ── */
+  .body { flex: 1; display: flex; min-height: 0; }
+  .filewrap { flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; }
+
+  .colhead {
+    display: flex; align-items: center; padding: 6px 20px;
+    font-size: 11.5px; color: var(--text-4); border-bottom: 1px solid var(--border-soft);
+    user-select: none; white-space: nowrap;
+  }
+  .row {
+    display: flex; align-items: center; padding: 0 20px; height: 40px;
+    border-bottom: 1px solid var(--border-soft); cursor: default; transition: background 0.08s;
+    white-space: nowrap;
+  }
+  .row:hover { background: var(--bg-hover); }
+  .row:hover .hov { opacity: 1; }
+  .hov { opacity: 0; transition: opacity 0.1s; }
+
+  /* 列结构与真实 ListView 一致:名称 / 类型 / 修改时间 / 大小 / 详情。
+     同步徽标不占新列,内联在名称之后,仅有差异时出现。 */
+  .c-fname { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; }
+  .c-ftype { width: 64px; flex-shrink: 0; font-size: 12px; color: var(--text-3); }
+  .c-fdate { width: 130px; flex-shrink: 0; font-size: 12px; color: var(--text-3); }
+  .c-fsize { width: 70px; flex-shrink: 0; font-size: 12px; color: var(--text-3); }
+  .c-fact { width: 64px; flex-shrink: 0; display: flex; justify-content: flex-end; gap: 2px; }
+  .detail-link {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #64748b;
+    border: 0; background: transparent; cursor: pointer; font-family: inherit; padding: 3px 6px; border-radius: 6px;
+  }
+  .detail-link:hover { background: #f1f5f9; color: #1e293b; }
+  .detail-link svg { width: 12px; height: 12px; }
+
+  .glyph { width: 17px; height: 17px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--text-3); }
+  .glyph svg { width: 14px; height: 14px; }
+  .glyph.folder { color: #8f97d8; }
+  .row .nm { font-size: 12.5px; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; }
+
+  /* 文件行同步徽标:极小,描边 */
+  .fbadge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10.5px; padding: 0 6px; height: 17px;
+    border: 1px solid var(--border); border-radius: 999px; background: #fff; white-space: nowrap; color: var(--text-3);
+  }
+  .fbadge.new { color: var(--green); border-color: #cfe7db; }
+  .fbadge.mod { color: var(--accent); border-color: #dadef4; }
+  .fbadge.del { color: var(--red); border-color: #ecd2cf; text-decoration: line-through; }
+  .fbadge.conflict { color: var(--red); border-color: #ecd2cf; }
+  .fbadge.copy { color: var(--amber); border-color: #eadfc3; }
+  .fbadge.cloud { color: var(--text-4); }
+
+  .icon-btn {
+    width: 24px; height: 24px; border-radius: 5px; border: 0; background: transparent;
+    color: var(--text-3); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+    transition: all 0.1s; font-family: inherit;
+  }
+  .icon-btn:hover { background: var(--bg-active); color: var(--text-1); }
+  .icon-btn svg { width: 13px; height: 13px; }
+  .foot-note { padding: 10px 20px; font-size: 11.5px; color: var(--text-4); }
+
+  /* ── 同步抽屉 ── */
+  .drawer {
+    width: 380px; flex-shrink: 0; border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0; background: var(--bg);
+  }
+  .drawer-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 16px; height: 40px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .drawer-head .t { font-size: 12.5px; font-weight: 600; }
+  .drawer-tabs { display: flex; align-items: center; gap: 2px; padding: 6px 12px; border-bottom: 1px solid var(--border-soft); flex-shrink: 0; }
+  .drawer-body { flex: 1; overflow-y: auto; padding: 14px 16px 30px; }
+
+  /* 状态头卡:抽屉顶部统一状态摘要 */
+  .state-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; }
+  .state-card .line1 { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; }
+  .state-card .line1 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .state-card .line2 { font-size: 11.5px; color: var(--text-3); margin-top: 6px; line-height: 1.6; }
+  .state-card .vrow { display: flex; align-items: center; gap: 14px; margin-top: 9px; font-size: 11.5px; color: var(--text-3); }
+  .state-card .vrow b { color: var(--text-2); font-weight: 500; font-family: "SF Mono", "JetBrains Mono", Consolas, monospace; }
+  .state-card .actions { display: flex; gap: 6px; margin-top: 11px; }
+
+  .d-section { margin-top: 16px; }
+  .d-section > .label {
+    font-size: 11.5px; font-weight: 500; color: var(--text-3); padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: space-between;
+  }
+  .d-section > .label .n { color: var(--text-4); font-weight: 400; }
+
+  .chg-row {
+    display: flex; align-items: center; gap: 8px; padding: 7px 2px;
+    border-bottom: 1px solid var(--border-soft); font-size: 12px; white-space: nowrap;
+  }
+  .chg-row:last-child { border-bottom: 0; }
+  .chg-row .ic { width: 15px; height: 15px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .chg-row .ic svg { width: 13px; height: 13px; }
+  .chg-row .p { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+  .chg-row .meta { font-size: 11px; color: var(--text-4); flex-shrink: 0; }
+  .ic.new { color: var(--green); }
+  .ic.mod { color: var(--accent); }
+  .ic.del { color: var(--red); }
+  .ic.skip { color: var(--text-4); }
+
+  .input {
+    width: 100%; border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 6px 9px; font-size: 12.5px; font-family: inherit; color: var(--text-1);
+    outline: none; transition: border-color 0.1s; background: #fff;
+  }
+  .input:focus { border-color: #b9bfe8; box-shadow: 0 0 0 2px var(--accent-soft); }
+  .field-label { font-size: 11px; font-weight: 500; color: var(--text-3); margin-bottom: 5px; display: block; }
+
+  .note-box {
+    border: 1px solid var(--border); border-left: 2px solid var(--text-4);
+    border-radius: var(--radius); padding: 8px 11px; font-size: 11.5px; color: var(--text-2);
+    line-height: 1.6; background: #fafafb;
+  }
+  .note-box.warn { border-left-color: var(--red); }
+  .note-box.amber { border-left-color: var(--amber); }
+  .note-box.ok { border-left-color: var(--green); }
+  .note-box b { color: var(--text-1); }
+  .note-box + .note-box { margin-top: 8px; }
+
+  /* 冲突卡 */
+  .conflict-card { border: 1px solid #eadfc3; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; background: #fffdf8; }
+  .conflict-card .kind { font-size: 11px; color: var(--amber); font-weight: 500; }
+  .conflict-card .f { font-size: 12px; color: var(--text-1); font-weight: 500; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conflict-card .pair { margin-top: 6px; font-size: 11.5px; color: var(--text-3); line-height: 1.7; }
+  .conflict-card .pair b { color: var(--text-2); font-weight: 500; }
+  .conflict-card .acts { display: flex; gap: 6px; margin-top: 9px; }
+
+  /* 错误卡(可读错误) */
+  .err-card { border: 1px solid #ecd2cf; border-radius: 8px; padding: 11px 13px; background: #fffafa; margin-bottom: 10px; }
+  .err-card .t { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; color: var(--red); }
+  .err-card .t svg { width: 13px; height: 13px; }
+  .err-card .why { font-size: 11.5px; color: var(--text-2); margin-top: 6px; line-height: 1.6; }
+  .err-card .fix { font-size: 11.5px; color: var(--text-3); margin-top: 5px; line-height: 1.6; }
+  .err-card .fix b { color: var(--text-2); font-weight: 500; }
+  .err-card .acts { display: flex; gap: 6px; margin-top: 9px; }
+
+  /* 版本列表 */
+  .ver-row {
+    display: flex; align-items: center; gap: 9px; padding: 8px 2px;
+    border-bottom: 1px solid var(--border-soft); font-size: 12px; white-space: nowrap;
+  }
+  .ver-row:hover { background: var(--bg-hover); }
+  .ver-row:hover .hov { opacity: 1; }
+  .vnum { font-family: "SF Mono", "JetBrains Mono", Consolas, monospace; font-size: 11.5px; color: var(--text-3); width: 48px; flex-shrink: 0; }
+  .vnum.ms { color: var(--amber); }
+  .ver-row .msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+  .ver-row .meta { font-size: 11px; color: var(--text-4); flex-shrink: 0; }
+  .tag-current { font-size: 10px; color: var(--green); border: 1px solid #cfe7db; padding: 0 5px; border-radius: 999px; height: 15px; display: inline-flex; align-items: center; flex-shrink: 0; }
+
+  /* 进度条(发布/拉取) */
+  .prog { margin-top: 10px; }
+  .prog .pl { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-3); margin-bottom: 5px; }
+  .prog .bar { height: 4px; border-radius: 999px; background: var(--bg-active); overflow: hidden; }
+  .prog .bar > div { height: 100%; border-radius: 999px; background: var(--accent); width: 64%; transition: width 0.3s; }
+
+  .step-list { margin-top: 10px; }
+  .step { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: var(--text-3); }
+  .step svg { width: 13px; height: 13px; flex-shrink: 0; }
+  .step.done { color: var(--text-2); }
+  .step.done svg { color: var(--green); }
+  .step.run { color: var(--accent); font-weight: 500; }
+  .step.wait svg { color: var(--text-4); }
+
+  /* ── 弹窗 ── */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.25);
+    display: none; align-items: flex-start; justify-content: center; z-index: 100; padding-top: 12vh;
+  }
+  .overlay.open { display: flex; }
+  .modal {
+    width: 460px; background: #fff; border-radius: 10px; border: 1px solid var(--border);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.16); overflow: hidden;
+    animation: pop 0.14s ease-out;
+  }
+  .modal.wide { width: 560px; }
+  @keyframes pop { from { transform: translateY(-4px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .modal .m-head { padding: 16px 18px 0; }
+  .modal .m-head h3 { font-size: 14px; font-weight: 600; }
+  .modal .m-head p { font-size: 12px; color: var(--text-3); margin-top: 3px; }
+  .modal .m-body { padding: 14px 18px 2px; max-height: 56vh; overflow-y: auto; }
+  .modal .m-foot { display: flex; justify-content: flex-end; gap: 7px; padding: 14px 18px; }
+  .form-row { display: flex; gap: 10px; margin-bottom: 12px; }
+  .form-row .col { flex: 1; }
+
+  /* 文件历史(单文件恢复) */
+  .hist-row {
+    display: flex; align-items: center; gap: 9px; padding: 8px 2px;
+    border-bottom: 1px solid var(--border-soft); font-size: 12px; white-space: nowrap;
+  }
+  .hist-row:hover .hov { opacity: 1; }
+  .hist-row .msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+  .hist-row .meta { font-size: 11px; color: var(--text-4); flex-shrink: 0; }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(6px);
+    background: #18181b; color: #fff; font-size: 12px; padding: 7px 14px;
+    border-radius: 7px; opacity: 0; transition: all 0.18s; pointer-events: none; z-index: 200;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .pane { display: none; }
+  .pane.on { display: block; }
+</style>
+</head>
+<body>
+
+<div class="frame">
+  <!-- 左侧:现有暗色 Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">IPM</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>总览</div>
+    <div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12H2M5.5 5h13l3.5 7v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5z"/></svg>我的资料</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>知识库</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>KnowClaw</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.5 19a4.5 4.5 0 1 0-1.8-8.6 6 6 0 1 0-11.2 3A4 4 0 0 0 6 19h11.5z"/></svg>协作项目</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h1m4 0h1"/></svg>企业管理</div>
+    <div class="spacer"></div>
+    <div class="account">
+      <div class="avatar">王</div>
+      <div class="meta"><div class="n">王律师</div><div class="e">wang@hengrui.law</div></div>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ════ 「我的资料」现有 Header(原样保留,仅替换云端入口) ════
+         变化只有两处:
+         1. 原「云端 v2」静态徽标 → 可点击的状态 chip(点击开抽屉);
+            「发布到云端」按钮 = chip 的未绑定形态,不再单独存在。
+         2. 原 Header 下方整行的 SyncStatusBar 横幅删除,信息并入 chip 与抽屉。
+         其余按钮(搜索/视图切换/筛选/新建文件夹/上传文件/AI分类/附属项目操作)一律不动。 -->
+    <div class="pm-head">
+      <div class="pm-row1">
+        <button class="pm-back" title="返回我的资料"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><path d="m15 18-6-6 6-6"/></svg></button>
+        <nav class="pm-crumb">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          <span class="link">所有项目</span>
+          <span class="sep">/</span>
+          <span class="cur">XX 集团并购重组专项</span>
+        </nav>
+      </div>
+      <div class="pm-row2">
+        <button class="pm-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>所有项目</button>
+        <div class="pm-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input placeholder="搜索文件..." />
+        </div>
+        <div class="pm-spacer"></div>
+        <div class="pm-viewtoggle">
+          <span class="on" title="列表视图"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg></span>
+          <span title="Explorer 视图"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+        </div>
+        <button class="pm-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M7 12h10M10 18h4"/></svg>筛选</button>
+        <button class="pm-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 10v6M9 13h6"/></svg>新建文件夹</button>
+        <button class="pm-btn dark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>上传文件</button>
+        <button class="pm-btn brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>AI分类</button>
+        <!-- ▼ H4.5 唯一改动点:原「云端 v2」徽标位置 → 状态 chip,点击开抽屉 -->
+        <span class="cloud-chip ok" id="chip" onclick="toggleDrawer()">
+          <span class="dot"></span><span id="chip-text">已与云端同步 · v42</span>
+        </span>
+      </div>
+    </div>
+
+    <!-- 演示控制条(仅设计稿用,不进实现) -->
+    <div class="demo-strip">
+      <span class="lbl">演示 · 切换云端状态:</span>
+      <span class="pill" data-s="unbound" onclick="setState('unbound')">未绑定</span>
+      <span class="pill on" data-s="synced" onclick="setState('synced')">已同步</span>
+      <span class="pill" data-s="local" onclick="setState('local')">本地变更</span>
+      <span class="pill" data-s="remote" onclick="setState('remote')">云端更新</span>
+      <span class="pill" data-s="conflict" onclick="setState('conflict')">双向变更+冲突</span>
+      <span class="pill" data-s="viewer" onclick="setState('viewer')">只读成员</span>
+      <span class="pill" data-s="archived" onclick="setState('archived')">已归档</span>
+      <span class="pill" data-s="error" onclick="setState('error')">同步异常</span>
+    </div>
+
+    <div class="body">
+
+      <!-- ── 左:文件区 = 现有 ListView 原样(名称/类型/修改时间/大小/详情 五列不变)。
+           唯一新增:名称后内联同步徽标(仅有差异时出现);
+           「历史版本与恢复」挂进现有「详情」按钮与右键菜单,不另设 hover 图标。 ── -->
+      <div class="filewrap">
+        <div class="colhead">
+          <span class="c-fname">名称</span>
+          <span class="c-ftype">类型</span>
+          <span class="c-fdate">修改时间</span>
+          <span class="c-fsize">大小</span>
+          <span class="c-fact">详情</span>
+        </div>
+
+        <div class="row">
+          <div class="c-fname"><span class="glyph folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span><span class="nm">财务报表</span></div>
+          <span class="c-ftype">文件夹</span>
+          <span class="c-fdate">2026-06-11 18:02</span>
+          <span class="c-fsize">—</span>
+          <span class="c-fact"><button class="detail-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>详情</button></span>
+        </div>
+
+        <div class="row">
+          <div class="c-fname">
+            <span class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span>
+            <span class="nm">股权转让协议(初稿).docx</span>
+            <span class="fbadge mod" id="fb-1">已修改 · 待同步</span>
+          </div>
+          <span class="c-ftype">文档</span>
+          <span class="c-fdate">2026-06-12 14:21</span>
+          <span class="c-fsize">1.2 MB</span>
+          <span class="c-fact"><button class="detail-link" onclick="openModal('modal-history')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>详情</button></span>
+        </div>
+
+        <div class="row">
+          <div class="c-fname">
+            <span class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span>
+            <span class="nm">尽调清单 v3.xlsx</span>
+            <span class="fbadge new" id="fb-2">新增 · 待同步</span>
+          </div>
+          <span class="c-ftype">表格</span>
+          <span class="c-fdate">2026-06-12 13:40</span>
+          <span class="c-fsize">348 KB</span>
+          <span class="c-fact"><button class="detail-link" onclick="openModal('modal-history')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>详情</button></span>
+        </div>
+
+        <div class="row">
+          <div class="c-fname">
+            <span class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span>
+            <span class="nm">补充协议三.pdf</span>
+            <span class="fbadge conflict" id="fb-3" style="display:none">冲突待处理</span>
+          </div>
+          <span class="c-ftype">PDF</span>
+          <span class="c-fdate">2026-06-09 09:48</span>
+          <span class="c-fsize">2.8 MB</span>
+          <span class="c-fact"><button class="detail-link" onclick="openModal('modal-history')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>详情</button></span>
+        </div>
+
+        <div class="row" id="row-copy" style="display:none">
+          <div class="c-fname" style="padding-left:26px">
+            <span class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>
+            <span class="nm" style="color:var(--text-3)">补充协议三(云端版本 v43).pdf</span>
+            <span class="fbadge copy">冲突副本</span>
+          </div>
+          <span class="c-ftype">PDF</span>
+          <span class="c-fdate">刚刚</span>
+          <span class="c-fsize">2.9 MB</span>
+          <span class="c-fact"><button class="detail-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>详情</button></span>
+        </div>
+
+        <div class="row">
+          <div class="c-fname">
+            <span class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span>
+            <span class="nm">法律意见书(终稿).docx</span>
+          </div>
+          <span class="c-ftype">文档</span>
+          <span class="c-fdate">2026-06-10 16:30</span>
+          <span class="c-fsize">860 KB</span>
+          <span class="c-fact"><button class="detail-link" onclick="openModal('modal-history')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>详情</button></span>
+        </div>
+
+        <p class="foot-note">列结构与现有「我的资料」完全一致;同步徽标内联在名称后,仅有差异的文件出现(已同步的文件不显示徽标,保持安静)。「历史版本与恢复」并入现有「详情」面板与右键菜单 —— 此稿中点「详情」直接演示历史弹窗。</p>
+      </div>
+
+      <!-- ── 右:同步抽屉(状态 / 版本 两个 Tab) ── -->
+      <aside class="drawer" id="drawer">
+        <div class="drawer-head">
+          <span class="t">云端同步</span>
+          <button class="icon-btn" onclick="toggleDrawer()" title="收起"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+        <div class="drawer-tabs">
+          <span class="pill on" id="dtab-status" onclick="switchDrawerTab('status')">状态</span>
+          <span class="pill" id="dtab-versions" onclick="switchDrawerTab('versions')">版本 <span style="color:var(--text-4)">42</span></span>
+        </div>
+
+        <div class="drawer-body">
+
+          <!-- ════ Tab:状态(随演示状态切换) ════ -->
+          <div class="pane on" id="dpane-status">
+
+            <!-- 状态 1:未绑定 -->
+            <div class="pane" id="st-unbound">
+              <div class="state-card">
+                <div class="line1"><span class="dot" style="background:#d4d4d8"></span>仅保存在本地</div>
+                <div class="line2">此项目尚未发布到云端。发布后将获得自动备份、版本历史与团队协作能力;发布的项目默认<b style="color:var(--text-2)">私有</b>,仅你可见。</div>
+                <div class="actions">
+                  <button class="btn primary" onclick="openModal('modal-publish')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 16l-4-4-4 4M12 12v9"/><path d="M20.4 16.6A5 5 0 0 0 18 7h-1.3A8 8 0 1 0 3 15.3"/></svg>
+                    发布到云端
+                  </button>
+                </div>
+              </div>
+              <div class="note-box">发布只是备份,不会让其他人看到此项目。需要协作时,在「协作项目」中生成邀请码或将项目设为公开。</div>
+            </div>
+
+            <!-- 状态 2:已同步 -->
+            <div class="pane on" id="st-synced">
+              <div class="state-card">
+                <div class="line1" style="color:var(--green)"><span class="dot" style="background:var(--green)"></span>已与云端同步</div>
+                <div class="vrow"><span>本地 <b>v42</b></span><span>云端 <b>v42</b></span><span>最近同步 12 分钟前</span></div>
+                <div class="actions">
+                  <button class="btn" onclick="toast('已重新检查云端状态')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg>检查更新
+                  </button>
+                  <button class="btn" onclick="openModal('modal-milestone')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></svg>发布里程碑
+                  </button>
+                </div>
+              </div>
+              <div class="d-section">
+                <div class="label">最新动态</div>
+                <div class="chg-row"><span class="ic" style="color:var(--text-4)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span><span class="p">陈思琪 12 分钟前推送了 v42:更新尽调清单与三份补充协议</span></div>
+              </div>
+            </div>
+
+            <!-- 状态 3:本地变更 -->
+            <div class="pane" id="st-local">
+              <div class="state-card">
+                <div class="line1" style="color:var(--accent)"><span class="dot" style="background:var(--accent)"></span>3 个本地变更待同步</div>
+                <div class="vrow"><span>本地 <b>v42 +3</b></span><span>云端 <b>v42</b></span></div>
+              </div>
+              <div class="d-section" style="margin-top:0">
+                <div class="label">本地变更 <span class="n">3</span></div>
+                <div class="chg-row"><span class="ic new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M12 18v-6M9 15h6"/></svg></span><span class="p">尽调清单 v3.xlsx</span><span class="meta">新增 · 348 KB</span></div>
+                <div class="chg-row"><span class="ic mod"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span><span class="p">股权转让协议(初稿).docx</span><span class="meta">修改 · 1.2 MB</span></div>
+                <div class="chg-row"><span class="ic del"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></span><span class="p">过期备忘录.docx</span><span class="meta">标记删除</span></div>
+                <div class="chg-row"><span class="ic skip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="m1 1 22 22"/></svg></span><span class="p" style="color:var(--text-4)">新建文件夹/会议纪要.docx</span><span class="meta">已忽略 · 文件夹需管理者创建</span></div>
+              </div>
+              <div class="d-section">
+                <span class="field-label">同步说明(可选)</span>
+                <input class="input" placeholder="例如:补充庭前证据材料">
+                <div class="actions" style="display:flex;gap:6px;margin-top:10px">
+                  <button class="btn primary" onclick="toast('同步完成:v43 已推送'); setState('synced')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 16l-4-4-4 4M12 12v9"/><path d="M20.4 16.6A5 5 0 0 0 18 7h-1.3A8 8 0 1 0 3 15.3"/></svg>
+                    同步到云端
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 状态 4:云端更新 -->
+            <div class="pane" id="st-remote">
+              <div class="state-card">
+                <div class="line1" style="color:var(--accent)"><span class="dot" style="background:var(--accent)"></span>云端有新更新</div>
+                <div class="vrow"><span>本地 <b>v42</b></span><span>云端 <b>v43</b></span></div>
+                <div class="line2">陈思琪 5 分钟前推送了 v43:法务意见书修订。</div>
+                <div class="actions">
+                  <button class="btn primary" onclick="toast('已更新到 v43'); setState('synced')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 12l4 4 4-4M12 16V7"/><path d="M20.4 16.6A5 5 0 0 0 18 7h-1.3A8 8 0 1 0 3 15.3"/></svg>
+                    拉取更新
+                  </button>
+                </div>
+              </div>
+              <div class="note-box">拉取不会覆盖你的本地修改:若同一文件双方都改过,云端版本会保留为<b>冲突副本</b>,由你决定取舍。</div>
+            </div>
+
+            <!-- 状态 5:双向变更 + 冲突 -->
+            <div class="pane" id="st-conflict">
+              <div class="state-card" style="border-color:#eadfc3">
+                <div class="line1" style="color:var(--amber)"><span class="dot" style="background:var(--amber)"></span>本地与云端同时有变更</div>
+                <div class="vrow"><span>本地 <b>v42 +2</b></span><span>云端 <b>v43</b></span></div>
+                <div class="line2">需先拉取云端更新,再推送本地变更。上次拉取保留了 <b style="color:var(--amber)">1 个冲突副本</b>待处理。</div>
+                <div class="actions">
+                  <button class="btn primary" onclick="toast('已拉取 v43,冲突文件已保留副本')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 12l4 4 4-4M12 16V7"/><path d="M20.4 16.6A5 5 0 0 0 18 7h-1.3A8 8 0 1 0 3 15.3"/></svg>
+                    先拉取更新
+                  </button>
+                  <button class="btn" disabled title="存在冲突副本,处理后才能推送">同步到云端</button>
+                </div>
+              </div>
+
+              <div class="d-section" style="margin-top:0">
+                <div class="label">冲突待处理 <span class="n">1</span></div>
+                <div style="margin-top:8px">
+                  <div class="conflict-card">
+                    <div class="kind">双方都修改了同一个文件</div>
+                    <div class="f">补充协议三.pdf</div>
+                    <div class="pair">
+                      <b>本地版本</b>:你 · 今天 14:20 修改 · 2.8 MB<br>
+                      <b>云端副本</b>:陈思琪 · v43 · 2.9 MB → 已另存为「补充协议三(云端版本 v43).pdf」
+                    </div>
+                    <div class="acts">
+                      <button class="btn sm" onclick="toast('已打开两个文件供比较')">打开比较</button>
+                      <button class="btn sm" onclick="openModal('modal-keep-local')">保留本地</button>
+                      <button class="btn sm" onclick="openModal('modal-use-remote')">采用云端</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="note-box amber">处理 = 二选一后删除多余文件;两个文件也可以都保留(把副本改名即可)。处理完成前,推送保持禁用。</div>
+            </div>
+
+            <!-- 状态 6:只读成员 -->
+            <div class="pane" id="st-viewer">
+              <div class="state-card">
+                <div class="line1" style="color:var(--text-3)"><span class="dot" style="background:#d4d4d8"></span>只读成员</div>
+                <div class="vrow"><span>本地 <b>v42</b></span><span>云端 <b>v43</b></span></div>
+                <div class="line2">你在此项目为只读权限:可拉取更新、查看版本历史,本地修改不会被同步。协作权限需项目 Owner 开通。</div>
+                <div class="actions">
+                  <button class="btn primary" onclick="toast('已更新到 v43')">拉取更新</button>
+                </div>
+              </div>
+              <div class="note-box">本地的修改只保存在你自己的电脑上;如需贡献内容,请联系项目 Owner(王律师)开通协作权限。</div>
+            </div>
+
+            <!-- 状态 7:已归档 -->
+            <div class="pane" id="st-archived">
+              <div class="state-card" style="border-color:#eadfc3">
+                <div class="line1" style="color:var(--amber)"><span class="dot" style="background:var(--amber)"></span>已被企业归档(只读)</div>
+                <div class="vrow"><span>本地 <b>v42</b></span><span>云端 <b>v42</b></span></div>
+                <div class="line2">企业管理员已归档此项目:可拉取与查看历史,无法推送变更。如需恢复协作,请联系企业管理员。</div>
+                <div class="actions">
+                  <button class="btn" onclick="toast('已是最新版本')">拉取更新</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 状态 8:同步异常(可读错误) -->
+            <div class="pane" id="st-error">
+              <div class="state-card" style="border-color:#ecd2cf">
+                <div class="line1" style="color:var(--red)"><span class="dot" style="background:var(--red)"></span>同步失败</div>
+                <div class="vrow"><span>本地 <b>v42 +3</b></span><span>云端 <b>检查失败</b></span><span>上次成功 2 小时前</span></div>
+              </div>
+
+              <div class="err-card">
+                <div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.7 18.4-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21.4h16a2 2 0 0 0 1.7-3z"/><path d="M12 9v4m0 4h.01"/></svg>云端存储暂时不可用</div>
+                <div class="why">上传文件时云端存储服务返回错误(403 InvalidAccessKey)。这通常是企业云存储账户配置或欠费问题,<b style="color:var(--text-2)">你的本地文件不受影响</b>,变更仍会保留在本地。</div>
+                <div class="fix">建议:联系企业管理员检查存储配置;问题解决后点击<b>重试</b>即可继续,无需重复操作。</div>
+                <div class="acts">
+                  <button class="btn sm primary" onclick="toast('重试中…')">重试同步</button>
+                  <button class="btn sm" onclick="toast('已复制错误详情')">复制错误详情</button>
+                </div>
+              </div>
+
+              <div class="d-section">
+                <div class="label">错误文案规范(全部可读化,实现时按 code 映射)</div>
+                <div style="margin-top:8px">
+                  <div class="note-box" style="margin-bottom:8px"><b>网络中断</b> — 无法连接云端服务,请检查网络后重试;本地变更已保留。</div>
+                  <div class="note-box" style="margin-bottom:8px"><b>权限不足</b> — 你在此项目为只读权限,无法推送;协作权限需项目 Owner 开通。</div>
+                  <div class="note-box" style="margin-bottom:8px"><b>项目已停用</b> — 此项目已被企业停用,所有云端操作不可用;请联系企业管理员。</div>
+                  <div class="note-box" style="margin-bottom:8px"><b>登录过期</b> — 登录状态已过期,请重新登录后继续;本地变更已保留。</div>
+                  <div class="note-box"><b>云端有新更新</b> — 推送被拒(版本落后),请先拉取更新再同步。</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ════ Tab:版本 ════ -->
+          <div class="pane" id="dpane-versions">
+            <div class="state-card" style="padding:10px 12px">
+              <div class="line1" style="font-size:12px">版本历史</div>
+              <div class="line2">每次同步生成一个同步版本;里程碑(★)由 Owner 手动标记,适合「定稿/交付」节点。单个文件的恢复在文件行的「历史」中操作。</div>
+              <div class="actions">
+                <button class="btn sm" onclick="openModal('modal-milestone')">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></svg>
+                  将当前版本标记为里程碑
+                </button>
+              </div>
+            </div>
+
+            <div class="d-section" style="margin-top:6px">
+              <div class="label">全部版本 <span class="n">42</span></div>
+              <div class="ver-row"><span class="vnum">v42</span><span class="msg">同步:更新尽调清单与三份补充协议</span><span class="tag-current">当前</span><span class="meta">陈思琪 · 12 分钟前</span></div>
+              <div class="ver-row"><span class="vnum">v41</span><span class="msg">同步:补充庭前证据材料</span><span class="meta">王律师 · 昨天</span></div>
+              <div class="ver-row"><span class="vnum ms">v40 ★</span><span class="msg">里程碑:第一轮交割文件定稿</span><span class="meta">王律师 · 2 天前</span></div>
+              <div class="ver-row"><span class="vnum">v39</span><span class="msg">同步:法务意见书修订</span><span class="meta">孙雨晴 · 3 天前</span></div>
+              <div class="ver-row"><span class="vnum">v38</span><span class="msg">同步:新增反垄断申报材料目录</span><span class="meta">陈思琪 · 5 天前</span></div>
+              <div class="ver-row"><span class="vnum ms">v33 ★</span><span class="msg">里程碑:尽调报告初稿交付</span><span class="meta">王律师 · 2 周前</span></div>
+            </div>
+            <p class="foot-note" style="padding:10px 2px">版本不可回滚整个项目(防误操作);需要找回旧内容时,用单文件的「历史与恢复」逐个恢复。</p>
+          </div>
+
+        </div>
+      </aside>
+    </div>
+
+    <!-- ───────── 弹窗:发布到云端 ───────── -->
+    <div class="overlay" id="modal-publish">
+      <div class="modal">
+        <div class="m-head"><h3>发布到云端</h3><p>XX 集团并购重组专项 · 316 个文件 · 1.8 GB</p></div>
+        <div class="m-body">
+          <div id="pub-form">
+            <div class="form-row">
+              <div class="col"><span class="field-label">云端项目名称</span><input class="input" value="XX 集团并购重组专项"></div>
+            </div>
+            <div class="form-row">
+              <div class="col"><span class="field-label">描述(可选)</span><input class="input" placeholder="并购交易尽调、交割文件与法律意见书协作空间"></div>
+            </div>
+            <div class="note-box">发布后项目为<b>私有</b>:仅你可见,可随时在「协作项目」中生成邀请码或设为公开。超过 200 MB 的大文件将以占位文件形式同步,协作者打开时再下载。</div>
+          </div>
+          <div id="pub-progress" style="display:none">
+            <div class="step-list">
+              <div class="step done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>扫描本地文件(316 个)</div>
+              <div class="step done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>创建云端项目</div>
+              <div class="step done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>比对已有文件(跳过 0 个)</div>
+              <div class="step run"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="4 3"/></svg>上传文件 203 / 316</div>
+              <div class="step wait"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>提交版本 v1</div>
+            </div>
+            <div class="prog">
+              <div class="pl"><span>财务报表/2025审计底稿.xlsx</span><span>64%</span></div>
+              <div class="bar"><div></div></div>
+            </div>
+            <div class="note-box" style="margin-top:12px">可以关闭此窗口,发布会在后台继续;进度在左侧边栏与状态 chip 中可见。</div>
+          </div>
+        </div>
+        <div class="m-foot">
+          <button class="btn" onclick="closeModal('modal-publish')">取消</button>
+          <button class="btn primary" id="pub-btn" onclick="startPublish()">开始发布</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── 弹窗:单文件历史与恢复 ───────── -->
+    <div class="overlay" id="modal-history">
+      <div class="modal wide">
+        <div class="m-head"><h3>历史版本与恢复</h3><p>收到资料/尽调文件/股权转让协议(初稿).docx</p></div>
+        <div class="m-body">
+          <div class="note-box" style="margin-bottom:12px">恢复会把所选版本写回本地,当前本地文件自动备份;恢复后显示为「已修改 · 待同步」,确认无误后再同步到云端。</div>
+          <div class="hist-row">
+            <span class="vnum">v42</span><span class="msg">更新尽调清单与三份补充协议</span><span class="tag-current">当前</span><span class="meta">陈思琪 · 12 分钟前 · 1.2 MB</span>
+            <span style="width:52px"></span>
+          </div>
+          <div class="hist-row">
+            <span class="vnum ms">v40 ★</span><span class="msg">第一轮交割文件定稿</span><span class="meta">王律师 · 2 天前 · 1.1 MB</span>
+            <span class="hov" style="flex-shrink:0"><button class="btn sm" onclick="toast('已恢复 v40 到本地,原文件已备份'); closeModal('modal-history')">恢复此版本</button></span>
+          </div>
+          <div class="hist-row">
+            <span class="vnum">v36</span><span class="msg">初稿上传</span><span class="meta">王律师 · 1 周前 · 0.9 MB</span>
+            <span class="hov" style="flex-shrink:0"><button class="btn sm" onclick="toast('已恢复 v36 到本地,原文件已备份'); closeModal('modal-history')">恢复此版本</button></span>
+          </div>
+        </div>
+        <div class="m-foot">
+          <button class="btn" onclick="closeModal('modal-history')">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── 弹窗:标记里程碑 ───────── -->
+    <div class="overlay" id="modal-milestone">
+      <div class="modal">
+        <div class="m-head"><h3>标记里程碑</h3><p>将当前版本 v42 标记为里程碑(仅 Owner)</p></div>
+        <div class="m-body">
+          <span class="field-label">里程碑名称</span>
+          <input class="input" placeholder="例如:第二轮交割文件定稿" style="margin-bottom:12px">
+          <div class="note-box">里程碑只是给版本一个醒目的名字,方便团队在历史里快速定位;不影响文件内容。</div>
+        </div>
+        <div class="m-foot">
+          <button class="btn" onclick="closeModal('modal-milestone')">取消</button>
+          <button class="btn primary" onclick="closeModal('modal-milestone'); toast('已标记里程碑「第二轮交割文件定稿」')">标记</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── 弹窗:冲突处理确认 ───────── -->
+    <div class="overlay" id="modal-keep-local">
+      <div class="modal">
+        <div class="m-head"><h3>保留本地版本?</h3><p>补充协议三.pdf</p></div>
+        <div class="m-body">
+          <div class="note-box">将删除云端副本「补充协议三(云端版本 v43).pdf」,保留你的本地版本;下次同步时,你的版本会覆盖云端。</div>
+        </div>
+        <div class="m-foot">
+          <button class="btn" onclick="closeModal('modal-keep-local')">取消</button>
+          <button class="btn primary" onclick="closeModal('modal-keep-local'); toast('已保留本地版本,冲突已解决'); resolveConflictDemo()">保留本地</button>
+        </div>
+      </div>
+    </div>
+    <div class="overlay" id="modal-use-remote">
+      <div class="modal">
+        <div class="m-head"><h3>采用云端版本?</h3><p>补充协议三.pdf</p></div>
+        <div class="m-body">
+          <div class="note-box warn">将用云端副本(陈思琪 · v43)<b>覆盖</b>你的本地版本;你的本地版本会先自动备份,可在备份目录找回。</div>
+        </div>
+        <div class="m-foot">
+          <button class="btn" onclick="closeModal('modal-use-remote')">取消</button>
+          <button class="btn danger" onclick="closeModal('modal-use-remote'); toast('已采用云端版本,本地版本已备份'); resolveConflictDemo()">采用云端</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+  </main>
+</div>
+
+<script>
+  // ── 演示:统一状态机切换 ──
+  const CHIP = {
+    unbound:  { cls: 'idle',    text: '未发布到云端' },
+    synced:   { cls: 'ok',      text: '已与云端同步 · v42' },
+    local:    { cls: 'pending', text: '3 个变更待同步' },
+    remote:   { cls: 'pending', text: '云端有更新 · v43' },
+    conflict: { cls: 'warn',    text: '1 个冲突待处理' },
+    viewer:   { cls: 'idle',    text: '只读 · v42' },
+    archived: { cls: 'warn',    text: '已归档 · 只读' },
+    error:    { cls: 'err',     text: '同步失败' },
+  };
+  let cur = 'synced';
+
+  function setState(s) {
+    cur = s;
+    document.querySelectorAll('.demo-strip .pill').forEach(p => p.classList.toggle('on', p.dataset.s === s));
+    // chip
+    const chip = document.getElementById('chip');
+    chip.className = 'cloud-chip ' + CHIP[s].cls;
+    document.getElementById('chip-text').textContent = CHIP[s].text;
+    // drawer status pane
+    ['unbound','synced','local','remote','conflict','viewer','archived','error'].forEach(k => {
+      document.getElementById('st-' + k).classList.toggle('on', k === s);
+    });
+    // 文件行徽标联动
+    const local = (s === 'local' || s === 'error');
+    document.getElementById('fb-1').style.display = (local || s === 'conflict') ? '' : 'none';
+    document.getElementById('fb-2').style.display = local ? '' : 'none';
+    document.getElementById('fb-3').style.display = (s === 'conflict') ? '' : 'none';
+    document.getElementById('row-copy').style.display = (s === 'conflict') ? 'flex' : 'none';
+    // 确保抽屉在状态 Tab
+    switchDrawerTab('status');
+    const drawer = document.getElementById('drawer');
+    if (drawer.style.display === 'none') drawer.style.display = 'flex';
+  }
+
+  function toggleDrawer() {
+    const d = document.getElementById('drawer');
+    d.style.display = (d.style.display === 'none') ? 'flex' : 'none';
+  }
+
+  function switchDrawerTab(t) {
+    document.getElementById('dtab-status').classList.toggle('on', t === 'status');
+    document.getElementById('dtab-versions').classList.toggle('on', t === 'versions');
+    document.getElementById('dpane-status').classList.toggle('on', t === 'status');
+    document.getElementById('dpane-versions').classList.toggle('on', t === 'versions');
+  }
+
+  function resolveConflictDemo() {
+    // 冲突解决后:副本行消失,状态回到「本地变更」(待推送)
+    setTimeout(() => setState('local'), 300);
+  }
+
+  // 弹窗
+  function openModal(id) {
+    document.getElementById(id).classList.add('open');
+    if (id === 'modal-publish') {
+      document.getElementById('pub-form').style.display = '';
+      document.getElementById('pub-progress').style.display = 'none';
+      document.getElementById('pub-btn').style.display = '';
+    }
+  }
+  function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+  document.querySelectorAll('.overlay').forEach(o => o.addEventListener('mousedown', (e) => { if (e.target === o) o.classList.remove('open'); }));
+
+  function startPublish() {
+    document.getElementById('pub-form').style.display = 'none';
+    document.getElementById('pub-btn').style.display = 'none';
+    document.getElementById('pub-progress').style.display = '';
+  }
+
+  function toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(t._timer); t._timer = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  // 支持 #conflict / #local 等 hash 直接打开对应演示状态
+  const initial = location.hash.replace('#', '');
+  setState(CHIP[initial] ? initial : 'synced');
+</script>
+</body>
+</html>

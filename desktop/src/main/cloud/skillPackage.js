@@ -78,7 +78,15 @@ export function createSkillPackage(skillDir, { version = '1.0.0', metadata = {} 
   const files = walkFiles(skillDir).map((abs) => {
     const rel = path.relative(skillDir, abs).replace(/\\/g, '/');
     const buf = fs.readFileSync(abs);
-    return { path: rel, encoding: 'base64', content: buf.toString('base64'), sizeBytes: buf.length };
+    return {
+      path: rel,
+      encoding: 'base64',
+      content: buf.toString('base64'),
+      sizeBytes: buf.length,
+      // H5: per-file hash enables real version diffs; older packages without
+      // it fall back to size-based comparison.
+      sha256: crypto.createHash('sha256').update(buf).digest('hex'),
+    };
   });
   const manifest = {
     name: parsed.name,
@@ -87,7 +95,7 @@ export function createSkillPackage(skillDir, { version = '1.0.0', metadata = {} 
     version,
     disableModelInvocation: parsed.disableModelInvocation,
     metadata,
-    files: files.map((f) => ({ path: f.path, sizeBytes: f.sizeBytes })),
+    files: files.map((f) => ({ path: f.path, sizeBytes: f.sizeBytes, sha256: f.sha256 })),
   };
   const pkg = { schemaVersion: PACKAGE_SCHEMA_VERSION, manifest, files };
   const buffer = Buffer.from(JSON.stringify(pkg), 'utf-8');

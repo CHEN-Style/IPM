@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { pool } from '../../infra/db/postgres.js';
 import { ossConfigured } from '../../config/env.js';
 import { getSignedGetUrl } from '../../infra/oss/ossClient.js';
+import { requireWorkspaceAccess } from '../workspaces/access.js';
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/i, 'sha256 must be 64 hex chars');
 
@@ -71,17 +72,6 @@ function normalizeManifestPath(input: string): string {
   return `/${trimmed.replace(/^\/+/, '')}`;
 }
 
-async function requireWorkspaceMember(workspaceId: string, userId: string) {
-  const member = await pool.query<{ role: string; org_id: string }>(
-    `SELECT wm.role, w.org_id
-       FROM workspace_members wm
-       JOIN workspaces w ON w.id = wm.workspace_id
-      WHERE wm.workspace_id = $1 AND wm.user_id = $2`,
-    [workspaceId, userId],
-  );
-  return member.rows[0] ?? null;
-}
-
 export async function registerVersionRoutes(app: FastifyInstance) {
   app.post('/api/workspaces/:id/versions', async (request, reply) => {
     const userId = request.userId;
@@ -98,18 +88,11 @@ export async function registerVersionRoutes(app: FastifyInstance) {
 
     const client = await pool.connect();
     try {
-      // Workspace must exist and caller must be an editor/owner.
-      const member = await client.query<{ role: string; org_id: string }>(
-        `SELECT wm.role, w.org_id
-           FROM workspace_members wm
-           JOIN workspaces w ON w.id = wm.workspace_id
-          WHERE wm.workspace_id = $1 AND wm.user_id = $2`,
-        [workspaceId, userId],
-      );
-      if (member.rowCount === 0) {
-        return reply.code(403).send({ ok: false, error: 'Not a member of this workspace.' });
-      }
-      const { role, org_id: orgId } = member.rows[0];
+      // Workspace must exist, caller must be an editor/owner, and the
+      // workspace must be active (H3/A4: commits are write actions).
+      const access = await requireWorkspaceAccess(reply, workspaceId, userId, 'write', client);
+      if (!access) return;
+      const { role, orgId } = access;
       if (role === 'viewer') {
         return reply.code(403).send({ ok: false, error: 'Viewers cannot commit versions.' });
       }
@@ -127,9 +110,11 @@ export async function registerVersionRoutes(app: FastifyInstance) {
 
       const objectMap = new Map<string, string>();
       if (hashes.length > 0) {
+        // H1 (audit A5): objects are org-scoped — a manifest may only
+        // reference blobs that belong to this workspace's org.
         const objs = await client.query<{ id: string; sha256: string }>(
-          `SELECT id, sha256 FROM objects WHERE sha256 = ANY($1) AND status = 'available'`,
-          [hashes],
+          `SELECT id, sha256 FROM objects WHERE org_id = $2 AND sha256 = ANY($1) AND status = 'available'`,
+          [hashes, orgId],
         );
         for (const row of objs.rows) {
           objectMap.set(row.sha256.toLowerCase(), row.id);
@@ -274,13 +259,9 @@ export async function registerVersionRoutes(app: FastifyInstance) {
     const { id: workspaceId } = request.params as { id: string };
     const { type } = request.query as { type?: string };
 
-    const member = await pool.query(
-      `SELECT 1 FROM workspace_members WHERE workspace_id = $1 AND user_id = $2`,
-      [workspaceId, userId],
-    );
-    if (member.rowCount === 0) {
-      return reply.code(403).send({ ok: false, error: 'Not a member of this workspace.' });
-    }
+    // H3 (A4): read action — version history stays readable when archived.
+    const access = await requireWorkspaceAccess(reply, workspaceId, userId, 'read');
+    if (!access) return;
 
     const filterMilestone = type === 'milestone';
     const rows = await pool.query<{
@@ -330,8 +311,8 @@ export async function registerVersionRoutes(app: FastifyInstance) {
       return reply.code(400).send({ ok: false, error: 'Invalid query', details: parsed.error.flatten() });
     }
 
-    const member = await requireWorkspaceMember(workspaceId, userId);
-    if (!member) return reply.code(403).send({ ok: false, error: 'Not a member of this workspace.' });
+    const access = await requireWorkspaceAccess(reply, workspaceId, userId, 'read');
+    if (!access) return;
 
     const filePath = normalizeManifestPath(parsed.data.path);
     const rows = await pool.query<{
@@ -399,8 +380,8 @@ export async function registerVersionRoutes(app: FastifyInstance) {
       return reply.code(400).send({ ok: false, error: 'Invalid body', details: parsed.error.flatten() });
     }
 
-    const member = await requireWorkspaceMember(workspaceId, userId);
-    if (!member) return reply.code(403).send({ ok: false, error: 'Not a member of this workspace.' });
+    const access = await requireWorkspaceAccess(reply, workspaceId, userId, 'read');
+    if (!access) return;
 
     const filePath = normalizeManifestPath(parsed.data.path);
     const row = await pool.query<{
@@ -451,14 +432,15 @@ export async function registerVersionRoutes(app: FastifyInstance) {
       return reply.code(400).send({ ok: false, error: 'Invalid body', details: parsed.error.flatten() });
     }
 
-    const member = await requireWorkspaceMember(workspaceId, userId);
-    if (!member) return reply.code(403).send({ ok: false, error: 'Not a member of this workspace.' });
+    // H3 (A4): conflicts only arise from active sync flows — write action.
+    const access = await requireWorkspaceAccess(reply, workspaceId, userId, 'write');
+    if (!access) return;
 
     await pool.query(
       `INSERT INTO events (org_id, workspace_id, actor_id, event_type, payload)
        VALUES ($1, $2, $3, 'version.conflict_auto_kept_both', $4::jsonb)`,
       [
-        member.org_id,
+        access.orgId,
         workspaceId,
         userId,
         JSON.stringify({
@@ -483,17 +465,10 @@ export async function registerVersionRoutes(app: FastifyInstance) {
       return reply.code(400).send({ ok: false, error: 'Invalid body', details: parsed.error.flatten() });
     }
 
-    const member = await pool.query<{ role: string; org_id: string }>(
-      `SELECT wm.role, w.org_id
-         FROM workspace_members wm
-         JOIN workspaces w ON w.id = wm.workspace_id
-        WHERE wm.workspace_id = $1 AND wm.user_id = $2`,
-      [workspaceId, userId],
-    );
-    if (member.rowCount === 0) {
-      return reply.code(403).send({ ok: false, error: 'Not a member of this workspace.' });
-    }
-    if (member.rows[0].role !== 'owner') {
+    // H3 (A4): promoting is a write action — active workspaces only.
+    const access = await requireWorkspaceAccess(reply, workspaceId, userId, 'write');
+    if (!access) return;
+    if (access.role !== 'owner') {
       return reply.code(403).send({ ok: false, error: 'Only the owner can create milestone versions.' });
     }
 
@@ -511,7 +486,7 @@ export async function registerVersionRoutes(app: FastifyInstance) {
       `INSERT INTO events (org_id, workspace_id, actor_id, event_type, payload)
        VALUES ($1, $2, $3, 'version.milestone', $4::jsonb)`,
       [
-        member.rows[0].org_id,
+        access.orgId,
         workspaceId,
         userId,
         JSON.stringify({ versionId, versionNumber: upd.rows[0].version_number, label: parsed.data.label }),

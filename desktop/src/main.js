@@ -36,6 +36,7 @@ import { registerSearchIpc } from './main/ipc/search.js';
 import { registerOcrIpc } from './main/ipc/ocr.js';
 import { registerCloudIpc } from './main/ipc/cloud.js';
 import { registerAuthIpc } from './main/ipc/auth.js';
+import { registerOrgIpc } from './main/ipc/org.js';
 import { createLockGuardedIpcMain } from './main/cloud/publishLockGuard.js';
 import * as userScope from './main/cloud/userScope.js';
 import { isWorkspaceLocked } from './main/cloud/publishLock.js';
@@ -2632,6 +2633,9 @@ app.whenReady().then(() => {
   // C2: Desktop cloud binding + local workspace scan (offline-only).
   // C4: also handles cloud browse / join / pull and on-demand file download.
   registerCloudIpc({ ipcMain, getWorkspaceDirOrThrow, createLocalCloudProject });
+
+  // H2: enterprise admin (org members + invites) for the enterprise console.
+  registerOrgIpc({ ipcMain });
 
   uploadPendingAnalytics(getAppRoot()).catch(() => {});
 

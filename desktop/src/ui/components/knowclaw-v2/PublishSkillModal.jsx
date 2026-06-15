@@ -1,12 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, UploadCloud, X } from 'lucide-react';
+import { suggestNextVersion } from './skillDiff.js';
 
 const versionRe = /^[0-9A-Za-z][0-9A-Za-z._-]{0,39}$/;
+
+const STATUS_LABEL = {
+  pending_review: '待审核',
+  approved: '已上架',
+  rejected: '已拒绝',
+  archived: '已归档',
+};
 
 const PublishSkillModal = ({
   open,
   skills,
   cwd,
+  // H5: optional registry skill to target — set when the user clicks
+  // 「提交新版本」in the My Submissions tab. Pre-selects the matching local
+  // skill (name === slug) and pre-fills the suggested next version.
+  target,
+  listMineRegistrySkills,
   onClose,
   publishRegistrySkill,
   onPublished,
@@ -20,21 +33,49 @@ const PublishSkillModal = ({
   const [description, setDescription] = useState('');
   const [phase, setPhase] = useState('idle');
   const [error, setError] = useState(null);
+  // slug → registry skill record for "current online version" hints.
+  const [mineBySlug, setMineBySlug] = useState(() => new Map());
 
   const selected = publishable.find((s) => s.name === skillName) || publishable[0] || null;
+  const online = selected ? mineBySlug.get(selected.name) : null;
 
   useEffect(() => {
     if (!open) return;
-    setSkillName((prev) => prev || publishable[0]?.name || '');
-    setVersion('1.0.0');
-    setDescription(publishable[0]?.description || '');
+    const initialName = (target?.slug && publishable.some((s) => s.name === target.slug))
+      ? target.slug
+      : (publishable[0]?.name || '');
+    setSkillName(initialName);
+    setVersion(target?.latestVersion ? suggestNextVersion(target.latestVersion) : '1.0.0');
+    setDescription(publishable.find((s) => s.name === initialName)?.description || '');
     setPhase('idle');
     setError(null);
-  }, [open, publishable]);
+  }, [open, publishable, target]);
+
+  // Load the caller's own registry submissions so we can show the current
+  // online version next to the selected skill and suggest the next number.
+  useEffect(() => {
+    if (!open || !listMineRegistrySkills) return undefined;
+    let cancelled = false;
+    (async () => {
+      const res = await listMineRegistrySkills();
+      if (cancelled || !res?.ok) return;
+      setMineBySlug(new Map((res.skills || []).map((s) => [s.slug, s])));
+    })();
+    return () => { cancelled = true; };
+  }, [open, listMineRegistrySkills]);
 
   useEffect(() => {
     if (selected) setDescription(selected.description || '');
   }, [selected?.name]);
+
+  // When the user switches skill (or the mine list lands), refresh the
+  // suggested version off the online record. Don't clobber a value the
+  // user already typed away from the auto-suggestion.
+  useEffect(() => {
+    if (!open || !selected) return;
+    const rec = mineBySlug.get(selected.name);
+    if (rec?.latestVersion) setVersion(suggestNextVersion(rec.latestVersion));
+  }, [open, selected?.name, mineBySlug]);
 
   if (!open) return null;
 
@@ -77,7 +118,9 @@ const PublishSkillModal = ({
             <UploadCloud size={18} className="text-indigo-500" />
           </div>
           <div className="flex-1">
-            <div className="text-[15px] font-semibold text-slate-800">提交 Skill 审核</div>
+            <div className="text-[15px] font-semibold text-slate-800">
+              {online ? '提交新版本审核' : '提交 Skill 审核'}
+            </div>
             <div className="text-[12px] text-slate-500 mt-0.5">管理员审核通过并设置可见范围后，成员才能在组织市场安装。</div>
           </div>
           <button type="button" onClick={onClose} className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100">
@@ -100,6 +143,12 @@ const PublishSkillModal = ({
               </div>
             ) : (
               <>
+                {target?.slug && !publishable.some((s) => s.name === target.slug) && (
+                  <div className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 text-[12px] text-amber-800 flex gap-2">
+                    <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                    本地没有名为「{target.slug}」的技能目录，无法直接提交它的新版本。请先安装或重建同名本地技能。
+                  </div>
+                )}
                 <label className="block">
                   <span className="block text-[12px] font-medium text-slate-700 mb-1">选择本地 Skill</span>
                   <select
@@ -113,6 +162,13 @@ const PublishSkillModal = ({
                       </option>
                     ))}
                   </select>
+                  {online && (
+                    <div className="mt-1.5 px-2.5 py-1.5 rounded-md bg-slate-50 border border-slate-100 text-[11px] text-slate-500">
+                      当前线上版本：<b className="text-slate-700">{online.latestVersion || '—'}</b>
+                      <span className="ml-1.5">（{STATUS_LABEL[online.status] || online.status}）</span>
+                      ，提交后将作为新版本进入审核。
+                    </div>
+                  )}
                 </label>
 
                 <label className="block">

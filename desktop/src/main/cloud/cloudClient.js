@@ -88,6 +88,11 @@ export class CloudClient {
         const err = new Error(message);
         err.status = res.status;
         err.body = parsed;
+        // H1: machine-readable error code (ORG_DISABLED / MEMBER_DISABLED /
+        // RATE_LIMITED ...) so UI layers can branch without string matching.
+        if (parsed && typeof parsed === 'object' && parsed.code) {
+          err.code = parsed.code;
+        }
         throw err;
       }
 
@@ -98,7 +103,19 @@ export class CloudClient {
         e.code = 'ABORTED';
         throw e;
       }
-      throw err;
+      // Already-shaped HTTP errors (from the !res.ok branch) carry a status or a
+      // machine code — re-throw verbatim so UI branching keeps working.
+      if (err && (err.status || err.code)) {
+        throw err;
+      }
+      // Everything else here is a transport-level failure (server unreachable,
+      // DNS, connection reset, TLS). Node's undici surfaces these as an opaque
+      // "fetch failed", which is meaningless to users. Map to a friendly,
+      // actionable message with a stable NETWORK code so callers can branch.
+      const e = new Error('无法连接云端服务，请检查网络后重试。');
+      e.code = 'NETWORK';
+      e.cause = err;
+      throw e;
     } finally {
       clearTimeout(timer);
     }
@@ -114,6 +131,10 @@ export class CloudClient {
 
   async put(reqPath, body, opts = {}) {
     return this.request('PUT', reqPath, { ...opts, body });
+  }
+
+  async patch(reqPath, body, opts = {}) {
+    return this.request('PATCH', reqPath, { ...opts, body });
   }
 
   async delete(reqPath, opts = {}) {

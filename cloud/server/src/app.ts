@@ -38,6 +38,11 @@ export async function buildApp() {
         imgSrc: ["'self'", 'data:'],
         connectSrc: ["'self'"],
         objectSrc: ["'none'"],
+        // Direct-IP deployments may run over plain HTTP before a domain and
+        // reverse proxy are configured. Helmet's default upgrade directive
+        // would make browsers request the console JS over HTTPS and leave the
+        // page stuck at "加载中...".
+        upgradeInsecureRequests: null,
       },
     },
   });

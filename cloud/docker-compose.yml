@@ -32,6 +32,9 @@ services:
       LOG_LEVEL: info
       CORS_ORIGIN: ${CORS_ORIGIN:-*}
       DATABASE_URL: postgres://ipm:ipm_dev_password@postgres:5432/ipm_cloud
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      CONFIG_ENC_KEY: ${CONFIG_ENC_KEY}
       OSS_REGION: ${OSS_REGION:-}
       OSS_BUCKET: ${OSS_BUCKET:-}
       OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}

@@ -4,7 +4,6 @@ import { useConfirmDialog } from '../../../hooks/useConfirmDialog.jsx';
 const useFileActions = ({
   cwd,
   domainOpts,
-  viewMode,
   refreshEntries,
   refreshGhosts,
   refreshTreeDir,
@@ -52,12 +51,13 @@ const useFileActions = ({
       }
       setNewFolderOpen(false);
       await refreshEntries?.();
+      await refreshTreeDir?.(newFolderBaseRelPath || '');
       setNotice?.({ variant: 'success', message: `已创建文件夹：${res?.createdName || name}` });
     } catch (e) {
       setErrorText?.(e?.message || String(e));
       setNotice?.({ variant: 'error', message: e?.message || String(e) });
     }
-  }, [cwd, domainOpts, newFolderBaseRelPath, newFolderName, refreshEntries, setErrorText, setNotice]);
+  }, [cwd, domainOpts, newFolderBaseRelPath, newFolderName, refreshEntries, refreshTreeDir, setErrorText, setNotice]);
 
   const uploadFiles = useCallback(async () => {
     if (cwd.type !== 'project' && cwd.type !== 'local') return;
@@ -72,12 +72,13 @@ const useFileActions = ({
         return;
       }
       await refreshEntries?.();
+      await refreshTreeDir?.(cwd.relPath || '');
       setNotice?.({ variant: 'success', message: '上传完成' });
     } catch (e) {
       setErrorText?.(e?.message || String(e));
       setNotice?.({ variant: 'error', message: e?.message || String(e) });
     }
-  }, [cwd, domainOpts, refreshEntries, setErrorText, setNotice]);
+  }, [cwd, domainOpts, refreshEntries, refreshTreeDir, setErrorText, setNotice]);
 
   const uploadFilesTo = useCallback(
     async (destRelPath, folderName) => {
@@ -93,13 +94,14 @@ const useFileActions = ({
           return;
         }
         await refreshEntries?.();
+        await refreshTreeDir?.(destRelPath || '');
         setNotice?.({ variant: 'success', message: `已上传到「${folderName}」` });
       } catch (e) {
         setErrorText?.(e?.message || String(e));
         setNotice?.({ variant: 'error', message: e?.message || String(e) });
       }
     },
-    [cwd, domainOpts, refreshEntries, setErrorText, setNotice],
+    [cwd, domainOpts, refreshEntries, refreshTreeDir, setErrorText, setNotice],
   );
 
   const dropUploadFiles = useCallback(
@@ -111,6 +113,7 @@ const useFileActions = ({
         const res = await window.ipm.explorer.dropUpload(cwd.name, cwd.relPath || '', filePaths, domainOpts);
         if (res?.ok) {
           await refreshEntries?.();
+          await refreshTreeDir?.(cwd.relPath || '');
           setNotice?.({ variant: 'success', message: `已上传 ${filePaths.length} 个文件/文件夹` });
         }
       } catch (e) {
@@ -118,7 +121,7 @@ const useFileActions = ({
         setNotice?.({ variant: 'error', message: e?.message || String(e) });
       }
     },
-    [cwd, domainOpts, refreshEntries, setErrorText, setNotice],
+    [cwd, domainOpts, refreshEntries, refreshTreeDir, setErrorText, setNotice],
   );
 
   const deleteEntry = useCallback(
@@ -141,7 +144,7 @@ const useFileActions = ({
         }
         await refreshEntries?.();
         await refreshGhosts?.().catch(() => {});
-        if (viewMode === 'explorer') {
+        {
           const parts = String(entry.relPath || '').split('/').filter(Boolean);
           parts.pop();
           const parent = parts.join('/');
@@ -158,7 +161,7 @@ const useFileActions = ({
         setNotice?.({ variant: 'error', message: cleaned });
       }
     },
-    [cwd, domainOpts, refreshEntries, refreshGhosts, refreshTreeDir, removeTreeNode, setErrorText, setNotice, viewMode],
+    [cwd, domainOpts, refreshEntries, refreshGhosts, refreshTreeDir, removeTreeNode, setErrorText, setNotice],
   );
 
   const openRename = useCallback(
@@ -195,11 +198,16 @@ const useFileActions = ({
       }
       setRenameOpen(false);
       await refreshEntries?.();
+      {
+        const parts = String(renameRelPath || '').split('/').filter(Boolean);
+        parts.pop();
+        await refreshTreeDir?.(parts.join('/'));
+      }
       setNotice?.({ variant: 'success', message: `已重命名为：${res?.renamedTo || newName}` });
     } catch (e) {
       setNotice?.({ variant: 'error', message: e?.message || String(e) });
     }
-  }, [cwd, domainOpts, refreshEntries, renameNewName, renameOldName, renameRelPath, setNotice]);
+  }, [cwd, domainOpts, refreshEntries, refreshTreeDir, renameNewName, renameOldName, renameRelPath, setNotice]);
 
   const openFileByRelPath = useCallback(
     async (relPath) => {

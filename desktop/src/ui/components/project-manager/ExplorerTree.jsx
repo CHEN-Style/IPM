@@ -1,31 +1,46 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { isHiddenSystemDir, folderTooltip } from './utils.js';
+import { isHiddenSystemDir, folderTooltip, normalizeRelPathPosix } from './utils.js';
 
 const ExplorerTree = ({
   name,
   relPath,
   depth,
   tree,
+  selectedRelPath,
+  focusedRelPath,
+  ghostBadgeByDir,
   onToggle,
+  onSelectDir,
   onLoad,
   onEntryContextMenu,
-  onOpenFile,
   onDragStartEntry,
   onDragEndAny,
   onDropOnFolder,
   onDragOverFolder,
   onDragLeaveFolder,
   folderDecor,
-  fmtBytes,
 }) => {
-  const rp = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '').replace(/\/{2,}/g, '/');
+  const rp = normalizeRelPathPosix(relPath);
   const node = tree?.[rp];
   // UX: only auto-expand the root node. Deeper folders start collapsed.
   const defaultOpen = depth === 0;
   const isOpen = node?.open ?? defaultOpen;
   const isLoading = node?.loading ?? false;
   const children = node?.entries ?? null;
+  const isSelected = normalizeRelPathPosix(selectedRelPath) === rp;
+  const isFocused = focusedRelPath != null && normalizeRelPathPosix(focusedRelPath) === rp;
+  const ghostCount = ghostBadgeByDir?.[rp] || 0;
+  const isRootNode = depth === 0;
+
+  const rowRef = useRef(null);
+  useEffect(() => {
+    // Reveal the currently-selected / keyboard-focused node when navigation
+    // happens from the right pane / breadcrumb / AI overview / keyboard.
+    if ((isSelected || isFocused) && rowRef.current) {
+      rowRef.current.scrollIntoView({ block: 'nearest' });
+    }
+  }, [isSelected, isFocused]);
 
   useEffect(() => {
     // Only auto-load children when the folder is open.
@@ -40,88 +55,164 @@ const ExplorerTree = ({
       iconClass: '',
       boxClass: '',
     }));
-  const safeFmtBytes = fmtBytes || (() => '-');
 
+  // Folders-only navigation pane: files appear only in the right-hand list.
+  const childDirs = Array.isArray(children)
+    ? children.filter((e) => e.kind === 'dir' && !isHiddenSystemDir(e))
+    : null;
+
+  // Shared interactive props for the clickable row (root header & card rows).
+  const interactiveProps = {
+    ref: rowRef,
+    role: 'treeitem',
+    'aria-selected': isSelected,
+    'aria-expanded': isOpen,
+    onClick: () => onSelectDir?.(rp),
+    onContextMenu: (evt) => {
+      if (rp) onEntryContextMenu?.(evt, { kind: 'dir', name: name || '文件夹', relPath: rp });
+    },
+    draggable: Boolean(rp),
+    onDragStart: (evt) => {
+      if (!rp) return;
+      onDragStartEntry?.(evt, { kind: 'dir', name: name || '文件夹', relPath: rp });
+    },
+    onDragEnd: onDragEndAny,
+    onDragOver: (evt) => onDragOverFolder?.(evt, { kind: 'dir', relPath: rp }),
+    onDragLeave: (evt) => onDragLeaveFolder?.(evt, { kind: 'dir', relPath: rp }),
+    onDrop: (evt) => onDropOnFolder?.(evt, { kind: 'dir', relPath: rp, name: name || '文件夹' }),
+    title: folderTooltip(rp),
+  };
+
+  const chevronBtn = (
+    <button
+      type="button"
+      className="w-5 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 shrink-0"
+      onClick={(evt) => {
+        evt.stopPropagation();
+        onToggle?.(rp);
+      }}
+      title={isOpen ? '收起' : '展开'}
+    >
+      {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+    </button>
+  );
+
+  const { Icon, iconClass } = safeFolderDecor(rp);
+
+  const badge =
+    ghostCount > 0 ? (
+      <span
+        className="shrink-0 ml-auto text-[10px] font-bold leading-none px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200"
+        title={`含 ${ghostCount} 个待处理 AI 建议`}
+      >
+        {ghostCount}
+      </span>
+    ) : null;
+
+  const loadingTag = isLoading ? (
+    <span className={`text-[10px] text-slate-400 shrink-0 ${ghostCount > 0 ? 'ml-1.5' : 'ml-auto'}`}>加载中...</span>
+  ) : null;
+
+  // --- Root node: rendered as a section header above the soft card. ---
+  if (isRootNode) {
+    return (
+      <div className="select-none px-2">
+        <div
+          {...interactiveProps}
+          className={`flex items-center gap-2 py-1.5 px-2 mb-2 rounded-lg cursor-pointer group transition-colors ${
+            isSelected ? 'text-[#3e4b9c] ring-1 ring-inset ring-[#3e4b9c]/40' : 'text-slate-800 hover:bg-slate-50'
+          } ${isFocused && !isSelected ? 'ring-1 ring-inset ring-[#3e4b9c]/40' : ''}`}
+        >
+          {chevronBtn}
+          <Icon size={18} className={iconClass} strokeWidth={1.6} />
+          <span className="text-sm font-bold truncate min-w-0 flex-1">{name || '项目根目录'}</span>
+          {badge}
+          {loadingTag}
+        </div>
+        {isOpen ? (
+          <div className="rounded-xl bg-slate-50/80 border border-slate-100 p-1.5" role="group">
+            {Array.isArray(childDirs) &&
+              childDirs.map((e) => (
+                <ExplorerTree
+                  key={e.relPath}
+                  name={e.name}
+                  relPath={e.relPath}
+                  depth={depth + 1}
+                  tree={tree}
+                  selectedRelPath={selectedRelPath}
+                  focusedRelPath={focusedRelPath}
+                  ghostBadgeByDir={ghostBadgeByDir}
+                  onToggle={onToggle}
+                  onSelectDir={onSelectDir}
+                  onLoad={onLoad}
+                  onEntryContextMenu={onEntryContextMenu}
+                  onDragStartEntry={onDragStartEntry}
+                  onDragEndAny={onDragEndAny}
+                  onDropOnFolder={onDropOnFolder}
+                  onDragOverFolder={onDragOverFolder}
+                  onDragLeaveFolder={onDragLeaveFolder}
+                  folderDecor={safeFolderDecor}
+                />
+              ))}
+            {Array.isArray(childDirs) && childDirs.length === 0 ? (
+              <div className="text-[11px] text-slate-300 py-2 text-center">（暂无子文件夹）</div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  // --- Child nodes: card rows that "float" (white + ring + shadow) when selected. ---
   return (
     <div className="select-none">
       <div
-        onClick={() => onToggle?.(rp)}
-        onContextMenu={(evt) => {
-          // folder itself: allow delete folder via same menu
-          if (rp) onEntryContextMenu?.(evt, { kind: 'dir', name: name || '文件夹', relPath: rp });
-        }}
-        draggable={Boolean(rp)}
-        onDragStart={(evt) => {
-          if (!rp) return;
-          onDragStartEntry?.(evt, { kind: 'dir', name: name || '文件夹', relPath: rp });
-        }}
-        onDragEnd={onDragEndAny}
-        onDragOver={(evt) => onDragOverFolder?.(evt, { kind: 'dir', relPath: rp })}
-        onDragLeave={(evt) => onDragLeaveFolder?.(evt, { kind: 'dir', relPath: rp })}
-        onDrop={(evt) => onDropOnFolder?.(evt, { kind: 'dir', relPath: rp, name: name || '文件夹' })}
-        title={folderTooltip(rp)}
-        className="flex items-center gap-2 py-1.5 px-2 hover:bg-slate-50 rounded cursor-pointer group transition-colors"
-        style={{ paddingLeft: `${depth * 20 + 8}px` }}
+        {...interactiveProps}
+        className={`flex items-center gap-1.5 py-1.5 pr-2 rounded-lg cursor-pointer group transition-all ${
+          isSelected
+            ? 'bg-white text-[#3e4b9c] shadow-sm ring-1 ring-[#d8dbed]'
+            : 'hover:bg-white/70 text-slate-600'
+        } ${isFocused && !isSelected ? 'ring-1 ring-inset ring-[#3e4b9c]/40' : ''}`}
+        style={{ paddingLeft: `${(depth - 1) * 14 + 6}px` }}
       >
-        <div className="text-slate-400">{isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</div>
-        {(() => {
-          const { Icon, iconClass } = safeFolderDecor(rp);
-          // Explorer tree uses a smaller icon container, keep consistent tint.
-          return <Icon size={18} className={iconClass} strokeWidth={1.5} />;
-        })()}
-        <span className="text-sm text-slate-700 font-medium">{name || '项目根目录'}</span>
-        {isLoading ? <span className="text-[10px] text-slate-400 ml-2">加载中...</span> : null}
+        {chevronBtn}
+        <Icon size={17} className={iconClass} strokeWidth={1.5} />
+        <span className={`text-sm truncate min-w-0 flex-1 ${isSelected ? 'font-semibold' : 'font-medium'}`}>
+          {name || '文件夹'}
+        </span>
+        {badge}
+        {loadingTag}
       </div>
       {isOpen ? (
-        <div className="relative">
-          <div className="absolute left-0 top-0 bottom-0 w-[1px] bg-slate-100" style={{ marginLeft: `${depth * 20 + 15}px` }} />
-          {Array.isArray(children) &&
-            children.filter((e) => !isHiddenSystemDir(e)).map((e) => {
-              if (e.kind === 'dir') {
-                return (
-                  <ExplorerTree
-                    key={e.relPath}
-                    name={e.name}
-                    relPath={e.relPath}
-                    depth={depth + 1}
-                    tree={tree}
-                    onToggle={onToggle}
-                    onLoad={onLoad}
-                    onEntryContextMenu={onEntryContextMenu}
-                    onDragStartEntry={onDragStartEntry}
-                    onDragEndAny={onDragEndAny}
-                    onDropOnFolder={onDropOnFolder}
-                    onDragOverFolder={onDragOverFolder}
-                    onDragLeaveFolder={onDragLeaveFolder}
-                    folderDecor={safeFolderDecor}
-                    fmtBytes={safeFmtBytes}
-                  />
-                );
-              }
-              return (
-                <div
-                  key={e.relPath}
-                  onContextMenu={(evt) => onEntryContextMenu?.(evt, e)}
-                  onDoubleClick={(evt) => {
-                    if (e.kind !== 'file') return;
-                    evt.preventDefault();
-                    evt.stopPropagation();
-                    onOpenFile?.(e.relPath);
-                  }}
-                  className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-slate-50 text-slate-600 transition-all cursor-default"
-                  style={{ paddingLeft: `${(depth + 1) * 20 + 8}px` }}
-                  draggable
-                  onDragStart={(evt) => onDragStartEntry?.(evt, e)}
-                  onDragEnd={onDragEndAny}
-                >
-                  <div className="flex items-center gap-2 truncate">
-                    <div className="w-4 h-4 flex items-center justify-center text-slate-400">•</div>
-                    <span className="text-sm truncate">{e.name}</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-medium shrink-0 pr-2">{safeFmtBytes(e.sizeBytes)}</div>
-                </div>
-              );
-            })}
+        <div role="group">
+          {Array.isArray(childDirs) &&
+            childDirs.map((e) => (
+              <ExplorerTree
+                key={e.relPath}
+                name={e.name}
+                relPath={e.relPath}
+                depth={depth + 1}
+                tree={tree}
+                selectedRelPath={selectedRelPath}
+                focusedRelPath={focusedRelPath}
+                ghostBadgeByDir={ghostBadgeByDir}
+                onToggle={onToggle}
+                onSelectDir={onSelectDir}
+                onLoad={onLoad}
+                onEntryContextMenu={onEntryContextMenu}
+                onDragStartEntry={onDragStartEntry}
+                onDragEndAny={onDragEndAny}
+                onDropOnFolder={onDropOnFolder}
+                onDragOverFolder={onDragOverFolder}
+                onDragLeaveFolder={onDragLeaveFolder}
+                folderDecor={safeFolderDecor}
+              />
+            ))}
+          {Array.isArray(childDirs) && childDirs.length === 0 ? (
+            <div className="text-[11px] text-slate-300 py-1" style={{ paddingLeft: `${depth * 14 + 26}px` }}>
+              （无子文件夹）
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -129,5 +220,3 @@ const ExplorerTree = ({
 };
 
 export default ExplorerTree;
-
-

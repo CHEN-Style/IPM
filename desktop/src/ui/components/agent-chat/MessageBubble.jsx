@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useLayoutEffect } from 'react';
 import {
   ChevronDown, ChevronRight, Wrench, Loader2,
   Check, X, Undo2, Zap, MessageSquare,
-  AlertCircle, Sparkles, Hourglass,
+  AlertCircle, Sparkles, Hourglass, Copy,
 } from 'lucide-react';
 import { marked } from 'marked';
 
@@ -18,6 +18,173 @@ marked.setOptions({ breaks: true, gfm: true });
 function renderMarkdown(text) {
   if (!text) return '';
   try { return marked.parse(text); } catch { return text.replace(/\n/g, '<br/>'); }
+}
+
+async function copyText(text) {
+  const value = String(text || '');
+  if (!value) return false;
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function tableToTsv(table) {
+  const rows = Array.from(table.querySelectorAll('tr'));
+  return rows
+    .map((row) => Array.from(row.querySelectorAll('th,td'))
+      .map((cell) => cell.innerText.replace(/\s+/g, ' ').trim())
+      .join('\t'))
+    .join('\n');
+}
+
+function addCopyButton(target, textFactory, title, kind = 'block') {
+  const isCode = kind === 'code';
+  const wrapper = document.createElement('div');
+  wrapper.className = isCode ? 'kc-copyable-block kc-code-editor-block' : 'kc-copyable-block';
+  wrapper.style.position = 'relative';
+  wrapper.style.marginTop = '0.75em';
+  wrapper.style.marginBottom = '0.75em';
+  if (kind === 'table') {
+    wrapper.style.paddingTop = '4px';
+  }
+  target.parentNode.insertBefore(wrapper, target);
+  if (isCode) {
+    const titlebar = document.createElement('div');
+    titlebar.className = 'kc-code-titlebar';
+    titlebar.innerHTML = '<span class="kc-code-dot kc-red"></span><span class="kc-code-dot kc-yellow"></span><span class="kc-code-dot kc-green"></span>';
+    wrapper.appendChild(titlebar);
+    wrapper.appendChild(target);
+  } else {
+    wrapper.appendChild(target);
+  }
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.title = title;
+  btn.setAttribute('aria-label', title);
+  btn.className = 'kc-inline-copy-btn';
+  btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>';
+  Object.assign(btn.style, {
+    position: 'absolute',
+    top: kind === 'table' ? '10px' : isCode ? '6px' : '8px',
+    right: '8px',
+    zIndex: '10',
+    width: '26px',
+    height: '26px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '0',
+    borderRadius: '6px',
+    border: '1px solid #d8dbed',
+    background: 'rgba(255, 255, 255, 0.92)',
+    color: '#475569',
+    boxShadow: '0 1px 2px rgba(15, 23, 42, 0.08)',
+    opacity: '0',
+    pointerEvents: 'none',
+    cursor: 'pointer',
+    transition: 'opacity 120ms ease, background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease',
+  });
+  wrapper.addEventListener('mouseenter', () => {
+    btn.style.opacity = '1';
+    btn.style.pointerEvents = 'auto';
+  });
+  wrapper.addEventListener('mouseleave', () => {
+    btn.style.opacity = '0';
+    btn.style.pointerEvents = 'none';
+  });
+  btn.addEventListener('mouseenter', () => {
+    btn.style.background = '#ffffff';
+    btn.style.color = '#3e4b9c';
+    btn.style.borderColor = '#c3c9e8';
+    btn.style.transform = 'translateY(-1px)';
+  });
+  btn.addEventListener('mouseleave', () => {
+    btn.style.background = 'rgba(255, 255, 255, 0.92)';
+    btn.style.color = '#475569';
+    btn.style.borderColor = '#d8dbed';
+    btn.style.transform = 'translateY(0)';
+  });
+  btn.addEventListener('click', async (evt) => {
+    evt.preventDefault();
+    evt.stopPropagation();
+    const ok = await copyText(textFactory());
+    btn.innerHTML = ok
+      ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>'
+      : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>';
+    btn.style.color = ok ? '#059669' : '#dc2626';
+    window.setTimeout(() => {
+      btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>';
+      btn.style.color = '#475569';
+    }, 1400);
+  });
+  wrapper.appendChild(btn);
+}
+
+function CopyableMarkdown({ html, rawText }) {
+  const ref = useRef(null);
+  const [copiedAll, setCopiedAll] = useState(false);
+
+  useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root) return undefined;
+    root.querySelectorAll('pre').forEach((pre) => {
+      if (pre.parentElement?.classList.contains('kc-copyable-block')) return;
+      addCopyButton(pre, () => {
+        const code = pre.querySelector('code');
+        return code ? code.innerText : pre.innerText;
+      }, '复制代码', 'code');
+    });
+    root.querySelectorAll('table').forEach((table) => {
+      if (table.parentElement?.classList.contains('kc-copyable-block')) return;
+      addCopyButton(table, () => tableToTsv(table), '复制表格（TSV，可直接粘贴到表格软件）', 'table');
+    });
+    return undefined;
+  });
+
+  const handleCopyAll = async () => {
+    const ok = await copyText(rawText);
+    if (!ok) return;
+    setCopiedAll(true);
+    window.setTimeout(() => setCopiedAll(false), 1400);
+  };
+
+  return (
+    <>
+      <div
+        ref={ref}
+        className="prose-chat"
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      <div className="mt-2 flex items-center justify-start">
+        <button
+          type="button"
+          onClick={handleCopyAll}
+          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+          title="复制整条回答"
+        >
+          {copiedAll ? <Check size={12} /> : <Copy size={12} />}
+          <span>{copiedAll ? '已复制' : '复制回答'}</span>
+        </button>
+      </div>
+    </>
+  );
 }
 
 /* ── Agent status loader (SVG + animated dot) ────────────────────
@@ -874,10 +1041,7 @@ const MessageBubble = ({ message, projectName, domain, streamingPhase, activeToo
 
           {message.content ? (
             <>
-              <div
-                className="prose-chat"
-                dangerouslySetInnerHTML={{ __html: renderedHtml }}
-              />
+              <CopyableMarkdown html={renderedHtml} rawText={message.content} />
               {message.streaming && (
                 <span className="inline-block w-1.5 h-4 bg-gray-400 animate-pulse rounded-sm ml-0.5 align-text-bottom" />
               )}

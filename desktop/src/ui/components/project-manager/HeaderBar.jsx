@@ -7,9 +7,9 @@ import {
   File,
   Folder,
   FolderPlus,
-  Folders,
   Home,
-  LayoutList,
+  PanelLeftOpen,
+  PanelLeftClose,
   ListFilter,
   Plus,
   Search,
@@ -35,8 +35,8 @@ const HeaderBar = ({
   onBackHome,
   showGoRoot,
   onGoRoot,
-  viewMode,
-  onSetViewMode,
+  navPaneOpen,
+  onToggleNavPane,
   isRoot,
   showGoParent,
   onGoParent,
@@ -331,25 +331,23 @@ const HeaderBar = ({
         {/* Spacer to push right group */}
         <div className="flex-1" />
 
-        {/* Right group: view mode, filter, actions */}
-        <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200 shrink-0">
+        {/* Right group: nav-pane toggle (Windows-explorer style), filter, actions.
+            The toggle only makes sense inside a workspace (the all-projects
+            root has no folder tree). */}
+        {!isRoot && (
           <button
             type="button"
-            onClick={() => onSetViewMode?.('list')}
-            className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
-            title="列表视图"
+            onClick={() => onToggleNavPane?.()}
+            className={`p-1.5 rounded-lg border transition-all shrink-0 ${
+              navPaneOpen
+                ? 'bg-white border-slate-200 text-[#3e4b9c] shadow-sm'
+                : 'bg-slate-100 border-slate-200 text-slate-500 hover:text-slate-700'
+            }`}
+            title={navPaneOpen ? '隐藏导航窗格' : '显示导航窗格'}
           >
-            <LayoutList size={15} />
+            {navPaneOpen ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
           </button>
-          <button
-            type="button"
-            onClick={() => onSetViewMode?.('explorer')}
-            className={`p-1.5 rounded-md transition-all ${viewMode === 'explorer' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
-            title="Explorer 视图"
-          >
-            <Folders size={15} />
-          </button>
-        </div>
+        )}
 
         <div className="relative shrink-0" ref={filterRef}>
           <button

@@ -52,12 +52,30 @@ import {
   FolderTree,
   ExternalLink,
   Upload,
+  Lock,
 } from 'lucide-react';
 
 // Custom MIME type used to mark drags originating from within our tree.
 // Picked deliberately specific so the ChatInput's onDrop can distinguish
 // "user dragged a workspace file" from "user dropped a real OS file".
 export const TREE_DRAG_MIME = 'text/knowclaw-file-path';
+
+// IPM-managed system folders living at the workspace root. Their contents
+// are auto-maintained (snippet index, project DB, structure metadata, …)
+// and must NOT be moved or edited by the user. We surface them with a
+// "系统" badge + lock affordance and de-emphasise their subtree so users
+// recognise them as off-limits.
+const SYSTEM_ROOT_DIRS = new Set(['meta', 'snippets']);
+
+// Returns 'root' for the system folder itself, 'child' for anything nested
+// inside one, or null for ordinary workspace entries.
+function systemFolderKind(relPath) {
+  const rp = String(relPath || '').replace(/\\/g, '/');
+  if (!rp) return null;
+  if (SYSTEM_ROOT_DIRS.has(rp)) return 'root';
+  const top = rp.split('/')[0];
+  return SYSTEM_ROOT_DIRS.has(top) ? 'child' : null;
+}
 
 // Map well-known extensions → icon. Defaults to a plain FileIcon so
 // unknown formats still render.
@@ -129,6 +147,12 @@ function TreeNode({
   const isSelected = !isDir && selectedPath === node.relPath;
   const isDropTarget = isDir && dropTargetDir === node.relPath;
 
+  // IPM system folders (meta / snippets) and everything nested inside them
+  // are read-only from the user's perspective.
+  const sysKind = systemFolderKind(node.relPath);
+  const isSystemRoot = sysKind === 'root';
+  const isInSystem = sysKind != null;
+
   const indent = depth * 12;
 
   // E.7 single-click: select files (no open), still toggle dirs.
@@ -172,6 +196,8 @@ function TreeNode({
   // tree drags are blocked by `effectAllowed = none`.
   const handleDragOver = useCallback((e) => {
     if (!isDir) return;
+    // System folders (meta / snippets) are off-limits: never accept drops.
+    if (isInSystem) return;
     const types = e.dataTransfer?.types;
     const hasFiles = types && (types.includes ? types.includes('Files') : Array.from(types).includes('Files'));
     if (!hasFiles) return;
@@ -179,7 +205,7 @@ function TreeNode({
     e.stopPropagation();
     e.dataTransfer.dropEffect = 'copy';
     onDirDragOver?.(node.relPath);
-  }, [isDir, node.relPath, onDirDragOver]);
+  }, [isDir, isInSystem, node.relPath, onDirDragOver]);
 
   const handleDragLeave = useCallback((e) => {
     if (!isDir) return;
@@ -191,10 +217,17 @@ function TreeNode({
 
   const handleDrop = useCallback((e) => {
     if (!isDir) return;
+    // Swallow (but ignore) drops on system folders so they don't bubble up
+    // to the panel-level handler and land in the workspace root by surprise.
+    if (isInSystem) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     onSystemDrop?.(e, node.relPath);
-  }, [isDir, node.relPath, onSystemDrop]);
+  }, [isDir, isInSystem, node.relPath, onSystemDrop]);
 
   // Composite background classes:
   //   selected (blue) > drop-target (blue ring) > touched (emerald/amber)
@@ -224,12 +257,16 @@ function TreeNode({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`group w-full flex items-center gap-1.5 px-2 py-1 rounded text-left text-[12px] text-slate-700 hover:bg-slate-100 transition-colors ${stateBg}`}
+        className={`group w-full flex items-center gap-1.5 px-2 py-1 rounded text-left text-[12px] ${
+          isInSystem ? 'text-slate-400' : 'text-slate-700'
+        } hover:bg-slate-100 transition-colors ${stateBg}`}
         style={{ paddingLeft: 8 + indent }}
         title={
-          isDir
-            ? `${node.relPath} — 拖文件到此目录上传`
-            : `${node.relPath}${node.size != null ? '  ·  ' + formatSize(node.size) : ''}\n单击选中，双击打开，拖出可引用到对话`
+          isInSystem
+            ? `${node.relPath}\nIPM 系统${isDir ? '文件夹' : '文件'}，由系统自动维护，请勿移动或修改`
+            : isDir
+              ? `${node.relPath} — 拖文件到此目录上传`
+              : `${node.relPath}${node.size != null ? '  ·  ' + formatSize(node.size) : ''}\n单击选中，双击打开，拖出可引用到对话`
         }
       >
         {isDir ? (
@@ -241,11 +278,22 @@ function TreeNode({
         )}
         <FileIconCmp
           size={13}
-          className={isDir ? 'text-amber-500 shrink-0' : 'text-slate-400 shrink-0'}
+          className={`shrink-0 ${
+            isInSystem ? 'text-slate-400' : isDir ? 'text-amber-500' : 'text-slate-400'
+          }`}
         />
         <span className="flex-1 min-w-0 truncate">
           {node.name}
         </span>
+        {isSystemRoot && (
+          <span
+            className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-200/80 text-slate-500"
+            title="系统文件夹，由系统自动维护，请勿移动或修改"
+          >
+            <Lock size={9} />
+            系统
+          </span>
+        )}
         {touched && (
           <span
             className={`w-1.5 h-1.5 rounded-full shrink-0 ${
@@ -310,18 +358,23 @@ const WorkspaceFileTree = ({
 
   const tree = useMemo(() => buildTree(Array.isArray(entries) ? entries : []), [entries]);
 
+  // Auto-expand the top-level folders ONLY the first time we load a given
+  // workspace's tree. Later refreshes (e.g. the post-`agent_end` reload, an
+  // interrupted turn, an upload) produce a brand-new `entries` array; without
+  // this one-shot guard every such refresh re-expanded all depth-1 folders
+  // and clobbered the user's manual collapse state. Keyed by `cwd` so
+  // switching workspaces still gets its initial expand.
+  const autoExpandedCwdRef = React.useRef(null);
   React.useEffect(() => {
     if (!entries || entries.length === 0) return;
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      for (const e of entries) {
-        if (e.type === 'directory' && e.depth === 1 && !next.has(e.relPath)) {
-          next.add(e.relPath);
-        }
-      }
-      return next;
-    });
-  }, [entries]);
+    if (autoExpandedCwdRef.current === cwd) return;
+    autoExpandedCwdRef.current = cwd;
+    const next = new Set();
+    for (const e of entries) {
+      if (e.type === 'directory' && e.depth === 1) next.add(e.relPath);
+    }
+    setExpanded(next);
+  }, [entries, cwd]);
 
   // Clear selection when the workspace switches — the previously
   // selected relPath belongs to a different tree.

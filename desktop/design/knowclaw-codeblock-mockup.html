@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KnowClaw 代码块 UI 方案对比</title>
+  <style>
+    :root {
+      --brand: #3e4b9c;
+      --brand-soft: #eceef7;
+      --brand-line: #d8dbed;
+      --ink: #0f172a;
+      --ink-2: #334155;
+      --muted: #64748b;
+      --muted-2: #94a3b8;
+      --line: #e2e8f0;
+      --line-soft: #eef2f7;
+      --paper: #ffffff;
+      --bg: #f4f6fb;
+      --code-bg: #f8fafc;
+      --code-ink: #253044;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px 28px 64px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 0%, rgba(62,75,156,0.08), transparent 28%),
+        linear-gradient(180deg, #fbfcff 0%, var(--bg) 100%);
+    }
+    header {
+      max-width: 1180px;
+      margin: 0 auto 24px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 22px;
+      letter-spacing: -0.02em;
+    }
+    .sub {
+      margin: 0;
+      max-width: 780px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .grid {
+      max-width: 1180px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+      gap: 22px;
+    }
+    .panel {
+      background: rgba(255,255,255,0.88);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 18px 42px -34px rgba(15,23,42,0.35);
+      overflow: hidden;
+    }
+    .panel-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 15px 16px 12px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .panel-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 750;
+    }
+    .badge {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--brand);
+      background: var(--brand-soft);
+      border: 1px solid var(--brand-line);
+      border-radius: 999px;
+      padding: 2px 7px;
+    }
+    .panel-desc {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .preview {
+      padding: 16px;
+    }
+    .copy {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      color: var(--muted);
+      background: rgba(255,255,255,0.86);
+      box-shadow: 0 1px 2px rgba(15,23,42,0.06);
+    }
+    .copy svg { width: 14px; height: 14px; }
+    pre {
+      margin: 0;
+      overflow-x: auto;
+      white-space: pre;
+      tab-size: 4;
+    }
+    code {
+      font-family: "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.72;
+    }
+    .output-label {
+      margin: 12px 0 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .output {
+      font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    /* A. Soft Paper */
+    .soft-code {
+      position: relative;
+      border: 1px solid #e1e6f2;
+      border-radius: 14px;
+      background: #fbfcff;
+      box-shadow: inset 4px 0 0 var(--brand-line);
+    }
+    .soft-code .bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 10px 8px 14px;
+      border-bottom: 1px solid #edf1f7;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .soft-code .bar span:first-child {
+      color: var(--brand);
+      background: var(--brand-soft);
+      border: 1px solid var(--brand-line);
+      border-radius: 999px;
+      padding: 2px 8px;
+    }
+    .soft-code .bar .copy { margin-left: auto; opacity: 0; transition: opacity 140ms ease; }
+    .soft-code:hover .bar .copy { opacity: 1; }
+    .soft-code pre {
+      padding: 14px 16px 16px;
+      color: var(--code-ink);
+    }
+    .soft-output {
+      padding: 11px 14px;
+      border: 1px solid #e1e6f2;
+      border-radius: 12px;
+      background: #ffffff;
+      color: #334155;
+    }
+
+    /* B. Editor Card */
+    .editor-code {
+      position: relative;
+      border: 1px solid #dbe3ef;
+      border-radius: 15px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+    .editor-title {
+      height: 38px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 10px 0 13px;
+      background: linear-gradient(180deg, #f8fafc 0%, #f2f5fb 100%);
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .dot.red { background: #fca5a5; }
+    .dot.yellow { background: #fcd34d; }
+    .dot.green { background: #86efac; }
+    .editor-title .file {
+      margin-left: 8px;
+      color: #64748b;
+      font-family: "SF Mono", Consolas, monospace;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .editor-title .copy { margin-left: auto; opacity: 0; transition: opacity 140ms ease; }
+    .editor-code:hover .copy { opacity: 1; }
+    .editor-code pre {
+      padding: 15px 16px 17px;
+      background: #fbfdff;
+      color: #253044;
+    }
+
+    /* C. Numbered Teaching */
+    .teaching-code {
+      position: relative;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+    .teaching-code .copy {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      opacity: 0;
+      transition: opacity 140ms ease;
+    }
+    .teaching-code:hover .copy { opacity: 1; }
+    .lines {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      background: #fbfcff;
+    }
+    .nums {
+      padding: 14px 0 16px;
+      text-align: right;
+      color: #b7c0cf;
+      background: #f5f7fb;
+      border-right: 1px solid #e7edf6;
+      user-select: none;
+      font-family: "SF Mono", Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.72;
+    }
+    .nums div { padding-right: 10px; }
+    .teaching-code pre {
+      padding: 14px 16px 16px;
+      color: #253044;
+    }
+    .hint {
+      padding: 9px 12px;
+      color: #6b7280;
+      background: #f9fafb;
+      border-top: 1px solid #edf2f7;
+      font-size: 12px;
+    }
+
+    /* D. Minimal Article */
+    .minimal-code {
+      position: relative;
+      border: 1px solid transparent;
+      border-left: 3px solid var(--brand-line);
+      border-radius: 2px 12px 12px 2px;
+      background: #f8fafc;
+    }
+    .minimal-code .copy {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      opacity: 0;
+      transition: opacity 140ms ease;
+    }
+    .minimal-code:hover .copy { opacity: 1; }
+    .minimal-code pre {
+      padding: 15px 16px;
+      color: #334155;
+    }
+
+    /* E. Soft Dark */
+    .soft-dark-code {
+      position: relative;
+      border-radius: 15px;
+      overflow: hidden;
+      background: #172033;
+      border: 1px solid #26354f;
+      box-shadow: 0 12px 26px -22px rgba(15, 23, 42, 0.9);
+    }
+    .soft-dark-code .bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 36px;
+      padding: 0 10px 0 14px;
+      background: #202b40;
+      border-bottom: 1px solid #2c3b58;
+      color: #cbd5e1;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .soft-dark-code .copy {
+      margin-left: auto;
+      opacity: 0;
+      background: rgba(255,255,255,0.08);
+      border-color: rgba(255,255,255,0.12);
+      color: #e2e8f0;
+      transition: opacity 140ms ease;
+    }
+    .soft-dark-code:hover .copy { opacity: 1; }
+    .soft-dark-code pre {
+      padding: 14px 16px 17px;
+      color: #dbeafe;
+    }
+
+    /* F. Report Block */
+    .report-code {
+      position: relative;
+      border-radius: 16px;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+      overflow: hidden;
+    }
+    .report-code .label-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 12px;
+      border-bottom: 1px solid #eef2f7;
+      background: #ffffff;
+    }
+    .report-code .label-row strong {
+      color: #111827;
+      font-size: 12px;
+    }
+    .report-code .label-row small {
+      color: #94a3b8;
+      font-size: 11px;
+      font-family: "SF Mono", Consolas, monospace;
+    }
+    .report-code .copy {
+      margin-left: auto;
+      opacity: 0;
+      transition: opacity 140ms ease;
+    }
+    .report-code:hover .copy { opacity: 1; }
+    .report-code pre {
+      padding: 14px 16px 16px;
+      background:
+        linear-gradient(90deg, rgba(62,75,156,0.05) 0 40px, transparent 40px),
+        #fbfcff;
+      color: #253044;
+    }
+    .report-output {
+      margin-top: 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      background: #f9fafb;
+      overflow: hidden;
+    }
+    .report-output .output-title {
+      padding: 8px 12px;
+      color: #64748b;
+      font-size: 11px;
+      font-weight: 700;
+      border-bottom: 1px solid #e5e7eb;
+      background: #ffffff;
+    }
+    .report-output .output {
+      padding: 10px 12px;
+      color: #334155;
+    }
+
+    @media (max-width: 760px) {
+      body { padding: 22px 14px 44px; }
+      .grid { grid-template-columns: 1fr; }
+      .panel { border-radius: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>KnowClaw 代码块 UI 方案对比</h1>
+    <p class="sub">
+      目标：替换当前浅色但仍显粗糙的代码块样式，让代码示例在 KnowClaw 对话里更像“可阅读的知识内容”，同时保留 hover 显示的 icon-only 复制按钮。
+    </p>
+  </header>
+
+  <main class="grid">
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">方案 A · 柔和纸张 <span class="badge">推荐</span></div>
+          <p class="panel-desc">浅色卡片 + 左侧品牌弱强调条 + 顶部语言胶囊。最贴近当前 KnowClaw 的轻量文档感，改动风险低。</p>
+        </div>
+      </div>
+      <div class="preview">
+        <div class="soft-code">
+          <div class="bar">
+            <span>Python</span>
+            <span>quick_sort.py</span>
+            <button class="copy" title="复制代码">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            </button>
+          </div>
+<pre><code>def quick_sort(nums):
+    if len(nums) <= 1:
+        return nums
+
+    pivot = nums[0]
+    left = [x for x in nums[1:] if x <= pivot]
+    right = [x for x in nums[1:] if x > pivot]
+
+    return quick_sort(left) + [pivot] + quick_sort(right)</code></pre>
+        </div>
+        <div class="output-label">输出：</div>
+        <div class="output soft-output">[1, 2, 3, 5, 8]</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">方案 B · 编辑器窗口</div>
+          <p class="panel-desc">带窗口三色点和文件名，像轻量代码编辑器截图。代码感强，但视觉元素稍多。</p>
+        </div>
+      </div>
+      <div class="preview">
+        <div class="editor-code">
+          <div class="editor-title">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+            <span class="file">quick_sort.py</span>
+            <button class="copy" title="复制代码">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            </button>
+          </div>
+<pre><code>def bubble_sort(nums):
+    nums = nums[:]
+    for i in range(len(nums)):
+        for j in range(len(nums) - 1 - i):
+            if nums[j] > nums[j + 1]:
+                nums[j], nums[j + 1] = nums[j + 1], nums[j]
+    return nums</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">方案 C · 教学行号</div>
+          <p class="panel-desc">左侧行号栏 + 底部提示，适合算法教学、逐行讲解。信息量最大，但占用更多宽度。</p>
+        </div>
+      </div>
+      <div class="preview">
+        <div class="teaching-code">
+          <button class="copy" title="复制代码">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+          </button>
+          <div class="lines">
+            <div class="nums"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div></div>
+<pre><code>def selection_sort(nums):
+    nums = nums[:]
+    for i in range(len(nums)):
+        min_i = i
+        for j in range(i + 1, len(nums)):
+            if nums[j] < nums[min_i]:
+                min_i = j
+        nums[i], nums[min_i] = nums[min_i], nums[i]</code></pre>
+          </div>
+          <div class="hint">适合 KnowClaw 在“解释代码 / 教学类回答”中使用。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">方案 D · 极简文章</div>
+          <p class="panel-desc">只保留左侧细线和浅底，不加标题栏。最安静，适合长文阅读，但语言信息缺失。</p>
+        </div>
+      </div>
+      <div class="preview">
+        <div class="minimal-code">
+          <button class="copy" title="复制代码">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+          </button>
+<pre><code>def insertion_sort(nums):
+    nums = nums[:]
+    for i in range(1, len(nums)):
+        cur = nums[i]
+        j = i - 1
+        while j >= 0 and nums[j] > cur:
+            nums[j + 1] = nums[j]
+            j -= 1
+        nums[j + 1] = cur
+    return nums</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">方案 E · 柔和深色</div>
+          <p class="panel-desc">如果仍希望保留“代码专属区域”的感觉，可用低对比深色。比当前深色块柔和，但仍不如浅色融入页面。</p>
+        </div>
+      </div>
+      <div class="preview">
+        <div class="soft-dark-code">
+          <div class="bar">
+            <span>Python</span>
+            <button class="copy" title="复制代码">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            </button>
+          </div>
+<pre><code>def merge_sort(nums):
+    if len(nums) <= 1:
+        return nums
+    mid = len(nums) // 2
+    left = merge_sort(nums[:mid])
+    right = merge_sort(nums[mid:])
+    return merge(left, right)</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">方案 F · 报告代码块</div>
+          <p class="panel-desc">标题栏更像报告里的“示例代码”，下面可配套输出块。适合 KnowClaw 未来可视化回答 / 教程回答。</p>
+        </div>
+      </div>
+      <div class="preview">
+        <div class="report-code">
+          <div class="label-row">
+            <strong>示例代码</strong>
+            <small>Python</small>
+            <button class="copy" title="复制代码">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            </button>
+          </div>
+<pre><code>nums = [5, 3, 8, 1, 2]
+print(quick_sort(nums))</code></pre>
+        </div>
+        <div class="report-output">
+          <div class="output-title">输出结果</div>
+          <div class="output">[1, 2, 3, 5, 8]</div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

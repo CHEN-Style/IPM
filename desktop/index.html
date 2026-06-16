@@ -304,13 +304,14 @@
       }
 
       .prose-chat pre {
-        margin-top: 0.75em;
-        margin-bottom: 0.75em;
-        padding: 0.875em 1em;
-        background: #1e293b;
-        border-radius: 8px;
+        margin-top: 0;
+        margin-bottom: 0;
+        padding: 1em 1.125em;
+        background: #f8fafc;
+        border-radius: 10px;
         overflow-x: auto;
-        border: 1px solid #334155;
+        border: 1px solid #e2e8f0;
+        box-shadow: inset 3px 0 0 #d8dbed;
       }
       .prose-chat pre code {
         background: none;
@@ -318,8 +319,45 @@
         border-radius: 0;
         padding: 0;
         font-size: 0.8em;
-        color: #e2e8f0;
+        color: #334155;
         line-height: 1.6;
+      }
+
+      .prose-chat .kc-code-editor-block {
+        border: 1px solid #dbe3ef;
+        border-radius: 15px;
+        background: #ffffff;
+        overflow: hidden;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+      }
+      .prose-chat .kc-code-titlebar {
+        height: 38px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 46px 0 13px;
+        background: linear-gradient(180deg, #f8fafc 0%, #f2f5fb 100%);
+        border-bottom: 1px solid #e2e8f0;
+      }
+      .prose-chat .kc-code-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .prose-chat .kc-code-dot.kc-red { background: #fca5a5; }
+      .prose-chat .kc-code-dot.kc-yellow { background: #fcd34d; }
+      .prose-chat .kc-code-dot.kc-green { background: #86efac; }
+      .prose-chat .kc-code-editor-block pre {
+        margin: 0;
+        padding: 1em 1.125em;
+        background: #fbfcff;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+      }
+      .prose-chat .kc-code-editor-block pre code {
+        color: #253044;
       }
 
       .prose-chat blockquote {
@@ -332,11 +370,15 @@
       .prose-chat blockquote p { margin: 0.25em 0; }
 
       .prose-chat table {
-        margin-top: 0.75em;
-        margin-bottom: 0.75em;
+        margin-top: 0;
+        margin-bottom: 0;
         width: 100%;
         border-collapse: collapse;
         font-size: 0.825em;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        overflow: hidden;
       }
       .prose-chat th {
         text-align: left;

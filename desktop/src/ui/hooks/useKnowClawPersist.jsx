@@ -212,6 +212,13 @@ export function KnowClawPersistProvider({ children }) {
   const toolCallArgBufferRef = useRef(new Map());
   const currentCwdRef = useRef(null);
   const sessionIdRef = useRef(null);
+  // Mirror of `currentModel` so async callbacks (e.g. the prefs:updated
+  // handler) can read the latest selection without taking it as a dep.
+  const currentModelRef = useRef(null);
+  // D-001: set when an AI-config change arrives mid-stream. We can't
+  // rebuild the live session without interrupting the in-flight turn, so
+  // we defer the rebuild until streaming next flips to idle.
+  const pendingConfigRebuildRef = useRef(false);
   const rehydratedRef = useRef(false);
   // D.2: monotonic counter bumped whenever the user (or our own code)
   // explicitly creates / switches a session — newSession, setCwd, the
@@ -224,6 +231,7 @@ export function KnowClawPersistProvider({ children }) {
 
   useEffect(() => { currentCwdRef.current = currentCwd; }, [currentCwd]);
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+  useEffect(() => { currentModelRef.current = currentModel; }, [currentModel]);
 
   // K2: mark a relPath as recently touched. Defined early so the
   // event handler closure (one big useEffect below) can call it.
@@ -1240,20 +1248,26 @@ export function KnowClawPersistProvider({ children }) {
     }
   }, [refreshSessions, streaming]);
 
+  // Returns the resolved selection so async callers (prefs:updated) can
+  // bind it to a fresh session. `current` is the model object that is now
+  // selected, or null when no model is available.
   const loadModels = useCallback(async () => {
     try {
       const res = await window.ipm?.knowclaw?.listModels?.();
       if (res?.ok && Array.isArray(res.models)) {
         setModels(res.models);
-        setCurrentModel((prev) => {
-          if (prev && res.models.some((m) => `${m.provider}/${m.id}` === prev)) {
-            return prev;
-          }
-          const def = res.models.find((m) => m.isDefault) || res.models[0];
-          return def ? `${def.provider}/${def.id}` : null;
-        });
+        const prev = currentModelRef.current;
+        const keep =
+          prev && res.models.find((m) => `${m.provider}/${m.id}` === prev);
+        const resolved =
+          keep || res.models.find((m) => m.isDefault) || res.models[0] || null;
+        setCurrentModel(resolved ? `${resolved.provider}/${resolved.id}` : null);
+        return { ok: true, current: resolved };
       }
-    } catch { /* ignore */ }
+      return { ok: false, current: null };
+    } catch {
+      return { ok: false, current: null };
+    }
   }, []);
 
   const setModel = useCallback(async (providerId, modelId) => {
@@ -1333,23 +1347,44 @@ export function KnowClawPersistProvider({ children }) {
   }, []);
 
   // AI 配置保存后无需重启应用：prefs IPC 会广播 prefs:updated，这里重新
-  // 拉取 KnowClaw 可用模型。如果当前选择已经不在新配置中，loadModels()
-  // 会自动落到新默认模型。模型能力（例如图片输入）绑定在 pi 会话创建时，
-  // 因此空闲的既有会话会自动重建；运行中的会话不被强制中断。
+  // 拉取 KnowClaw 可用模型，并把新选择重建为一个全新的 pi 会话。
+  //
+  // 背景（D-001 bug）：pi 的 AgentSession 在创建时就把 provider/model 配置
+  // “烧死”，主进程的 ensureSession 又会复用既有会话，所以单纯改配置不会生效。
+  // 旧逻辑用 `sessionIdRef.current` 作为重建闸门，导致企业用户首次导入配置
+  // （此时还没有任何会话）时跳过重建，配置不生效、输入框也因为没有可用会话
+  // 而像“卡住”一样无法发送，必须重启 App 才恢复。
+  //
+  // 新逻辑：
+  //  1) 无论是否已有会话，只要空闲就重建会话以绑定新配置；
+  //  2) 通过 setModel 把新选择同步回主进程 currentSelection，避免主进程
+  //     沿用过期模型；
+  //  3) 若变更发生在流式回复期间，则打标记，等本轮结束后由 wasStreamingRef
+  //     副作用补一次重建（见下方）。
   useEffect(() => {
-    const unsubscribe = window.ipm?.prefs?.onUpdated?.((payload) => {
+    const unsubscribe = window.ipm?.prefs?.onUpdated?.(async (payload) => {
       const keys = Array.isArray(payload?.changedKeys) ? payload.changedKeys : [];
       if (!keys.includes('ai') && !keys.includes('llm')) return;
-      void loadModels();
+      const res = await loadModels();
       void refreshStatus();
-      if (!streaming && sessionIdRef.current) {
-        void newSession();
+      if (streaming) {
+        // 不打断在途回复，标记延迟重建。
+        pendingConfigRebuildRef.current = true;
+        return;
+      }
+      const cur = res?.current;
+      if (cur?.provider && cur?.id) {
+        // setModel 会同步主进程选择并 newSession() 重建会话。
+        await setModel(cur.provider, cur.id);
+      } else {
+        // 没有可用模型（配置无效）时仍尝试重建，让主进程回到干净状态。
+        await newSession();
       }
     });
     return () => {
       if (typeof unsubscribe === 'function') unsubscribe();
     };
-  }, [loadModels, newSession, refreshStatus, streaming]);
+  }, [loadModels, newSession, refreshStatus, setModel, streaming]);
 
   const toggleSubAgent = useCallback(async (enabled) => {
     const next = Boolean(enabled);
@@ -2143,9 +2178,24 @@ export function KnowClawPersistProvider({ children }) {
     if (wasStreamingRef.current && !streaming) {
       void refreshSessions();
       void refreshStatus();
+      // D-001: AI 配置在本轮回复期间发生过变更，现在空闲了，补一次会话重建，
+      // 让新配置（模型/能力）在下一轮生效。
+      if (pendingConfigRebuildRef.current) {
+        pendingConfigRebuildRef.current = false;
+        const cur = currentModelRef.current;
+        const slash = cur ? cur.indexOf('/') : -1;
+        if (slash > 0) {
+          const providerId = cur.slice(0, slash);
+          const modelId = cur.slice(slash + 1);
+          if (providerId && modelId) void setModel(providerId, modelId);
+          else void newSession();
+        } else {
+          void newSession();
+        }
+      }
     }
     wasStreamingRef.current = streaming;
-  }, [streaming, refreshSessions, refreshStatus]);
+  }, [streaming, refreshSessions, refreshStatus, setModel, newSession]);
 
   // -------- Computed: session lock --------
   //

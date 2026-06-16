@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 
-const useDragDrop = ({ cwd, domainOpts, viewMode, refreshEntries, refreshTreeDir, setNotice }) => {
+const useDragDrop = ({ cwd, domainOpts, refreshEntries, refreshTreeDir, setNotice }) => {
   const [dragOverFolderRelPath, setDragOverFolderRelPath] = useState('');
 
   const getDragPayload = useCallback((e) => {
@@ -41,7 +41,7 @@ const useDragDrop = ({ cwd, domainOpts, viewMode, refreshEntries, refreshTreeDir
           return;
         }
         await refreshEntries?.();
-        if (viewMode === 'explorer') {
+        {
           const srcParts = String(srcRelPath || '').split('/').filter(Boolean);
           srcParts.pop();
           const srcParent = srcParts.join('/');
@@ -57,7 +57,7 @@ const useDragDrop = ({ cwd, domainOpts, viewMode, refreshEntries, refreshTreeDir
         setNotice?.({ variant: 'error', message: cleaned });
       }
     },
-    [cwd, refreshEntries, refreshTreeDir, setNotice, viewMode],
+    [cwd, refreshEntries, refreshTreeDir, setNotice],
   );
 
   const onDropOnFolder = useCallback(

@@ -1,12 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Ban, Check, Folder, Info, Search, Wand2 } from 'lucide-react';
-import ExplorerTree from './ExplorerTree.jsx';
 import RejectPopover from './RejectPopover.jsx';
 import { isHiddenSystemDir, folderTooltip } from './utils.js';
 
 const EntryTable = ({
   errorText,
-  viewMode,
   loading,
   entries,
   pendingGhostsInCwd,
@@ -30,10 +28,6 @@ const EntryTable = ({
   fileDecor,
   fileFilter,
   fileFilterExts,
-  onBlankContextMenu,
-  tree,
-  onToggleTree,
-  onLoadTree,
   // H4.5: per-file sync badges for bound cloud projects.
   // Map of project-root-relative posix path ('/a/b.docx') -> 'new'|'mod'|'conflict'.
   // null = project not bound (render nothing).
@@ -124,8 +118,7 @@ const EntryTable = ({
           {errorText}
         </div>
       )}
-      {viewMode === 'list' ? (
-        <table className="w-full text-left border-separate border-spacing-y-1" style={{ tableLayout: 'fixed' }}>
+      <table className="w-full text-left border-separate border-spacing-y-1" style={{ tableLayout: 'fixed' }}>
           <colgroup>
             <col />
             {!compact && <col style={{ width: 60 }} />}
@@ -322,33 +315,6 @@ const EntryTable = ({
             )}
           </tbody>
         </table>
-      ) : (
-        <div className="p-2" onContextMenu={onBlankContextMenu}>
-          <ExplorerTree
-            name={
-              cwd?.relPath
-                ? String(cwd.relPath).split('/').slice(-1)[0]
-                : cwd?.type === 'local'
-                  ? String(cwd.rootPath || '').split(/[/\\]+/).filter(Boolean).slice(-1)[0] || String(cwd.rootPath || '本地文件夹')
-                  : cwd?.name
-            }
-            relPath={cwd?.relPath || ''}
-            depth={0}
-            tree={tree}
-            onToggle={onToggleTree}
-            onLoad={onLoadTree}
-            onEntryContextMenu={onContextMenuEntry}
-            onOpenFile={onOpenFile}
-            onDragStartEntry={onDragStartEntry}
-            onDragEndAny={onDragEndAny}
-            onDropOnFolder={onDropOnFolder}
-            onDragOverFolder={onDragOverFolder}
-            onDragLeaveFolder={onDragLeaveFolder}
-            folderDecor={folderDecor}
-            fmtBytes={fmtBytes}
-          />
-        </div>
-      )}
     </div>
   );
 };

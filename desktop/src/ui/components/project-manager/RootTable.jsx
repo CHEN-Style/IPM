@@ -32,9 +32,12 @@ const RootTable = ({
         </div>
       )}
 
-      {/* Responsive breakpoint styles for path column */}
+      {/* Responsive breakpoint styles for path column.
+          约束各断点下路径列的最大宽度，确保长路径始终被截断而非撑开列宽；
+          右内边距由 pr-* 控制，保证路径与状态列之间始终留有间隔。 */}
       <style>{`
-        .root-table-path { display: table-cell; }
+        .root-table-path { display: table-cell; max-width: 360px; }
+        @media (max-width: 1200px) { .root-table-path { max-width: 220px; } }
         @media (max-width: 900px) { .root-table-path { max-width: 120px; } }
         @media (max-width: 720px) { .root-table-path { display: none; } }
       `}</style>
@@ -43,7 +46,7 @@ const RootTable = ({
         <thead>
           <tr className="text-[11px] text-slate-400 uppercase tracking-widest font-bold">
             <th className="pb-4 pl-4 font-bold">{entityLabel}名称</th>
-            <th className="pb-4 font-bold root-table-path">路径</th>
+            <th className="pb-4 pr-8 font-bold root-table-path">路径</th>
             <th className="pb-4 font-bold whitespace-nowrap">状态</th>
             <th className="pb-4 text-right pr-4 font-bold whitespace-nowrap">操作</th>
           </tr>
@@ -122,7 +125,7 @@ const RootTable = ({
                   </div>
                 </div>
               </td>
-              <td className="py-3.5 border-y border-transparent root-table-path">
+              <td className="py-3.5 pr-8 border-y border-transparent root-table-path">
                 <span className="text-xs text-slate-400 block truncate" title={displayPath}>{displayPath}</span>
               </td>
               <td className="py-3.5 border-y border-transparent">

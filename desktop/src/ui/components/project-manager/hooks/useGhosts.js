@@ -1,6 +1,24 @@
 import { useCallback, useMemo, useState } from 'react';
 
-const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
+// Parent directory (project-root-relative posix) of a file/folder relPath.
+const dirOf = (p) => {
+  const parts = String(p || '').split('/').filter(Boolean);
+  parts.pop();
+  return parts.join('/');
+};
+
+// Dual-pane: accepting an AI suggestion MOVES a file, changing both the
+// source and target folders. Refresh the affected nodes in the left tree
+// so it stays consistent with the right-hand list.
+const refreshTreeDirs = async (refreshTreeDir, dirs) => {
+  if (typeof refreshTreeDir !== 'function') return;
+  const uniq = Array.from(new Set((dirs || []).map((d) => String(d || ''))));
+  for (const d of uniq) {
+    try { await refreshTreeDir(d); } catch { /* ignore */ }
+  }
+};
+
+const useGhosts = ({ cwd, domainOpts, refreshEntries, refreshTreeDir, setNotice }) => {
   const [ghosts, setGhosts] = useState([]); // suggestions[] from ai-storage.json (pending+others)
   const [ghostLoading, setGhostLoading] = useState(false);
 
@@ -55,9 +73,11 @@ const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
       const api = window.ipm?.aiStorage?.accept;
       if (!api) return;
       try {
+        const g = (ghosts || []).find((x) => String(x?.sourceRelPath) === String(sourceRelPath));
         const res = await api(cwd.name, sourceRelPath, domainOpts);
         await refreshEntries?.();
         await refreshGhosts();
+        await refreshTreeDirs(refreshTreeDir, [g?.suggestedFolderRelPath, dirOf(sourceRelPath)]);
         if (res?.stale) {
           setNotice?.({ variant: 'info', message: '源文件已不在暂存区，本条建议已自动关闭' });
         } else if (res?.alreadyApplied) {
@@ -69,7 +89,7 @@ const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
         setNotice?.({ variant: 'error', message: e?.message || String(e) });
       }
     },
-    [cwd, domainOpts, refreshEntries, refreshGhosts, setNotice],
+    [cwd, domainOpts, ghosts, refreshEntries, refreshGhosts, refreshTreeDir, setNotice],
   );
 
   const rejectGhost = useCallback(
@@ -94,9 +114,14 @@ const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
       const api = window.ipm?.aiStorage?.acceptAll;
       if (!api) return;
       try {
-        const res = await api(cwd.name, { folderRelPath: cwd.relPath || '', ...domainOpts });
+        const target = cwd.relPath || '';
+        const srcDirs = (ghosts || [])
+          .filter((x) => String(x?.suggestedFolderRelPath) === target)
+          .map((x) => dirOf(x.sourceRelPath));
+        const res = await api(cwd.name, { folderRelPath: target, ...domainOpts });
         await refreshEntries?.();
         await refreshGhosts();
+        await refreshTreeDirs(refreshTreeDir, [target, ...srcDirs]);
         const parts = [`已接受 ${res?.accepted || 0} 个`];
         if (res?.alreadyApplied) parts.push(`其中 ${res.alreadyApplied} 个已在目标位置`);
         if (res?.staleClosed) parts.push(`已清理失效建议 ${res.staleClosed} 条`);
@@ -106,7 +131,7 @@ const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
         setNotice?.({ variant: 'error', message: e?.message || String(e) });
       }
     },
-    [cwd, domainOpts, refreshEntries, refreshGhosts, setNotice],
+    [cwd, domainOpts, ghosts, refreshEntries, refreshGhosts, refreshTreeDir, setNotice],
   );
 
   const rejectAllGhostsHere = useCallback(
@@ -131,9 +156,15 @@ const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
       const api = window.ipm?.aiStorage?.acceptAll;
       if (!api) return;
       try {
+        const affectedDirs = [];
+        for (const x of pendingGhostsAll) {
+          affectedDirs.push(String(x?.suggestedFolderRelPath || ''));
+          affectedDirs.push(dirOf(x?.sourceRelPath));
+        }
         const res = await api(cwd.name, { ...domainOpts });
         await refreshEntries?.();
         await refreshGhosts();
+        await refreshTreeDirs(refreshTreeDir, affectedDirs);
         const parts = [`已接受 ${res?.accepted || 0} 个`];
         if (res?.alreadyApplied) parts.push(`其中 ${res.alreadyApplied} 个已在目标位置`);
         if (res?.staleClosed) parts.push(`已清理失效建议 ${res.staleClosed} 条`);
@@ -143,7 +174,7 @@ const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
         setNotice?.({ variant: 'error', message: e?.message || String(e) });
       }
     },
-    [cwd, domainOpts, refreshEntries, refreshGhosts, setNotice],
+    [cwd, domainOpts, pendingGhostsAll, refreshEntries, refreshGhosts, refreshTreeDir, setNotice],
   );
 
   const rejectAllGhostsProject = useCallback(
@@ -168,9 +199,13 @@ const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
       const api = window.ipm?.aiStorage?.acceptAll;
       if (!api) return;
       try {
+        const srcDirs = (ghosts || [])
+          .filter((x) => String(x?.suggestedFolderRelPath) === String(folderRelPath))
+          .map((x) => dirOf(x.sourceRelPath));
         const res = await api(cwd.name, { folderRelPath, ...domainOpts });
         await refreshEntries?.();
         await refreshGhosts();
+        await refreshTreeDirs(refreshTreeDir, [folderRelPath, ...srcDirs]);
         const parts = [`已接受 ${res?.accepted || 0} 个`];
         if (res?.alreadyApplied) parts.push(`其中 ${res.alreadyApplied} 个已在目标位置`);
         if (res?.staleClosed) parts.push(`已清理失效建议 ${res.staleClosed} 条`);
@@ -180,7 +215,7 @@ const useGhosts = ({ cwd, domainOpts, refreshEntries, setNotice }) => {
         setNotice?.({ variant: 'error', message: e?.message || String(e) });
       }
     },
-    [cwd, domainOpts, refreshEntries, refreshGhosts, setNotice],
+    [cwd, domainOpts, ghosts, refreshEntries, refreshGhosts, refreshTreeDir, setNotice],
   );
 
   const rejectGroup = useCallback(

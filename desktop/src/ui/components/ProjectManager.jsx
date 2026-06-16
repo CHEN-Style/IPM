@@ -6,6 +6,7 @@ import AIGhostOverview from './project-manager/AIGhostOverview.jsx';
 import HeaderBar from './project-manager/HeaderBar.jsx';
 import RootTable from './project-manager/RootTable.jsx';
 import EntryTable from './project-manager/EntryTable.jsx';
+import ExplorerTree from './project-manager/ExplorerTree.jsx';
 import useProjects from './project-manager/hooks/useProjects.js';
 import useExplorerEntries from './project-manager/hooks/useExplorerEntries.js';
 import useGhosts from './project-manager/hooks/useGhosts.js';
@@ -28,7 +29,7 @@ import useSyncStatus, { deriveCloudChip } from './cloud-projects/useSyncStatus.j
 import FileHistoryRestoreModal from './cloud-projects/FileHistoryRestoreModal.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { useCloudPublish } from '../hooks/useCloudPublish.jsx';
-import { fileDecor, folderDecor, fmtBytes, fmtTime } from './project-manager/utils.js';
+import { fileDecor, folderDecor, fmtBytes, fmtTime, isHiddenSystemDir } from './project-manager/utils.js';
 
 /** Stable analytics ids for context menu rows (labels come from useContextMenu). */
 function pmContextMenuTrack(label) {
@@ -147,8 +148,73 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
     enterRelDir,
     goParent,
   } = useExplorerEntries({ isStudy, domainOpts });
-  const [viewMode, setViewMode] = useState('list'); // 'list' | 'explorer' (UI only for now)
+  // Dual-pane (Windows-explorer style): the left folder tree (navigation
+  // pane) is always available inside a workspace; this only toggles its
+  // visibility. Persisted like other UI prefs (cf. App.jsx ipm.sidebarPinned).
+  const [navPaneOpen, setNavPaneOpen] = useState(() => {
+    try {
+      const v = window.localStorage.getItem('ipm.pm.navPaneOpen');
+      return v === null ? true : v === '1';
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem('ipm.pm.navPaneOpen', navPaneOpen ? '1' : '0'); } catch { /* ignore */ }
+  }, [navPaneOpen]);
+  // Resizable nav-pane width (P4). Persisted; clamped to a sane range.
+  const NAV_MIN = 180;
+  const NAV_MAX = 480;
+  const clampNavWidth = useCallback((w) => Math.max(NAV_MIN, Math.min(NAV_MAX, Math.round(w))), []);
+  const [navPaneWidth, setNavPaneWidth] = useState(() => {
+    try {
+      const v = parseInt(window.localStorage.getItem('ipm.pm.navPaneWidth') || '', 10);
+      return Number.isFinite(v) ? Math.max(NAV_MIN, Math.min(NAV_MAX, v)) : 256;
+    } catch {
+      return 256;
+    }
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem('ipm.pm.navPaneWidth', String(navPaneWidth)); } catch { /* ignore */ }
+  }, [navPaneWidth]);
+  // Drag-to-resize: track start X + start width on the window during a drag.
+  const navResizeRef = useRef(null); // { startX, startW }
+  const startNavResize = useCallback((e) => {
+    navResizeRef.current = { startX: e.clientX, startW: navPaneWidth };
+    const onMove = (ev) => {
+      const st = navResizeRef.current;
+      if (!st) return;
+      setNavPaneWidth(clampNavWidth(st.startW + (ev.clientX - st.startX)));
+    };
+    const onUp = () => {
+      navResizeRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.classList.remove('select-none', 'cursor-col-resize');
+    };
+    document.body.classList.add('select-none', 'cursor-col-resize');
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  }, [navPaneWidth, clampNavWidth]);
+  // When the cloud sync drawer is open and the window is narrow, three
+  // columns (tree + list + drawer) get cramped; auto-collapse the tree
+  // without clobbering the user's stored preference.
+  const mainColRef = useRef(null);
+  const [mainColNarrow, setMainColNarrow] = useState(false);
   const newProjectInputRef = useRef(null);
+
+  // Folder tree (left navigation pane). Declared before useGhosts so the
+  // ghost-accept refresh can keep the tree in sync via refreshTreeDir.
+  const {
+    tree,
+    resetTree,
+    refreshTreeDir,
+    ensureTreeNode,
+    toggleTreeDir,
+    removeTreeNode,
+    expandToPath,
+  } = useFolderTree({ cwd, domainOpts, normalizedDomain, setNotice, setErrorText });
 
   // AI ghost files (staging suggestions)
   const [overviewOpen, setOverviewOpen] = useState(false);
@@ -169,7 +235,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
     rejectAllGhostsProject,
     acceptGroup,
     rejectGroup,
-  } = useGhosts({ cwd, domainOpts, refreshEntries, setNotice });
+  } = useGhosts({ cwd, domainOpts, refreshEntries, refreshTreeDir, setNotice });
   const {
     aiUploadInputRef,
     aiUpload,
@@ -303,15 +369,6 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
   } = useFolderDetail({ cwd, domainOpts, setNotice });
 
   const {
-    tree,
-    resetTree,
-    refreshTreeDir,
-    ensureTreeNode,
-    toggleTreeDir,
-    removeTreeNode,
-  } = useFolderTree({ cwd, domainOpts, normalizedDomain, viewMode, setNotice, setErrorText });
-
-  const {
     newFolderOpen,
     newFolderName,
     newFolderBaseRelPath,
@@ -336,7 +393,6 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
   } = useFileActions({
     cwd,
     domainOpts,
-    viewMode,
     refreshEntries,
     refreshGhosts,
     refreshTreeDir,
@@ -348,15 +404,6 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
   const isRoot = cwd.type === 'root';
   const isProjectCwd = cwd.type === 'project';
   const isLocalCwd = cwd.type === 'local';
-  const setViewModeSafe = (next) => {
-    setViewMode(next);
-    if (isRoot) {
-      setNotice({
-        variant: 'info',
-        message: `提示：视图切换仅在进入某个${entityLabel}后生效；当前为「${entityLabelAll}」视图。`,
-      });
-    }
-  };
   const [createKnowledgeTarget, setCreateKnowledgeTarget] = useState(null);
   const [restoreFileTarget, setRestoreFileTarget] = useState(null);
   const openRestoreFile = useCallback((entry) => {
@@ -475,6 +522,119 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
   useEffect(() => {
     if (!cloudEligible || !currentBound) setSyncDrawerOpen(false);
   }, [cloudEligible, currentBound, cwd.name]);
+
+  // Observe the main column width so we can auto-collapse the nav pane when
+  // the sync drawer squeezes it on a narrow window (decided value, not the
+  // stored preference).
+  useEffect(() => {
+    const el = mainColRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver((obsEntries) => {
+      const w = obsEntries[0]?.contentRect?.width;
+      if (typeof w === 'number') setMainColNarrow(w < 720);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const navPaneEffectiveOpen = navPaneOpen && !(syncDrawerOpen && mainColNarrow);
+  const showNavPane = !isRoot && (isProjectCwd || isLocalCwd) && navPaneEffectiveOpen;
+
+  // Dual-pane linkage: whenever the current directory changes (right-pane
+  // double-click, breadcrumb, AI overview "进入", search nav), reveal and
+  // highlight it in the left tree.
+  useEffect(() => {
+    if (isProjectCwd || isLocalCwd) expandToPath(cwd.relPath || '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [normalizedDomain, cwd.type, cwd.name, cwd.rootPath, cwd.relPath]);
+
+  // P4: per-folder pending-AI-suggestion counts, rolled up to ancestors so
+  // a collapsed parent shows the total in its subtree. Root key '' equals
+  // the overall pendingGhostCount (matches the overview banner).
+  const ghostBadgeByDir = useMemo(() => {
+    const m = {};
+    for (const g of pendingGhostGroups) {
+      const c = g.items.length;
+      m[''] = (m[''] || 0) + c;
+      let acc = '';
+      for (const p of String(g.folderRelPath || '').split('/').filter(Boolean)) {
+        acc = acc ? `${acc}/${p}` : p;
+        m[acc] = (m[acc] || 0) + c;
+      }
+    }
+    return m;
+  }, [pendingGhostGroups]);
+
+  // P4: keyboard navigation. `focusedRelPath` is the keyboard-active node
+  // (distinct from the selected dir = cwd.relPath). `visibleTreeNodes` is the
+  // flattened list of currently-visible folder nodes, in render order.
+  const [focusedRelPath, setFocusedRelPath] = useState(null);
+  const visibleTreeNodes = useMemo(() => {
+    const out = [];
+    const walk = (key, depth) => {
+      const node = tree[key];
+      const isOpen = node?.open ?? depth === 0;
+      out.push({ relPath: key, depth, isOpen, hasLoaded: Array.isArray(node?.entries) });
+      if (!isOpen) return;
+      const dirs = Array.isArray(node?.entries)
+        ? node.entries.filter((e) => e.kind === 'dir' && !isHiddenSystemDir(e))
+        : [];
+      for (const d of dirs) walk(String(d.relPath || ''), depth + 1);
+    };
+    if (isProjectCwd || isLocalCwd) walk('', 0);
+    return out;
+  }, [tree, isProjectCwd, isLocalCwd]);
+
+  const handleNavKeyDown = useCallback(
+    (e) => {
+      if (!visibleTreeNodes.length) return;
+      const cur = focusedRelPath ?? (cwd.relPath || '');
+      const idx = Math.max(0, visibleTreeNodes.findIndex((n) => n.relPath === cur));
+      const node = visibleTreeNodes[idx] || visibleTreeNodes[0];
+      switch (e.key) {
+        case 'ArrowDown': {
+          e.preventDefault();
+          const next = visibleTreeNodes[Math.min(visibleTreeNodes.length - 1, idx + 1)];
+          if (next) setFocusedRelPath(next.relPath);
+          break;
+        }
+        case 'ArrowUp': {
+          e.preventDefault();
+          const prev = visibleTreeNodes[Math.max(0, idx - 1)];
+          if (prev) setFocusedRelPath(prev.relPath);
+          break;
+        }
+        case 'ArrowRight': {
+          e.preventDefault();
+          if (!node.isOpen) {
+            toggleTreeDir(node.relPath);
+          } else {
+            const child = visibleTreeNodes[idx + 1];
+            if (child && child.depth > node.depth) setFocusedRelPath(child.relPath);
+          }
+          break;
+        }
+        case 'ArrowLeft': {
+          e.preventDefault();
+          if (node.isOpen && node.relPath) {
+            toggleTreeDir(node.relPath);
+          } else if (node.relPath) {
+            const parts = node.relPath.split('/').filter(Boolean);
+            parts.pop();
+            setFocusedRelPath(parts.join('/'));
+          }
+          break;
+        }
+        case 'Enter': {
+          e.preventDefault();
+          setCwd({ ...cwd, relPath: node.relPath });
+          break;
+        }
+        default:
+          break;
+      }
+    },
+    [visibleTreeNodes, focusedRelPath, cwd, toggleTreeDir, setCwd],
+  );
 
   const cloudChip = useMemo(() => {
     if (!cloudEligible) return null;
@@ -725,7 +885,6 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
   } = useDragDrop({
     cwd,
     domainOpts,
-    viewMode,
     refreshEntries,
     refreshTreeDir,
     setNotice,
@@ -817,7 +976,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
     {pageDragOver && inProject && !isRoot && (
       <div className="absolute inset-0 z-40 pointer-events-none rounded-lg" style={{ border: '2px dashed rgba(62,75,156,0.35)', background: 'rgba(62,75,156,0.03)' }} />
     )}
-    <div className="flex-1 flex flex-col min-w-0 h-full">
+    <div ref={mainColRef} className="flex-1 flex flex-col min-w-0 h-full">
       {/* Hidden file input for “Upload & AI classify” (Electron gives file.path) */}
       <input
         ref={aiUploadInputRef}
@@ -840,8 +999,8 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
         onBackHome={onBackHome}
         showGoRoot={cwd.type === 'project' && !cwd.relPath && !isStudy}
         onGoRoot={goRoot}
-        viewMode={viewMode}
-        onSetViewMode={setViewModeSafe}
+        navPaneOpen={navPaneOpen}
+        onToggleNavPane={() => setNavPaneOpen((v) => !v)}
         isRoot={isRoot}
         showGoParent={!isRoot && Boolean(cwd.relPath)}
         onGoParent={goParent}
@@ -887,8 +1046,9 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
         onCloudChipClick={handleCloudChipClick}
       />
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto" onContextMenu={handleBlankContextMenu}>
+      {/* Content: AI overview banner (full width) above a Windows-explorer
+          style split — left folder tree (nav pane) + right file list. */}
+      <div className="flex-1 flex flex-col min-h-0">
         <AIGhostOverview
           show={!isRoot && (showOverviewBar || pipelineState.isActive)}
           overviewOpen={overviewOpen}
@@ -911,70 +1071,114 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
           pipelineClassifying={pipelineState.classifying}
         />
 
-        {isRoot ? (
-          <RootTable
-            errorText={errorText}
-            localFolders={localFolders}
-            projects={projects}
-            entityLabel={entityLabel}
-            cloudBindings={cloudBindings}
-            cloudLockedNames={cloudLockedNames}
-            onEnterLocalFolder={enterLocalFolder}
-            onContextMenuLocalFolder={handleRowContextMenuLocalFolder}
-            onEnterProject={enterProject}
-            onContextMenuProject={handleRowContextMenuRoot}
-            rowStyleByStatus={rowStyleByStatus}
-            projectStatuses={PROJECT_STATUSES}
-            statusLabel={statusLabel}
-            badgeByStatus={badgeByStatus}
-            onSetProjectStatus={setProjectStatus}
-            onOpenKnowledge={(p) => setKnowledgeCtx({
-              name: p.name,
-              path: p.path,
-              attached: Boolean(p.attached),
-              externalRootPath: p.externalRootPath || '',
-            })}
-            onOpenPreferences={(p) => setPreferencesCtx({
-              name: p.name,
-              path: p.path,
-              attached: Boolean(p.attached),
-              externalRootPath: p.externalRootPath || '',
-            })}
-          />
-        ) : (
-          <EntryTable
-            errorText={errorText}
-            viewMode={viewMode}
-            loading={loading}
-            entries={entries}
-            pendingGhostsInCwd={pendingGhostsInCwd}
-            cwd={cwd}
-            dragOverFolderRelPath={dragOverFolderRelPath}
-            onContextMenuEntry={handleRowContextMenuEntry}
-            onEnterDir={enterRelDir}
-                  onOpenFile={openFileByRelPath}
-            onAcceptGhost={acceptGhost}
-            onRejectGhost={rejectGhost}
-            onViewTrace={openTrace}
-                  onDragStartEntry={onDragStartEntry}
-                  onDragEndAny={onDragEndAny}
-                  onDragOverFolder={onDragOverFolder}
-                  onDragLeaveFolder={onDragLeaveFolder}
-            onDropOnFolder={onDropOnFolder}
-            onOpenFolderDetail={openFolderDetail}
-            fmtTime={fmtTime}
-            fmtBytes={fmtBytes}
-            folderDecor={folderDecor}
-            fileDecor={fileDecor}
-            fileFilter={isRoot ? [] : fileFilters}
-            fileFilterExts={fileFilterExts}
-            onBlankContextMenu={handleBlankContextMenu}
-            tree={tree}
-            onToggleTree={toggleTreeDir}
-            onLoadTree={ensureTreeNode}
-            syncBadges={syncBadges}
-          />
-        )}
+        <div className="flex-1 flex min-h-0">
+          {showNavPane && (
+            <>
+            <aside
+              className="shrink-0 overflow-y-auto border-r border-slate-200 bg-white/50 py-2 outline-none"
+              style={{ width: navPaneWidth }}
+              role="tree"
+              tabIndex={0}
+              onKeyDown={handleNavKeyDown}
+              onFocus={() => { if (focusedRelPath == null) setFocusedRelPath(cwd.relPath || ''); }}
+              onContextMenu={handleBlankContextMenu}
+            >
+              <ExplorerTree
+                name={
+                  isLocalCwd
+                    ? (String(cwd.rootPath || '').split(/[/\\]+/).filter(Boolean).slice(-1)[0] || '本地文件夹')
+                    : (cwd.name || '项目根目录')
+                }
+                relPath=""
+                depth={0}
+                tree={tree}
+                selectedRelPath={cwd.relPath || ''}
+                focusedRelPath={focusedRelPath}
+                ghostBadgeByDir={ghostBadgeByDir}
+                onToggle={toggleTreeDir}
+                onSelectDir={(rp) => { setCwd({ ...cwd, relPath: rp }); setFocusedRelPath(rp); }}
+                onLoad={ensureTreeNode}
+                onEntryContextMenu={handleRowContextMenuEntry}
+                onDragStartEntry={onDragStartEntry}
+                onDragEndAny={onDragEndAny}
+                onDropOnFolder={onDropOnFolder}
+                onDragOverFolder={onDragOverFolder}
+                onDragLeaveFolder={onDragLeaveFolder}
+                folderDecor={folderDecor}
+              />
+            </aside>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              className="w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-[#3e4b9c]/30 transition-colors"
+              onMouseDown={startNavResize}
+              title="拖拽调整宽度"
+            />
+            </>
+          )}
+
+          <div className="flex-1 min-w-0 overflow-y-auto" onContextMenu={handleBlankContextMenu}>
+            {isRoot ? (
+              <RootTable
+                errorText={errorText}
+                localFolders={localFolders}
+                projects={projects}
+                entityLabel={entityLabel}
+                cloudBindings={cloudBindings}
+                cloudLockedNames={cloudLockedNames}
+                onEnterLocalFolder={enterLocalFolder}
+                onContextMenuLocalFolder={handleRowContextMenuLocalFolder}
+                onEnterProject={enterProject}
+                onContextMenuProject={handleRowContextMenuRoot}
+                rowStyleByStatus={rowStyleByStatus}
+                projectStatuses={PROJECT_STATUSES}
+                statusLabel={statusLabel}
+                badgeByStatus={badgeByStatus}
+                onSetProjectStatus={setProjectStatus}
+                onOpenKnowledge={(p) => setKnowledgeCtx({
+                  name: p.name,
+                  path: p.path,
+                  attached: Boolean(p.attached),
+                  externalRootPath: p.externalRootPath || '',
+                })}
+                onOpenPreferences={(p) => setPreferencesCtx({
+                  name: p.name,
+                  path: p.path,
+                  attached: Boolean(p.attached),
+                  externalRootPath: p.externalRootPath || '',
+                })}
+              />
+            ) : (
+              <EntryTable
+                errorText={errorText}
+                loading={loading}
+                entries={entries}
+                pendingGhostsInCwd={pendingGhostsInCwd}
+                cwd={cwd}
+                dragOverFolderRelPath={dragOverFolderRelPath}
+                onContextMenuEntry={handleRowContextMenuEntry}
+                onEnterDir={enterRelDir}
+                onOpenFile={openFileByRelPath}
+                onAcceptGhost={acceptGhost}
+                onRejectGhost={rejectGhost}
+                onViewTrace={openTrace}
+                onDragStartEntry={onDragStartEntry}
+                onDragEndAny={onDragEndAny}
+                onDragOverFolder={onDragOverFolder}
+                onDragLeaveFolder={onDragLeaveFolder}
+                onDropOnFolder={onDropOnFolder}
+                onOpenFolderDetail={openFolderDetail}
+                fmtTime={fmtTime}
+                fmtBytes={fmtBytes}
+                folderDecor={folderDecor}
+                fileDecor={fileDecor}
+                fileFilter={isRoot ? [] : fileFilters}
+                fileFilterExts={fileFilterExts}
+                syncBadges={syncBadges}
+              />
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Folder Detail Overlay (covers main area; click outside to close) */}

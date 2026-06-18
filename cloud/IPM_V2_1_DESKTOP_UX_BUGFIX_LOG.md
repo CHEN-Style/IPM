@@ -243,10 +243,46 @@
   4. **表格复制**：将 DOM 表格转换为 TSV（制表符分隔），便于直接粘贴到 Excel / WPS / 飞书表格并保持行列结构。
   5. **整条回答复制**：在 assistant 回答左下角新增「复制回答」按钮，复制原始 `message.content`（Markdown 原文）；复制成功后短暂显示「已复制」。
   6. 新增 `copyText()` 工具：优先使用 `navigator.clipboard.writeText`，失败时回退到隐藏 textarea + `document.execCommand('copy')`。
-  7. **代码块视觉重设计**：先通过 `desktop/design/knowclaw-codeblock-mockup.html` 输出 6 个代码块设计稿供选型，最终选用 **方案 B · 编辑器窗口**。实现上在 `CopyableMarkdown` 注入复制能力时，将 `pre` 包装为 `kc-code-editor-block`，在代码块顶部增加编辑器标题栏（`kc-code-titlebar`，三色点 + `代码示例` 标识 + 右侧 hover 复制 icon），下方保留可横向滚动的浅色代码区；全局 `.prose-chat` 样式补充编辑器窗口布局。表格补充白底、边框和圆角，配合表格复制按钮。
+  7. **代码块视觉重设计**：先通过 `desktop/design/knowclaw-codeblock-mockup.html` 输出 6 个代码块设计稿供选型，最终选用 **方案 B · 编辑器窗口**。实现上在 `CopyableMarkdown` 注入复制能力时，将 `pre` 包装为 `kc-code-editor-block`，在代码块顶部增加编辑器标题栏（`kc-code-titlebar`，仅保留三色点 + 右侧 hover 复制 icon，不显示文字标识），下方保留可横向滚动的浅色代码区；全局 `.prose-chat` 样式补充编辑器窗口布局。表格补充白底、边框和圆角，配合表格复制按钮。
 - **涉及文件**：
   - `desktop/src/ui/components/agent-chat/MessageBubble.jsx`
   - `desktop/index.html`
   - `desktop/design/knowclaw-codeblock-mockup.html`
 - **验证**：ESLint 通过；待手动目视——普通 Markdown 回答左下角显示复制按钮；代码块/表格 hover 后显示 icon-only 局部复制按钮；表格复制按钮不覆盖表头文字；复制成功状态短暂切换为 check icon；代码块改为编辑器窗口布局；流式生成时复制按钮不闪烁，输出完成后仍保留；思考块、工具卡片、任务卡、`ask_user` 卡不受影响。
 - **影响面/回归**：仅改变 assistant Markdown 回答区域的渲染包装与复制交互；不影响消息内容存储、发送、工具调用或其他结构化卡片。
+
+---
+
+### D-009 — 中台 AI 分类面板 Linear 风格改版 + 空下拉残留修复
+
+- **类型 / 优先级**：UX 优化 + Bug 修复 / P1
+- **状态**：`DONE`（2026-06-18）
+- **模块/页面**：中台项目/案件文件区 AI 分类建议（`AIGhostOverview` / `ProjectManager` / classify tracker 状态）
+- **问题/需求**：
+  - 当前 AI 分类 UI 偏“临时调试面板”，卡片重、按钮多、动作拥挤，和已有 Linear 风格中台页面不一致。
+  - 非致命 bug：AI 分类结束后用户点击接受，待处理建议已清空，但横幅/下拉仍继续显示一段时间；展开后列表为空，直到 tracker 自动清理才消失。
+- **根因**：
+  - `ProjectManager` 的显示条件使用 `showOverviewBar || pipelineState.isActive`。
+  - `useClassifyPipeline` 的 `isActive` 将 `queued + classifying + classified + failed` 都计入 active；而 `classifyTracker` 会把 `classified/failed` 保留 30 秒后才自动清理。
+  - 接受建议后 `pendingGhostGroups` 已清空，但 `classified` 仍残留，导致 `AIGhostOverview` 继续显示且展开区没有任何 group。
+- **设计过程**：
+  1. 先产出 `desktop/design/ai-classify-overview-mockup.html`（多方案卡片式），反馈为不够贴合。
+  2. 探索 Linear 设计语言：低噪音、细分隔线 row、单一 accent、hover actions、小状态点/pill、少大色块。
+  3. 重做 `desktop/design/ai-classify-linear-mockup.html`，最终确定 Linear issue/inbox list 风格，并补齐顶部批量拒绝、文件夹/单文件 hover icon actions。
+- **改动方案**：
+  1. `AIGhostOverview` 重构为 Linear 风格横向状态 row + 细分隔线列表：标题 `AI 分类`、状态 pill、轻量 meta、顶部批量动作、展开后 row/list 展示目标文件夹与子文件。
+  2. 文件夹级动作改为 hover icon-only：进入（外链箭头）、接受（check）、拒绝（x）。
+  3. 单文件动作改为 hover icon-only：接受、拒绝、查看过程；单文件拒绝继续复用 `RejectPopover`。
+  4. 顶部批量动作保留文字：`全部接受` 为 primary，`全部拒绝` 为低强调 danger。
+  5. 空下拉修复：`AIGhostOverview` 根据 `pendingGhostGroups`、`queued/classifying`、`classified/failed` 分成三种状态：
+     - 有待处理建议：渲染建议列表。
+     - 仅处理中：显示“AI 正在分类，当前还没有可处理建议”。
+     - 无待处理但 tracker 仍有完成/失败残留：显示“所有建议已处理”，提供 `清除完成状态`，不渲染空列表。
+  6. `ProjectManager` 将 `pipelineState.classified`、`pipelineState.failed`、`pipelineState.clearCompleted` 传入 `AIGhostOverview`，显示条件改为显式检查 pending/queued/classifying/classified/failed。
+- **涉及文件**：
+  - `desktop/src/ui/components/project-manager/AIGhostOverview.jsx`
+  - `desktop/src/ui/components/ProjectManager.jsx`
+  - `desktop/design/ai-classify-linear-mockup.html`
+  - `desktop/design/ai-classify-overview-mockup.html`
+- **验证**：相关文件 ESLint 通过；待手动验证——分类进行中/有建议/接受后无建议但 tracker 残留/全部拒绝/单文件拒绝反馈/过程查看等状态均显示正确，不再出现空下拉。
+- **影响面/回归**：仅影响项目/案件文件区顶部 AI 分类建议面板；不改动底层分类、移动、拒绝、轨迹查看逻辑。

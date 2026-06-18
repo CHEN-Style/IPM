@@ -137,7 +137,12 @@ const TrayWidget = ({
     return file?.path || (window.ipm?.files?.getPathForFile ? window.ipm.files.getPathForFile(file) : '');
   };
 
-  const hasTarget = !disabled && (activeDomain === 'study' ? true : Boolean(activeProjectId));
+  const hasTarget = useMemo(() => {
+    if (disabled) return false;
+    if (activeDomain === 'study') return true;
+    if (!activeProjectId) return false;
+    return (projects || []).some((p) => p?.id === activeProjectId);
+  }, [activeDomain, activeProjectId, disabled, projects]);
 
   const autoUploadSingle = async (file, { allowUndo = true } = {}) => {
     if (!hasTarget) return;

@@ -58,11 +58,11 @@ const FloatingMode = ({ onBackToMain }) => {
   const [menu, setMenu] = useState({ open: false, x: 0, y: 0 });
   const [activeDomain, setActiveDomain] = useState('projects'); // projects | cases | study
   const [itemsByDomain, setItemsByDomain] = useState({ projects: [], cases: [], study: [{ id: '', label: '学习', status: 'active' }] });
-  const [currentByDomain, setCurrentByDomain] = useState({ projects: null, cases: null });
   const [activeProjectId, setActiveProjectId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploadMode, setUploadMode] = useState('confirm'); // confirm | auto
   const widgetRef = useRef(null);
+  const loadTargetsSeqRef = useRef(0);
   const [toolPanel, setToolPanel] = useState(''); // '' | 'clipboard'
   const [recording, setRecording] = useState(false);
   const [copiedId, setCopiedId] = useState('');
@@ -157,63 +157,79 @@ const FloatingMode = ({ onBackToMain }) => {
     ];
   }, [onBackToMain]);
 
+  const loadTargets = useCallback(async ({ showLoading = false, domain = activeDomain } = {}) => {
+    const seq = loadTargetsSeqRef.current + 1;
+    loadTargetsSeqRef.current = seq;
+    if (showLoading) setLoading(true);
+    try {
+      const [projList, projCur, caseList, caseCur, prefsRes] = await Promise.all([
+        window.ipm?.projects?.list?.(),
+        window.ipm?.projects?.getCurrent?.(),
+        window.ipm?.cases?.list?.(),
+        window.ipm?.cases?.getCurrent?.(),
+        window.ipm?.prefs?.get?.(),
+      ]);
+      if (seq !== loadTargetsSeqRef.current) return;
+      const nextUploadMode = prefsRes?.prefs?.floatingUploadMode || 'confirm';
+      setUploadMode(nextUploadMode);
+
+      const projAll = (projList || []).map((p) => ({ id: p.name, label: p.name, status: p.status || 'active' }));
+      const projActive = projAll.filter((p) => String(p.status || '').toLowerCase() === 'active');
+      const caseAll = (caseList || []).map((p) => ({ id: p.name, label: p.name, status: p.status || 'active' }));
+      const caseActive = caseAll.filter((p) => String(p.status || '').toLowerCase() === 'active');
+      const study = [{ id: '', label: '学习', status: 'active' }];
+
+      const nextItemsByDomain = { projects: projActive, cases: caseActive, study };
+      setItemsByDomain(nextItemsByDomain);
+
+      // The floating window is a separate renderer from the main console. It
+      // must re-read project status because create/archive actions happen in
+      // the main window and do not remount this component.
+      const targetDomain = domain === 'cases' ? 'cases' : domain === 'study' ? 'study' : 'projects';
+      const pickPreferred = (d) => {
+        if (d === 'study') return '';
+        const list = nextItemsByDomain[d] || [];
+        const cur = d === 'cases' ? caseCur : projCur;
+        return cur && list.some((m) => m.id === cur) ? cur : list[0]?.id || null;
+      };
+      const preferred = pickPreferred(targetDomain);
+      setActiveProjectId(preferred);
+      if (targetDomain === 'projects' && preferred && preferred !== projCur) {
+        window.ipm?.projects?.setCurrent?.(preferred).catch(() => {});
+      }
+      if (targetDomain === 'cases' && preferred && preferred !== caseCur) {
+        window.ipm?.cases?.setCurrent?.(preferred).catch(() => {});
+      }
+    } catch (e) {
+      if (seq !== loadTargetsSeqRef.current) return;
+      console.error(e);
+      setItemsByDomain({ projects: [], cases: [], study: [{ id: '', label: '学习', status: 'active' }] });
+      setActiveProjectId(null);
+    } finally {
+      if (seq === loadTargetsSeqRef.current) setLoading(false);
+    }
+  }, [activeDomain]);
+
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      try {
-        const [projList, projCur, caseList, caseCur, prefsRes] = await Promise.all([
-          window.ipm?.projects?.list?.(),
-          window.ipm?.projects?.getCurrent?.(),
-          window.ipm?.cases?.list?.(),
-          window.ipm?.cases?.getCurrent?.(),
-          window.ipm?.prefs?.get?.(),
-        ]);
-        const mode = prefsRes?.prefs?.floatingUploadMode || 'confirm';
-        setUploadMode(mode);
-
-        const projAll = (projList || []).map((p) => ({ id: p.name, label: p.name, status: p.status || 'active' }));
-        const projActive = projAll.filter((p) => String(p.status || '').toLowerCase() === 'active');
-        const caseAll = (caseList || []).map((p) => ({ id: p.name, label: p.name, status: p.status || 'active' }));
-        const caseActive = caseAll.filter((p) => String(p.status || '').toLowerCase() === 'active');
-        const study = [{ id: '', label: '学习', status: 'active' }];
-        if (cancelled) return;
-
-        const nextItemsByDomain = { projects: projActive, cases: caseActive, study };
-        setItemsByDomain(nextItemsByDomain);
-        setCurrentByDomain({ projects: projCur || null, cases: caseCur || null });
-
-        // Choose active target per current domain
-        const pickPreferred = (domain) => {
-          if (domain === 'study') return '';
-          const list = nextItemsByDomain[domain] || [];
-          const cur = domain === 'cases' ? caseCur : projCur;
-          return cur && list.some((m) => m.id === cur) ? cur : list[0]?.id || null;
-        };
-        const preferred = pickPreferred(activeDomain);
-        setActiveProjectId(preferred);
-        // keep main process state aligned for projects/cases
-        if (activeDomain === 'projects' && preferred && preferred !== projCur) {
-          window.ipm?.projects?.setCurrent?.(preferred).catch(() => {});
-        }
-        if (activeDomain === 'cases' && preferred && preferred !== caseCur) {
-          window.ipm?.cases?.setCurrent?.(preferred).catch(() => {});
-        }
-      } catch (e) {
-        console.error(e);
-        if (!cancelled) {
-          setItemsByDomain({ projects: [], cases: [], study: [{ id: '', label: '学习', status: 'active' }] });
-          setActiveProjectId(null);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+    const refresh = (opts) => {
+      if (!cancelled) void loadTargets(opts);
     };
-    load();
+    refresh({ showLoading: true });
+    const interval = window.setInterval(() => refresh({ showLoading: false }), 3000);
+    const onFocus = () => refresh({ showLoading: false });
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') refresh({ showLoading: false });
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, []);
+  }, [loadTargets]);
 
   const selectProject = async (projectId) => {
     setActiveProjectId(projectId);
@@ -232,16 +248,7 @@ const FloatingMode = ({ onBackToMain }) => {
       setActiveProjectId('');
       return;
     }
-    const list = itemsByDomain?.[d] || [];
-    const cur = d === 'cases' ? currentByDomain?.cases : currentByDomain?.projects;
-    const preferred = cur && list.some((m) => m.id === cur) ? cur : list[0]?.id || null;
-    setActiveProjectId(preferred);
-    try {
-      if (d === 'projects' && preferred) await window.ipm?.projects?.setCurrent?.(preferred);
-      if (d === 'cases' && preferred) await window.ipm?.cases?.setCurrent?.(preferred);
-    } catch {
-      // ignore
-    }
+    await loadTargets({ domain: d, showLoading: false });
   };
 
   // FK7-2: KnowClawFloating registers its own Esc cascade

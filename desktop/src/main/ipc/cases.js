@@ -51,6 +51,26 @@ export function registerCasesIpc({
     };
   };
 
+  const getCaseStatusFromState = (state, name) => {
+    const statusMap = state?.caseStatuses && typeof state.caseStatuses === 'object' ? state.caseStatuses : {};
+    return normalizeProjectStatus(statusMap[name] || 'active');
+  };
+
+  const clearCurrentCaseIfStale = (state) => {
+    const current = sanitizeProjectName(state?.currentCase);
+    if (!current) {
+      if (state.currentCase) state.currentCase = null;
+      return null;
+    }
+    const dir = path.join(getCasesRoot(), current);
+    if (!fs.existsSync(dir) || getCaseStatusFromState(state, current) !== 'active') {
+      state.currentCase = null;
+      return null;
+    }
+    if (state.currentCase !== current) state.currentCase = current;
+    return current;
+  };
+
   // ===== Cases (案件) =====
   ipcMain.handle('cases/list', async () => {
     const root = getCasesRoot();
@@ -119,6 +139,9 @@ export function registerCasesIpc({
     const state = readState();
     state.caseStatuses = state.caseStatuses && typeof state.caseStatuses === 'object' ? state.caseStatuses : {};
     state.caseStatuses[name] = status;
+    if (status !== 'active' && state.currentCase === name) {
+      state.currentCase = null;
+    }
     writeState(state);
     return { ok: true, name, status };
   });
@@ -194,7 +217,11 @@ export function registerCasesIpc({
   });
 
   ipcMain.handle('cases/getCurrent', async () => {
-    return readState().currentCase ?? null;
+    const state = readState();
+    const before = state.currentCase ?? null;
+    const current = clearCurrentCaseIfStale(state);
+    if (current !== before) writeState(state);
+    return current;
   });
 
   ipcMain.handle('cases/setCurrent', async (_evt, payload) => {
@@ -203,6 +230,9 @@ export function registerCasesIpc({
     const dir = path.join(getCasesRoot(), name);
     if (!fs.existsSync(dir)) throw new Error(`目录不存在：${name}`);
     const state = readState();
+    if (getCaseStatusFromState(state, name) !== 'active') {
+      throw new Error(`案件「${name}」不是 ACTIVE 状态，不能设为当前案件。`);
+    }
     state.currentCase = name;
     writeState(state);
     return { ok: true, currentCase: name };

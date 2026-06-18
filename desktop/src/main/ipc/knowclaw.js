@@ -913,7 +913,12 @@ export function registerKnowClawIpc({
   // next launch. The session JSONL files themselves are persistent
   // (under pi's per-cwd hash directory) so opening a recent session
   // works as before.
-  const FLOATING_WORKSPACE_PATH = path.join(getUserFileRoot(), 'workspaces', '_floating');
+  const getFloatingWorkspacePath = () => path.join(getUserFileRoot(), 'workspaces', '_floating');
+  const ensureFloatingWorkspacePath = () => {
+    const dir = getFloatingWorkspacePath();
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  };
 
   function createChannelState(overrides = {}) {
     return {
@@ -925,6 +930,7 @@ export function registerKnowClawIpc({
       planMode: false,         // was: currentPlanMode
       cwd: overrides.cwd ?? null, // was: currentCwd; null = global mode
       cwdLocked: overrides.cwdLocked ?? false,
+      floatingWorkspace: overrides.floatingWorkspace ?? false,
     };
   }
 
@@ -940,8 +946,9 @@ export function registerKnowClawIpc({
   const channels = {
     main: createChannelState(),
     floating: createChannelState({
-      cwd: FLOATING_WORKSPACE_PATH,
+      cwd: ensureFloatingWorkspacePath(),
       cwdLocked: true,
+      floatingWorkspace: true,
     }),
   };
 
@@ -950,7 +957,7 @@ export function registerKnowClawIpc({
   // cwd. mkdirSync with recursive is idempotent — safe to call on
   // every registration. Failures are non-fatal (we'll get a clearer
   // error from pi later if the directory truly can't be created).
-  try { fs.mkdirSync(FLOATING_WORKSPACE_PATH, { recursive: true }); }
+  try { ensureFloatingWorkspacePath(); }
   catch (err) {
     // eslint-disable-next-line no-console
     console.warn('[KnowClaw] failed to create floating workspace dir:', err?.message || err);
@@ -1313,6 +1320,13 @@ export function registerKnowClawIpc({
    * behaviour for the main channel).
    */
   function getEffectiveCwd(ch) {
+    if (ch?.floatingWorkspace) {
+      try {
+        return path.resolve(ensureFloatingWorkspacePath());
+      } catch {
+        return getUserFileRoot();
+      }
+    }
     if (ch && ch.cwd) {
       try {
         return path.resolve(ch.cwd);
@@ -1518,7 +1532,7 @@ export function registerKnowClawIpc({
 
   ipcMain.handle('knowclaw:send', async (evt, payload) => {
     const ch = getChannel(payload);
-    const locked = cwdLockedResponse(ch?.cwd);
+    const locked = cwdLockedResponse(getEffectiveCwd(ch));
     if (locked) return locked;
     const message = String(payload?.message ?? '').trim();
     // U8b-2: image attachments are optional. An empty message is still
@@ -1564,7 +1578,7 @@ export function registerKnowClawIpc({
     // up front.
     let messageWithSkills = message;
     if (Array.isArray(payload?.pinnedSkills) && payload.pinnedSkills.length > 0) {
-      const resolved = resolvePinnedSkillContents(payload.pinnedSkills, ch.cwd);
+      const resolved = resolvePinnedSkillContents(payload.pinnedSkills, getEffectiveCwd(ch));
       if (resolved.length > 0) {
         messageWithSkills = `${formatPinnedSkillsBlock(resolved)}\n\n${message}`;
       }
@@ -1938,15 +1952,16 @@ export function registerKnowClawIpc({
     // window. Marked `protected: true` so the dropdown hides the
     // "X" remove button (this is system-managed, not user clutter).
     {
+      const floatingWorkspacePath = getFloatingWorkspacePath();
       const floatingExists = (() => {
-        try { return fs.existsSync(FLOATING_WORKSPACE_PATH) && fs.statSync(FLOATING_WORKSPACE_PATH).isDirectory(); }
+        try { return fs.existsSync(floatingWorkspacePath) && fs.statSync(floatingWorkspacePath).isDirectory(); }
         catch { return false; }
       })();
       if (floatingExists) {
         tryAdd({
           name: '悬浮助手',
           domain: 'floating',
-          path: FLOATING_WORKSPACE_PATH,
+          path: floatingWorkspacePath,
           pinned: true,
           protected: true,
         });
@@ -2198,7 +2213,7 @@ export function registerKnowClawIpc({
   //     try to recurse — the user can drag the parent's contents instead.
   ipcMain.handle('knowclaw:uploadToWorkspace', async (_evt, payload) => {
     const ch = getChannel(payload);
-    const locked = cwdLockedResponse(ch?.cwd);
+    const locked = cwdLockedResponse(getEffectiveCwd(ch));
     if (locked) return { ...locked, uploaded: [], skipped: [] };
     const MAX_BYTES = 100 * 1024 * 1024; // 100 MB / file
     const filePaths = Array.isArray(payload?.filePaths) ? payload.filePaths : [];
@@ -2209,7 +2224,7 @@ export function registerKnowClawIpc({
     // Global mode has no real cwd, just the user file root which is
     // shared across projects/cases/etc. Refuse to copy there — the
     // user must pick or create a workspace first.
-    if (!ch.cwd) {
+    if (!ch.cwd && !ch.floatingWorkspace) {
       return {
         ok: false,
         error: '请先选择一个工作空间，再上传文件。',

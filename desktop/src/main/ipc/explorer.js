@@ -5,10 +5,12 @@ export function registerExplorerIpc({
   ipcMain,
   dialog,
   shell,
+  readState,
   // workspace & path helpers
   sanitizeProjectName,
   normalizeRelPathPosix,
   normalizeWorkspaceDomain,
+  normalizeProjectStatus,
   getWorkspaceRoot,
   getStudyRoot,
   STUDY_WORKSPACE_NAME,
@@ -61,6 +63,20 @@ export function registerExplorerIpc({
   };
   const isAttached = (projectDir) =>
     typeof isAttachedProject === 'function' && isAttachedProject(projectDir);
+
+  const assertActiveWorkspaceForWrite = (projectName, domain) => {
+    const d = typeof normalizeWorkspaceDomain === 'function' ? normalizeWorkspaceDomain(domain) : String(domain || 'projects');
+    if (d === 'study') return;
+    const state = typeof readState === 'function' ? readState() : {};
+    const mapKey = d === 'cases' ? 'caseStatuses' : 'projectStatuses';
+    const statusMap = state?.[mapKey] && typeof state[mapKey] === 'object' ? state[mapKey] : {};
+    const normalize = typeof normalizeProjectStatus === 'function' ? normalizeProjectStatus : (v) => String(v || 'active').toLowerCase();
+    const status = normalize(statusMap[projectName] || 'active');
+    if (status !== 'active') {
+      const label = d === 'cases' ? '案件' : '项目';
+      throw new Error(`${label}「${projectName}」当前状态为 ${status}，只允许修改 ACTIVE 状态的${label}。`);
+    }
+  };
 
   // F1: 选择正确的 structure 同步函数 — 附属壳走外部扫描，原生项目走原版。
   const syncStructureFor = (projectDir, projectName, seedDoc) => {
@@ -253,7 +269,8 @@ export function registerExplorerIpc({
   });
 
   ipcMain.handle('explorer/mkdir', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    const { name: projectName, projectDir, domain } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    assertActiveWorkspaceForWrite(projectName, domain);
     const relPath = String(payload?.relPath ?? '');
     const folderName = sanitizeFileName(payload?.folderName);
     if (!folderName) throw new Error('文件夹名称不能为空');
@@ -290,7 +307,8 @@ export function registerExplorerIpc({
   });
 
   ipcMain.handle('explorer/delete', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    const { name: projectName, projectDir, domain } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    assertActiveWorkspaceForWrite(projectName, domain);
     const entryRelPath = String(payload?.relPath ?? '');
     if (!entryRelPath) throw new Error('目标路径不能为空');
     const relPosix = normalizeRelPathPosix(entryRelPath);
@@ -400,7 +418,8 @@ export function registerExplorerIpc({
   });
 
   ipcMain.handle('explorer/upload', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    const { name: projectName, projectDir, domain } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    assertActiveWorkspaceForWrite(projectName, domain);
     const destRelPath = String(payload?.destRelPath ?? '');
     const destDir = resolveContent(projectDir, destRelPath);
     if (!fs.existsSync(destDir)) throw new Error('目标目录不存在');
@@ -436,7 +455,8 @@ export function registerExplorerIpc({
   });
 
   ipcMain.handle('explorer/drop-upload', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    const { name: projectName, projectDir, domain } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    assertActiveWorkspaceForWrite(projectName, domain);
     const destRelPath = String(payload?.destRelPath ?? '');
     const destDir = resolveContent(projectDir, destRelPath);
     if (!fs.existsSync(destDir)) throw new Error('目标目录不存在');
@@ -470,7 +490,8 @@ export function registerExplorerIpc({
   });
 
   ipcMain.handle('explorer/rename', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    const { name: projectName, projectDir, domain } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    assertActiveWorkspaceForWrite(projectName, domain);
     const entryRelPath = String(payload?.relPath ?? '');
     const newNameRaw = String(payload?.newName ?? '');
     if (!entryRelPath) throw new Error('目标路径不能为空');
@@ -558,7 +579,8 @@ export function registerExplorerIpc({
   });
 
   ipcMain.handle('explorer/move', async (_evt, payload) => {
-    const { name: projectName, projectDir } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    const { name: projectName, projectDir, domain } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    assertActiveWorkspaceForWrite(projectName, domain);
     const srcRelPath = String(payload?.srcRelPath ?? '');
     const destDirRelPath = String(payload?.destDirRelPath ?? '');
     if (!srcRelPath) throw new Error('源路径不能为空');

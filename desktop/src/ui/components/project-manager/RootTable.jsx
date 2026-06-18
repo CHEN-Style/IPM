@@ -55,6 +55,7 @@ const RootTable = ({
           {projects.map((p, pIdx) => {
             const isAttached = Boolean(p?.attached);
             const isBroken = Boolean(p?.broken);
+            const isActive = String(p.status || 'active').toLowerCase() === 'active';
             const externalPath = String(p?.externalRootPath || '');
             const cloudPublishing = cloudLockedNames?.has?.(p.name);
             const cloudInfo = cloudBindings?.[p.name];
@@ -66,9 +67,9 @@ const RootTable = ({
             return (
             <tr
               key={p.name}
-              onClick={() => onEnterProject?.(p.name)}
+              onClick={() => { if (isActive) onEnterProject?.(p.name); }}
               onContextMenu={(e) => onContextMenuProject?.(e, p.name)}
-              className={`group cursor-pointer transition-all duration-200 ${rowCls}`}
+              className={`group transition-all duration-200 ${isActive ? 'cursor-pointer' : 'cursor-default'} ${rowCls}`}
               data-tour={pIdx === 0 ? 'project-card-first' : undefined}
               title={isAttached
                 ? (isBroken

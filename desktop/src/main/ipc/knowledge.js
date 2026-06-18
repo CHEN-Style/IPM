@@ -191,6 +191,8 @@ async function runOcrInBackground({
 export function registerKnowledgeIpc({
   ipcMain,
   clipboardImageCache,
+  readState,
+  normalizeProjectStatus,
   getWorkspaceDirOrThrow,
   getProjectDb,
   ensureProjectStructure,
@@ -218,6 +220,20 @@ export function registerKnowledgeIpc({
     ensureProjectStructure(name, payload?.domain);
     const db = getProjectDb(projectDir);
     return { db, projectName: name, projectDir };
+  };
+
+  const assertActiveWorkspaceForCreate = (projectName, domain) => {
+    const d = String(domain || 'projects').toLowerCase() === 'cases' ? 'cases' : String(domain || 'projects').toLowerCase() === 'study' ? 'study' : 'projects';
+    if (d === 'study') return;
+    const state = typeof readState === 'function' ? readState() : {};
+    const mapKey = d === 'cases' ? 'caseStatuses' : 'projectStatuses';
+    const statusMap = state?.[mapKey] && typeof state[mapKey] === 'object' ? state[mapKey] : {};
+    const normalize = typeof normalizeProjectStatus === 'function' ? normalizeProjectStatus : (v) => String(v || 'active').toLowerCase();
+    const status = normalize(statusMap[projectName] || 'active');
+    if (status !== 'active') {
+      const label = d === 'cases' ? '案件' : '项目';
+      throw new Error(`${label}「${projectName}」当前状态为 ${status}，不能新增知识碎片。`);
+    }
   };
 
   const emit = (projectName, changeType, id) => {
@@ -277,6 +293,7 @@ export function registerKnowledgeIpc({
   // ===== Create =====
   ipcMain.handle('knowledge/create', async (_evt, payload) => {
     const { db, projectName, projectDir } = getDb(payload);
+    assertActiveWorkspaceForCreate(projectName, payload?.domain);
     const type = String(payload?.type || 'snippet');
     const now = new Date();
     const stamp = formatStamp(now);

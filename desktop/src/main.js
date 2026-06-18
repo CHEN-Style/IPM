@@ -2377,9 +2377,11 @@ app.whenReady().then(() => {
     ipcMain: guardedIpcMain,
     dialog,
     shell,
+    readState,
     sanitizeProjectName,
     normalizeRelPathPosix,
     normalizeWorkspaceDomain,
+    normalizeProjectStatus,
     getWorkspaceRoot,
     getStudyRoot,
     STUDY_WORKSPACE_NAME,
@@ -2536,6 +2538,8 @@ app.whenReady().then(() => {
   registerKnowledgeIpc({
     ipcMain,
     clipboardImageCache,
+    readState,
+    normalizeProjectStatus,
     getWorkspaceDirOrThrow,
     getProjectDb,
     ensureProjectStructure,
@@ -2558,6 +2562,8 @@ app.whenReady().then(() => {
 
   registerFloatingIpc({
     ipcMain: guardedIpcMain,
+    readState,
+    normalizeProjectStatus,
     getWorkspaceDirOrThrow,
     sanitizeFileName,
     ensureTempDir,

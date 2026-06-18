@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>中台 AI 分类 UIUX 方案对比</title>
+  <style>
+    :root {
+      --brand: #3e4b9c;
+      --brand-soft: #eceef7;
+      --brand-line: #d8dbed;
+      --ink: #0f172a;
+      --ink-2: #334155;
+      --muted: #64748b;
+      --muted-2: #94a3b8;
+      --line: #e2e8f0;
+      --line-soft: #eef2f7;
+      --bg: #f4f6fb;
+      --paper: #ffffff;
+      --amber: #d97706;
+      --amber-soft: #fff7ed;
+      --green: #059669;
+      --green-soft: #ecfdf5;
+      --red: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px 28px 64px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 0%, rgba(62,75,156,0.08), transparent 28%),
+        linear-gradient(180deg, #fbfcff 0%, var(--bg) 100%);
+    }
+    header { max-width: 1180px; margin: 0 auto 24px; }
+    h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: -0.02em; }
+    .sub { margin: 0; max-width: 860px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+    .grid {
+      max-width: 1180px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+      gap: 22px;
+    }
+    .panel {
+      background: rgba(255,255,255,0.9);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 18px 42px -34px rgba(15,23,42,0.35);
+      overflow: hidden;
+    }
+    .panel-head {
+      padding: 15px 16px 12px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .panel-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 750; }
+    .panel-desc { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .badge {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--brand);
+      background: var(--brand-soft);
+      border: 1px solid var(--brand-line);
+      border-radius: 999px;
+      padding: 2px 7px;
+    }
+    .preview { padding: 16px; }
+    svg { display: block; }
+    button {
+      font: inherit;
+      border: none;
+      background: none;
+      cursor: default;
+    }
+    .btn {
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 10px;
+      border-radius: 9px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+    }
+    .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+    .btn.green { background: var(--green); border-color: var(--green); color: #fff; }
+    .btn.ghost { background: #fff; color: var(--muted); }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 23px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+    }
+    .pill.amber { color: var(--amber); background: var(--amber-soft); border-color: #fed7aa; }
+    .pill.green { color: var(--green); background: var(--green-soft); border-color: #bbf7d0; }
+    .pill.brand { color: var(--brand); background: var(--brand-soft); border-color: var(--brand-line); }
+    .iconbox {
+      width: 34px;
+      height: 34px;
+      border-radius: 11px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: none;
+      background: var(--brand-soft);
+      border: 1px solid var(--brand-line);
+      color: var(--brand);
+    }
+    .muted { color: var(--muted); }
+    .tiny { font-size: 11px; color: var(--muted-2); }
+
+    /* A compact command bar */
+    .classify-a {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .a-top {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .a-main { min-width: 0; flex: 1; }
+    .a-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; font-weight: 760; }
+    .a-sub { margin-top: 3px; color: var(--muted-2); font-size: 11px; }
+    .pipeline { display: inline-flex; align-items: center; gap: 6px; }
+    .stage { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; font-weight: 700; }
+    .stage .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
+    .stage.active .dot { background: var(--brand); box-shadow: 0 0 0 4px rgba(62,75,156,0.10); }
+    .stage.done .dot { background: var(--green); }
+    .a-body { padding: 10px 12px 12px; background: #fbfcff; }
+    .group-card {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 13px;
+      overflow: hidden;
+    }
+    .group-card + .group-card { margin-top: 9px; }
+    .group-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 11px;
+    }
+    .folder { min-width: 0; flex: 1; }
+    .folder-name { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 750; color: var(--ink-2); }
+    .folder-preview { margin-top: 3px; color: var(--muted-2); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .items { border-top: 1px solid var(--line-soft); }
+    .item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 11px;
+      border-top: 1px solid #f5f7fb;
+    }
+    .item:first-child { border-top: none; }
+    .file-name { font-size: 12px; font-weight: 650; color: var(--ink-2); }
+    .path { margin-top: 2px; color: var(--muted-2); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .actions { display: inline-flex; align-items: center; gap: 7px; }
+
+    /* B side rail */
+    .classify-b {
+      display: grid;
+      grid-template-columns: 170px minmax(0, 1fr);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
+      overflow: hidden;
+      min-height: 330px;
+    }
+    .rail {
+      padding: 14px 12px;
+      background: linear-gradient(180deg, #f8fafc 0%, #f2f5fb 100%);
+      border-right: 1px solid var(--line);
+    }
+    .rail-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 780; }
+    .rail-stats { display: grid; gap: 8px; margin-top: 14px; }
+    .stat {
+      padding: 9px 10px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.78);
+      border: 1px solid rgba(226,232,240,0.9);
+    }
+    .stat-num { font-size: 20px; line-height: 1; font-weight: 800; color: var(--brand); }
+    .stat-label { margin-top: 4px; font-size: 11px; color: var(--muted); }
+    .b-content { padding: 12px; }
+    .b-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .folder-chip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+    .folder-chip + .folder-chip { margin-top: 8px; }
+    .chip-name { min-width: 0; font-size: 12.5px; font-weight: 750; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* C calm empty/done state */
+    .classify-c {
+      border: 1px solid #bbf7d0;
+      border-radius: 16px;
+      background: linear-gradient(180deg, #ffffff 0%, #f6fffb 100%);
+      padding: 18px;
+    }
+    .done-row { display: flex; gap: 13px; align-items: flex-start; }
+    .done-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--green-soft);
+      border: 1px solid #bbf7d0;
+      color: var(--green);
+      flex: none;
+    }
+    .done-title { font-size: 14px; font-weight: 800; color: #064e3b; }
+    .done-sub { margin-top: 4px; color: #64748b; font-size: 12px; line-height: 1.6; }
+    .done-actions { margin-top: 13px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* D integrated slim banner */
+    .classify-d {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .d-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: #fff;
+    }
+    .d-bar .iconbox { width: 30px; height: 30px; border-radius: 10px; }
+    .d-title { font-size: 13px; font-weight: 780; }
+    .d-groups {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      border-top: 1px solid var(--line-soft);
+      background: #fbfcff;
+    }
+    .d-group {
+      min-width: 0;
+      padding: 10px 12px;
+      border-right: 1px solid var(--line-soft);
+    }
+    .d-group:last-child { border-right: none; }
+    .d-group b { display: block; font-size: 12px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .d-group span { display: block; margin-top: 3px; font-size: 11px; color: var(--muted-2); }
+
+    @media (max-width: 760px) {
+      body { padding: 22px 14px 44px; }
+      .grid { grid-template-columns: 1fr; }
+      .classify-b { grid-template-columns: 1fr; }
+      .rail { border-right: none; border-bottom: 1px solid var(--line); }
+      .d-groups { grid-template-columns: 1fr; }
+      .d-group { border-right: none; border-bottom: 1px solid var(--line-soft); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>中台 AI 分类 UIUX 方案对比</h1>
+    <p class="sub">
+      当前 UI 的问题主要是“暂存区”像临时调试面板，动作密集、层级重、完成后容易出现空下拉。下面设计稿更贴近现有 IPM 轻量卡片风格，并把“处理中 / 待接受 / 已完成空态”分开呈现。
+    </p>
+  </header>
+
+  <main class="grid">
+    <section class="panel">
+      <div class="panel-head">
+        <div class="panel-title">方案 A · 智能分类收件箱 <span class="badge">推荐</span></div>
+        <p class="panel-desc">保留横幅位置，但改成“分类收件箱”语义：顶部状态 + 文件夹建议卡片 + 轻量动作。适合直接替换当前 AIGhostOverview。</p>
+      </div>
+      <div class="preview">
+        <div class="classify-a">
+          <div class="a-top">
+            <div class="iconbox">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2Z"/></svg>
+            </div>
+            <div class="a-main">
+              <div class="a-title">
+                AI 分类收件箱
+                <span class="pill amber">待处理 8</span>
+                <span class="pipeline">
+                  <span class="stage done"><span class="dot"></span>排队 0</span>
+                  <span class="stage active"><span class="dot"></span>分类中 1</span>
+                  <span class="stage done"><span class="dot"></span>已产出 8</span>
+                </span>
+              </div>
+              <div class="a-sub">AI 已把 temp 中的文件归入 3 个建议文件夹，确认后会移动到对应位置。</div>
+            </div>
+            <div class="actions">
+              <button class="btn green">全部接受</button>
+              <button class="btn ghost">全部放弃</button>
+            </div>
+          </div>
+          <div class="a-body">
+            <div class="group-card">
+              <div class="group-row">
+                <div class="folder">
+                  <div class="folder-name">
+                    调研研究 <span class="pill amber">4</span>
+                  </div>
+                  <div class="folder-preview">访谈纪要.docx，竞品截图.png，市场数据.xlsx 等</div>
+                </div>
+                <div class="actions">
+                  <button class="btn ghost">进入</button>
+                  <button class="btn green">接受</button>
+                </div>
+              </div>
+              <div class="items">
+                <div class="item">
+                  <div><div class="file-name">访谈纪要.docx</div><div class="path">temp/访谈纪要.docx → 调研研究/</div></div>
+                  <div class="actions"><button class="btn green">接受</button><button class="btn ghost">过程</button></div>
+                </div>
+                <div class="item">
+                  <div><div class="file-name">竞品截图.png</div><div class="path">temp/竞品截图.png → 调研研究/</div></div>
+                  <div class="actions"><button class="btn green">接受</button><button class="btn ghost">过程</button></div>
+                </div>
+              </div>
+            </div>
+            <div class="group-card">
+              <div class="group-row">
+                <div class="folder"><div class="folder-name">收到资料 <span class="pill amber">3</span></div><div class="folder-preview">客户原始资料.zip，附件清单.pdf 等</div></div>
+                <div class="actions"><button class="btn ghost">进入</button><button class="btn green">接受</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div class="panel-title">方案 B · 左侧状态栏 + 右侧建议</div>
+        <p class="panel-desc">更像中台任务面板：左侧汇总状态，右侧只列出建议文件夹。信息更稳，但占用高度略大。</p>
+      </div>
+      <div class="preview">
+        <div class="classify-b">
+          <div class="rail">
+            <div class="rail-title">
+              <span class="iconbox" style="width:30px;height:30px;border-radius:10px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3v4M3 5h4M19 17v4M17 19h4M11 5l2 5 5 2-5 2-2 5-2-5-5-2 5-2Z"/></svg>
+              </span>
+              AI 分类
+            </div>
+            <div class="rail-stats">
+              <div class="stat"><div class="stat-num">8</div><div class="stat-label">待确认建议</div></div>
+              <div class="stat"><div class="stat-num">3</div><div class="stat-label">目标文件夹</div></div>
+              <div class="stat"><div class="stat-num">1</div><div class="stat-label">仍在分类</div></div>
+            </div>
+          </div>
+          <div class="b-content">
+            <div class="b-toolbar">
+              <span class="pill brand">建议按文件夹批量处理</span>
+              <div class="actions"><button class="btn green">全部接受</button><button class="btn ghost">全部放弃</button></div>
+            </div>
+            <div class="folder-chip"><span class="chip-name">调研研究</span><span class="pill amber">4 个</span><div class="actions"><button class="btn ghost">查看</button><button class="btn green">接受</button></div></div>
+            <div class="folder-chip"><span class="chip-name">收到资料</span><span class="pill amber">3 个</span><div class="actions"><button class="btn ghost">查看</button><button class="btn green">接受</button></div></div>
+            <div class="folder-chip"><span class="chip-name">过程文档</span><span class="pill amber">1 个</span><div class="actions"><button class="btn ghost">查看</button><button class="btn green">接受</button></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div class="panel-title">方案 C · 完成空态（修复空下拉）</div>
+        <p class="panel-desc">用于“pending 已清空但 classify tracker 尚未 auto clear”的窗口期：不显示空下拉，而显示明确完成态，可手动收起。</p>
+      </div>
+      <div class="preview">
+        <div class="classify-c">
+          <div class="done-row">
+            <div class="done-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M20 6 9 17l-5-5"/></svg>
+            </div>
+            <div>
+              <div class="done-title">本轮 AI 分类已处理完成</div>
+              <div class="done-sub">暂无待接受的分类建议。系统仍会保留分类完成状态一小段时间用于状态回放，但不再显示空列表。</div>
+              <div class="done-actions">
+                <button class="btn primary">收起分类状态</button>
+                <button class="btn ghost">查看分类过程</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div class="panel-title">方案 D · 轻量进度条横幅</div>
+        <p class="panel-desc">最小占用空间：默认只展示摘要，展开后用横向文件夹摘要卡，而不是深层列表。适合文件较少时。</p>
+      </div>
+      <div class="preview">
+        <div class="classify-d">
+          <div class="d-bar">
+            <div class="iconbox">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2Z"/></svg>
+            </div>
+            <div style="min-width:0;flex:1;">
+              <div class="d-title">AI 已生成 8 条分类建议</div>
+              <div class="tiny">3 个目标文件夹 · 1 个文件仍在分类</div>
+            </div>
+            <div class="actions"><button class="btn green">全部接受</button><button class="btn ghost">展开</button></div>
+          </div>
+          <div class="d-groups">
+            <div class="d-group"><b>调研研究</b><span>4 个建议</span></div>
+            <div class="d-group"><b>收到资料</b><span>3 个建议</span></div>
+            <div class="d-group"><b>过程文档</b><span>1 个建议</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -3,6 +3,8 @@ import path from 'node:path';
 
 export function registerFloatingIpc({
   ipcMain,
+  readState,
+  normalizeProjectStatus,
   getWorkspaceDirOrThrow,
   sanitizeFileName,
   ensureTempDir,
@@ -18,9 +20,23 @@ export function registerFloatingIpc({
 }) {
   if (!ipcMain) throw new Error('registerFloatingIpc: ipcMain is required');
 
+  const getTargetStatus = (name, domain) => {
+    if (domain === 'study') return 'active';
+    const state = typeof readState === 'function' ? readState() : {};
+    const mapKey = domain === 'cases' ? 'caseStatuses' : 'projectStatuses';
+    const statusMap = state?.[mapKey] && typeof state[mapKey] === 'object' ? state[mapKey] : {};
+    const normalize = typeof normalizeProjectStatus === 'function' ? normalizeProjectStatus : (v) => String(v || 'active').toLowerCase();
+    return normalize(statusMap[name] || 'active');
+  };
+
   // ===== Floating: file copy to temp (no business indexing yet) =====
   ipcMain.handle('floating/copyToTemp', async (_evt, payload) => {
     const { name: projectName, projectDir, domain } = getWorkspaceDirOrThrow(payload?.projectName, payload?.domain);
+    const targetStatus = getTargetStatus(projectName, domain);
+    if (targetStatus !== 'active') {
+      const label = domain === 'cases' ? '案件' : '项目';
+      throw new Error(`${label}「${projectName}」当前状态为 ${targetStatus}，悬浮窗只允许向 ACTIVE 状态写入文件。`);
+    }
     const srcPath = String(payload?.srcPath ?? '');
     if (!srcPath) throw new Error('源文件路径不能为空');
     if (!fs.existsSync(srcPath)) throw new Error('源文件不存在');

@@ -1050,7 +1050,15 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
           style split — left folder tree (nav pane) + right file list. */}
       <div className="flex-1 flex flex-col min-h-0">
         <AIGhostOverview
-          show={!isRoot && (showOverviewBar || pipelineState.isActive)}
+          show={
+            !isRoot && (
+              showOverviewBar
+              || (pipelineState.queued?.length || 0) > 0
+              || (pipelineState.classifying?.length || 0) > 0
+              || (pipelineState.classified?.length || 0) > 0
+              || (pipelineState.failed?.length || 0) > 0
+            )
+          }
           overviewOpen={overviewOpen}
           pendingGhostCount={pendingGhostCount}
           pendingGhostFolderCount={pendingGhostFolderCount}
@@ -1069,6 +1077,9 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
           onViewTrace={openTrace}
           pipelineQueued={pipelineState.queued}
           pipelineClassifying={pipelineState.classifying}
+          pipelineClassified={pipelineState.classified}
+          pipelineFailed={pipelineState.failed}
+          onClearCompleted={pipelineState.clearCompleted}
         />
 
         <div className="flex-1 flex min-h-0">

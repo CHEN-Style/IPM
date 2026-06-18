@@ -52,6 +52,26 @@ export function registerProjectsIpc({
     };
   };
 
+  const getProjectStatusFromState = (state, name) => {
+    const statusMap = state?.projectStatuses && typeof state.projectStatuses === 'object' ? state.projectStatuses : {};
+    return normalizeProjectStatus(statusMap[name] || 'active');
+  };
+
+  const clearCurrentProjectIfStale = (state) => {
+    const current = sanitizeProjectName(state?.currentProject);
+    if (!current) {
+      if (state.currentProject) state.currentProject = null;
+      return null;
+    }
+    const projDir = path.join(getProjectsRoot(), current);
+    if (!fs.existsSync(projDir) || getProjectStatusFromState(state, current) !== 'active') {
+      state.currentProject = null;
+      return null;
+    }
+    if (state.currentProject !== current) state.currentProject = current;
+    return current;
+  };
+
   ipcMain.handle('projects/list', async () => {
     const root = getProjectsRoot();
     if (!fs.existsSync(root)) {
@@ -122,6 +142,9 @@ export function registerProjectsIpc({
     const state = readState();
     state.projectStatuses = state.projectStatuses && typeof state.projectStatuses === 'object' ? state.projectStatuses : {};
     state.projectStatuses[name] = status;
+    if (status !== 'active' && state.currentProject === name) {
+      state.currentProject = null;
+    }
     writeState(state);
     return { ok: true, name, status };
   });
@@ -213,7 +236,11 @@ export function registerProjectsIpc({
   });
 
   ipcMain.handle('projects/getCurrent', async () => {
-    return readState().currentProject ?? null;
+    const state = readState();
+    const before = state.currentProject ?? null;
+    const current = clearCurrentProjectIfStale(state);
+    if (current !== before) writeState(state);
+    return current;
   });
 
   ipcMain.handle('projects/setCurrent', async (_evt, payload) => {
@@ -222,6 +249,9 @@ export function registerProjectsIpc({
     const projDir = path.join(getProjectsRoot(), name);
     if (!fs.existsSync(projDir)) throw new Error(`项目不存在：${name}`);
     const state = readState();
+    if (getProjectStatusFromState(state, name) !== 'active') {
+      throw new Error(`项目「${name}」不是 ACTIVE 状态，不能设为当前项目。`);
+    }
     state.currentProject = name;
     writeState(state);
     return { ok: true, currentProject: name };

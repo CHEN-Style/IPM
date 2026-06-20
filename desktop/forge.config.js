@@ -136,6 +136,8 @@ module.exports = {
     asar: false,
     icon: './assets/icon',
     rebuild: false,
+    appBundleId: 'com.ipm.app',
+    appCategoryType: 'public.app-category.productivity',
   },
   rebuildConfig: {
     onlyModules: [],
@@ -229,41 +231,15 @@ module.exports = {
   },
   makers: [
     {
-      name: '@electron-forge/maker-wix',
+      name: '@electron-forge/maker-dmg',
       config: {
         name: 'IPM',
-        manufacturer: 'IPM Team',
-        description: 'Intelligent Project Manager - AI-driven knowledge and project management',
-        icon: './assets/icon.ico',
-        ui: {
-          chooseDirectory: true,
-        },
-        beforeCreate: (creator) => {
-          // WiX defaults the MSI database to code page 1252. Our packaged
-          // app intentionally includes user-facing Chinese docs / skill
-          // assets, so generated File/@Name values can contain CJK
-          // characters. Force UTF-8 at the Product level before the WXS is
-          // generated; otherwise light.exe fails with LGHT0311.
-          if (typeof creator.wixTemplate === 'string' && !/Codepage=/.test(creator.wixTemplate)) {
-            creator.wixTemplate = creator.wixTemplate.replace(
-              'Language="{{Language}}">',
-              'Language="{{Language}}"\n           Codepage="65001">',
-            );
-          }
-        },
+        format: 'ULFO',
       },
     },
     {
       name: '@electron-forge/maker-zip',
       platforms: ['darwin'],
-    },
-    {
-      name: '@electron-forge/maker-deb',
-      config: {},
-    },
-    {
-      name: '@electron-forge/maker-rpm',
-      config: {},
     },
   ],
   plugins: [

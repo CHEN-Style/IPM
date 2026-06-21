@@ -428,6 +428,7 @@ V1 时做过的响应式改造（RootTable/EntryTable/HeaderBar/MyDataPage）已
 2. `npm start` 启动：
    - 主窗口标题栏交通灯位置正确、原生菜单可用。
    - 悬浮窗 / 气泡窗显示正常，从访达拖文件可放入悬浮窗。
+   - macOS 三指左右滑切换 Space 后，悬浮窗 / 气泡窗仍保持可见。
    - 系统托盘图标显示与右键菜单可用。
    - 全局快捷键 ⌘⇧Space 切换中台/悬浮。
 3. 功能验证：
@@ -455,6 +456,7 @@ V1 时做过的响应式改造（RootTable/EntryTable/HeaderBar/MyDataPage）已
   - `src/ui/components/ProjectManager.jsx`、`project-manager/HeaderBar.jsx`：`Windows-explorer style` 注释改为 `file-browser style`。
   - `src/ui/components/floating-knowclaw/FloatingInput.jsx`：`setAlwaysOnTop's screen-saver level` 失效注释改为 `floating level`（与 B3/B4 实际改动一致）。
 - **R2.3 Skill 文档术语**：`Agent/pi-runtime/skills/web-artifacts-builder/SKILL.md` 把用户可见的「在文件管理器中打开工作空间」改为「在访达中打开工作空间」。该文档内的 Windows Node 安装建议属跨平台说明，按计划保留。
+- **R2.4 macOS Spaces 悬浮体验**：macOS 三指左右滑会切换 Space，普通悬浮窗默认只属于创建它的 Space，导致切到其他桌面后用户体感上“悬浮窗不跟随”。`src/main.js` 给悬浮窗和气泡窗统一加 `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })`，复用窗口时也重新保障；`src/main/ipc/bubble.js` 在 `bubble/show` 前补一次 best-effort 设置，确保 AI 气泡也跟随所有 Space。
 
 ### H2. 待 mac 本机执行（不可在 Windows 替代）
 

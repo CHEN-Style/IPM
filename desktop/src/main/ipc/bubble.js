@@ -61,6 +61,16 @@ export function registerBubbleIpc({
       ocrText: typeof ocrText === 'string' ? ocrText : '',
     });
     repositionBubble();
+    if (process.platform === 'darwin') {
+      try {
+        bw.setVisibleOnAllWorkspaces(true, {
+          visibleOnFullScreen: true,
+          skipTransformProcessType: true,
+        });
+      } catch {
+        // Best effort: the bubble can still show on the current Space.
+      }
+    }
     if (!bw.isVisible()) bw.show();
     return { ok: true };
   });

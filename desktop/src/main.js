@@ -1917,10 +1917,26 @@ const createMainWindow = () => {
   mainWindowRef.current = mainWindow;
 };
 
+const keepFloatingWindowAcrossMacSpaces = (win) => {
+  if (process.platform !== 'darwin' || !win || win.isDestroyed()) return;
+  try {
+    // macOS Spaces are separate workspaces. Without this, the floating panel is
+    // only visible on the Space where it was created, so three-finger swipes
+    // make it feel "left behind" on another desktop.
+    win.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
+  } catch (err) {
+    console.warn('[IPM] setVisibleOnAllWorkspaces failed:', err?.message || err);
+  }
+};
+
 const createFloatingWindow = () => {
   // G1.1a: 实例存活则直接复用 show + focus，避免重建带来的「正在加载目标...」闪烁
   // 与内部状态清零。watcher 依赖 show/hide 事件，复用路径同样会触发 startClipboardWatcher。
   if (floatingWindow && !floatingWindow.isDestroyed()) {
+    keepFloatingWindowAcrossMacSpaces(floatingWindow);
     if (!floatingWindow.isVisible()) floatingWindow.show();
     floatingWindow.focus();
     return floatingWindow;
@@ -1946,6 +1962,7 @@ const createFloatingWindow = () => {
   });
 
   floatingWindow.setAlwaysOnTop(true, 'floating');
+  keepFloatingWindowAcrossMacSpaces(floatingWindow);
 
   loadRenderer(floatingWindow, 'floating');
 
@@ -2000,7 +2017,10 @@ const createFloatingWindow = () => {
 // a large "speech bubble" adjacent to the floating window. Created
 // lazily on first `bubble/show` and reused via show/hide afterwards.
 const createBubbleWindow = () => {
-  if (bubbleWindow && !bubbleWindow.isDestroyed()) return bubbleWindow;
+  if (bubbleWindow && !bubbleWindow.isDestroyed()) {
+    keepFloatingWindowAcrossMacSpaces(bubbleWindow);
+    return bubbleWindow;
+  }
   bubbleWindow = new BrowserWindow({
     width: 420,
     height: 430,
@@ -2021,6 +2041,7 @@ const createBubbleWindow = () => {
     },
   });
   bubbleWindow.setAlwaysOnTop(true, 'floating');
+  keepFloatingWindowAcrossMacSpaces(bubbleWindow);
   loadRenderer(bubbleWindow, 'bubble');
   bubbleWindow.on('closed', () => {
     bubbleWindow = null;

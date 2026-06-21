@@ -5,6 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>KnowVault</title>
     <script type="text/javascript">
+      (function () {
+        try {
+          var ui = new URLSearchParams(window.location.search).get('ui');
+          if (ui === 'floating' || ui === 'bubble') {
+            document.documentElement.classList.add('ui-transparent-window');
+          }
+        } catch (_) {
+          // Keep the normal main-window background if URL parsing is unavailable.
+        }
+      })();
+    </script>
+    <script type="text/javascript">
       (function(c,l,a,r,i,t,y){
         c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
         t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
@@ -12,14 +24,24 @@
       })(window, document, "clarity", "script", "w8eef5jz7i");
     </script>
     <style>
+      html,
+      body,
+      #root {
+        min-height: 100%;
+      }
       body {
         font-family: 'Inter', sans-serif;
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
         background-color: #0f172a; /* Deep slate baseline */
       }
-      /* Floating window should NOT have the mid-platform deep background */
-      body.ui-floating {
+      /* Floating/bubble windows must stay fully transparent on macOS. The
+         html class is set before React mounts, avoiding a black first frame. */
+      html.ui-transparent-window,
+      html.ui-transparent-window body,
+      html.ui-transparent-window #root,
+      body.ui-floating,
+      body.ui-bubble {
         background-color: transparent !important;
       }
       /* Custom scrollbar for professional look */

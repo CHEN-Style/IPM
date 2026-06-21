@@ -150,7 +150,7 @@ const INPUT_STYLE = {
   fontSize: 13, color: C.t1, outline: 'none', background: '#fff',
 };
 
-const MONO = '"SF Mono", "JetBrains Mono", Consolas, monospace';
+const MONO = '"SF Mono", "JetBrains Mono", Menlo, monospace';
 
 function statusHealth(ws) {
   if (ws.status === 'archived') return { tone: 'warn', text: '已归档 · 只读' };

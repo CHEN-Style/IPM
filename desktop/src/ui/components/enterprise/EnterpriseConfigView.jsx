@@ -269,8 +269,8 @@ const EnterpriseConfigView = () => {
   return (
     <>
       {/* ── 过滤行 ── */}
-      <div className="flex items-center gap-2.5 mt-[18px] mb-3.5">
-        <div className="inline-flex rounded-[7px] p-0.5" style={{ background: '#eef0f4' }}>
+      <div className="flex items-center flex-wrap gap-2.5 gap-y-2 mt-[18px] mb-3.5">
+        <div className="inline-flex rounded-[7px] p-0.5 shrink-0" style={{ background: '#eef0f4' }}>
           <button type="button" className="px-3 py-[5px] rounded-md text-[12.5px]"
             style={{ background: '#fff', color: '#1e293b', fontWeight: 500, boxShadow: '0 1px 2px rgba(15,23,42,0.08)' }}>
             AI 配置 {templates.length}
@@ -280,14 +280,14 @@ const EnterpriseConfigView = () => {
             <span className="text-[10px] font-medium px-1.5 py-px rounded-full" style={{ background: '#f1f5f9', color: '#94a3b8' }}>规划中</span>
           </span>
         </div>
-        <div className="flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5" style={{ background: '#fff', border: `1px solid ${BORDER}`, width: 220 }}>
+        <div className="flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 flex-1 min-w-[140px] max-w-[220px]" style={{ background: '#fff', border: `1px solid ${BORDER}` }}>
           <Search size={13} style={{ color: '#94a3b8' }} />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索模板名称或配置码…"
             className="w-full outline-none text-[12.5px] bg-transparent" style={{ color: '#1e293b' }} />
         </div>
         <div className="flex-1" />
         <button type="button" onClick={openCreate}
-          className="flex items-center gap-1.5 px-3.5 py-[7px] rounded-[7px] text-[13px] font-medium text-white transition-colors"
+          className="flex items-center gap-1.5 px-3.5 py-[7px] rounded-[7px] text-[13px] font-medium text-white transition-colors shrink-0 whitespace-nowrap"
           style={{ background: ACCENT }}
           onMouseEnter={(e) => { e.currentTarget.style.background = '#34407e'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = ACCENT; }}>
@@ -313,7 +313,7 @@ const EnterpriseConfigView = () => {
       ) : (
         <>
           {/* ── 统计条 ── */}
-          <div className="flex gap-2.5 mb-[18px]">
+          <div className="flex flex-wrap gap-2.5 mb-[18px] [&>*]:min-w-[120px]">
             {[
               { k: 'AI 配置模板', v: <>{stats.total} <small>· {stats.enabled} 启用</small></> },
               { k: '累计导入', v: <>{stats.imports} <small>次</small></> },
@@ -328,8 +328,8 @@ const EnterpriseConfigView = () => {
           </div>
 
           {/* ── 表格 ── */}
-          <div className="rounded-[10px] overflow-hidden" style={{ background: '#fff', border: `1px solid ${BORDER}` }}>
-            <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+          <div className="rounded-[10px] overflow-x-auto" style={{ background: '#fff', border: `1px solid ${BORDER}` }}>
+            <table className="w-full min-w-[640px]" style={{ borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#fbfcfd' }}>
                   {[['模板', '34%'], ['状态', '11%'], ['配置码', '20%'], ['使用', '13%'], ['过期', '13%'], ['创建人', '13%'], ['', '6%']].map(([h, w], i) => (
@@ -358,7 +358,7 @@ const EnterpriseConfigView = () => {
                       <td className="px-4 py-[11px]" style={{ borderBottom: '1px solid #f1f5f9' }}><StatusTag status={t.status} /></td>
                       <td className="px-4 py-[11px]" style={{ borderBottom: '1px solid #f1f5f9' }}>
                         <span className="inline-flex items-center gap-2 text-[12.5px] font-semibold"
-                          style={{ fontFamily: '"SF Mono", "JetBrains Mono", Consolas, monospace', letterSpacing: '0.03em', color: disabled ? '#94a3b8' : '#1e293b', textDecoration: disabled ? 'line-through' : 'none' }}>
+                          style={{ fontFamily: '"SF Mono", "JetBrains Mono", Menlo, monospace', letterSpacing: '0.03em', color: disabled ? '#94a3b8' : '#1e293b', textDecoration: disabled ? 'line-through' : 'none' }}>
                           {t.code}
                           {!disabled && (
                             <button type="button" title="复制" className="flex transition-colors hover:text-[#3e4b9c]" style={{ color: '#94a3b8' }}
@@ -441,8 +441,8 @@ const EnterpriseConfigView = () => {
       {drawer && (
         <>
           <div className="fixed inset-0 z-[80]" style={{ background: 'rgba(15,23,42,0.18)' }} onClick={() => setDrawer(null)} />
-          <aside className="fixed top-0 right-0 h-screen z-[90] bg-white flex flex-col"
-            style={{ width: 480, boxShadow: '-8px 0 40px rgba(15,23,42,0.12)' }}>
+          <aside className="fixed top-0 right-0 h-screen z-[90] bg-white flex flex-col w-[min(480px,calc(100vw-32px))]"
+            style={{ boxShadow: '-8px 0 40px rgba(15,23,42,0.12)' }}>
             <div className="px-6 pt-5 pb-4" style={{ borderBottom: '1px solid #e8eaf0' }}>
               <h2 className="text-[16px] font-semibold flex items-center gap-2 truncate" style={{ color: '#1e293b' }}>
                 <span className="truncate">{drawer.template.name}</span>
@@ -453,7 +453,7 @@ const EnterpriseConfigView = () => {
               )}
               <div className="flex items-center gap-2 mt-3">
                 <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md text-[12.5px] font-semibold"
-                  style={{ background: '#f1f5f9', color: drawer.template.status === 'active' ? '#1e293b' : '#94a3b8', fontFamily: '"SF Mono", "JetBrains Mono", Consolas, monospace', letterSpacing: '0.04em', textDecoration: drawer.template.status === 'active' ? 'none' : 'line-through' }}>
+                  style={{ background: '#f1f5f9', color: drawer.template.status === 'active' ? '#1e293b' : '#94a3b8', fontFamily: '"SF Mono", "JetBrains Mono", Menlo, monospace', letterSpacing: '0.04em', textDecoration: drawer.template.status === 'active' ? 'none' : 'line-through' }}>
                   {drawer.template.code}
                   <button type="button" title="复制" className="flex hover:text-[#3e4b9c]" style={{ color: '#94a3b8' }} onClick={() => copyCode(drawer.template.code)}>
                     <Copy size={12} />

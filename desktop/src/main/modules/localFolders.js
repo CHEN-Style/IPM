@@ -33,10 +33,13 @@ const normalizeAbsDirPath = (p) => {
   const raw = String(p || '').trim();
   if (!raw) return '';
   const abs = path.resolve(raw);
-  const root = path.parse(abs).root;
-  if (abs === root) return abs; // keep drive root "C:\"
-  return abs.replace(/[\\/]+$/, '');
+  if (abs === '/') return abs; // keep POSIX root "/"
+  return abs.replace(/\/+$/, ''); // only `/` is a path separator on macOS
 };
+
+// macOS preserves case and (on case-sensitive volumes) is case-significant,
+// so we only fold case for dedup/comparison on Windows.
+const pathKey = (abs) => (process.platform === 'win32' ? abs.toLowerCase() : abs);
 
 const getLocalFolderPathsFromState = (state) => {
   const arr = Array.isArray(state?.localFolders) ? state.localFolders : [];
@@ -45,7 +48,7 @@ const getLocalFolderPathsFromState = (state) => {
   for (const p of arr) {
     const abs = normalizeAbsDirPath(p);
     if (!abs) continue;
-    const key = abs.toLowerCase();
+    const key = pathKey(abs);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(abs);
@@ -60,8 +63,7 @@ const setLocalFolderPathsToState = (state, absPaths) => {
 
 const getFolderDisplayName = (absPath) => {
   const abs = String(absPath || '');
-  const root = path.parse(abs).root;
-  if (abs === root) return root; // e.g. "C:\"
+  if (abs === '/') return '/'; // POSIX root
   const base = path.basename(abs);
   return base || abs;
 };
@@ -118,8 +120,8 @@ export const registerLocalFoldersIpc = ({ ipcMain, dialog, getStatePath }) => {
 
     const state = readState();
     const paths = getLocalFolderPathsFromState(state);
-    const key = picked.toLowerCase();
-    if (!paths.some((p) => p.toLowerCase() === key)) {
+    const key = pathKey(picked);
+    if (!paths.some((p) => pathKey(p) === key)) {
       paths.push(picked);
     }
     setLocalFolderPathsToState(state, paths);
@@ -131,7 +133,7 @@ export const registerLocalFoldersIpc = ({ ipcMain, dialog, getStatePath }) => {
     const abs = normalizeAbsDirPath(payload?.path);
     if (!abs) throw new Error('path 不能为空');
     const state = readState();
-    const paths = getLocalFolderPathsFromState(state).filter((p) => p.toLowerCase() !== abs.toLowerCase());
+    const paths = getLocalFolderPathsFromState(state).filter((p) => pathKey(p) !== pathKey(abs));
     setLocalFolderPathsToState(state, paths);
     writeState(state);
     return { ok: true, removedPath: abs, folders: listFolders() };

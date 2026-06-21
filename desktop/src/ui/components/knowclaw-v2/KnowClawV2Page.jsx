@@ -342,7 +342,7 @@ const KnowClawV2Page = ({ currentUser = null }) => {
   // received status yet, so we wait and don't flash.
   //
   // The banner now has a "立即重新检测" button to spare users from
-  // restarting IPM after they install Git for Windows in a separate
+  // restarting IPM after they fix their bash toolchain in a separate
   // window. While the rescan is in flight we briefly disable the
   // button + show a spinner so the user gets feedback.
   const [bashBannerDismissed, setBashBannerDismissed] = useState(false);
@@ -430,10 +430,10 @@ const KnowClawV2Page = ({ currentUser = null }) => {
       <div className="flex-1 min-w-0 flex flex-col">
         {/* U3 + bundled-bash: Git Bash missing banner.
             Visible only when `resolveBashShell()` in the main process
-            couldn't find a system Git, anything on PATH, or the
-            bundled MinGit fallback. The "立即重新检测" button forces
-            a fresh probe so users who just installed Git for Windows
-            don't need to restart IPM. Dismiss is per-session. */}
+            couldn't find a system bash (e.g. /bin/bash) or anything
+            on PATH. The "立即重新检测" button forces a fresh probe so
+            users who just fixed their bash toolchain don't need to
+            restart IPM. Dismiss is per-session. */}
         {showBashBanner && (
           <div
             className="flex items-start gap-3 px-6 py-3 border-b"
@@ -444,16 +444,9 @@ const KnowClawV2Page = ({ currentUser = null }) => {
               <div className="font-semibold mb-0.5">未检测到 bash 解释器</div>
               <div>
                 KnowClaw 的部分 Skill（pdf / docx / pptx / web-artifacts-builder 等）依赖 bash 执行辅助脚本。
-                Windows 用户请安装{' '}
-                <a
-                  href="https://git-scm.com/download/win"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline text-amber-900 hover:text-amber-700"
-                >
-                  Git for Windows
-                </a>
-                ，安装完成后点击「立即重新检测」即可启用，无需重启 IPM。
+                macOS 通常自带 <code className="px-1 rounded bg-amber-100/70">/bin/bash</code>；如仍看到此提示，
+                请检查系统 bash 或命令行工具（可在「终端」运行 <code className="px-1 rounded bg-amber-100/70">xcode-select --install</code>），
+                完成后点击「立即重新检测」即可启用，无需重启 IPM。
               </div>
             </div>
             <button
@@ -1241,7 +1234,7 @@ function WorkspaceBadge({ cwd, isGlobal, onOpenInExplorer }) {
     return (
       <span
         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border bg-slate-50 text-slate-500 border-slate-200"
-        title="工作空间：全局（默认 userfile/ 根目录） — 点击右侧图标在文件资源管理器中打开"
+        title="工作空间：全局（默认 userfile/ 根目录） — 点击右侧图标在访达中打开"
       >
         <Globe size={10} />
         <span>全局</span>
@@ -1250,7 +1243,7 @@ function WorkspaceBadge({ cwd, isGlobal, onOpenInExplorer }) {
             type="button"
             onClick={handleOpen}
             className="ml-0.5 text-slate-400 hover:text-slate-700 transition-colors"
-            title="在文件资源管理器中打开"
+            title="在访达中打开"
           >
             <ExternalLink size={10} />
           </button>
@@ -1264,7 +1257,7 @@ function WorkspaceBadge({ cwd, isGlobal, onOpenInExplorer }) {
   return (
     <span
       className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border bg-amber-50 text-amber-700 border-amber-200 max-w-[200px]"
-      title={`工作空间：${cwd} — 点击右侧图标在文件资源管理器中打开`}
+      title={`工作空间：${cwd} — 点击右侧图标在访达中打开`}
     >
       <Folder size={10} className="shrink-0" />
       <span className="truncate">{name}</span>
@@ -1273,7 +1266,7 @@ function WorkspaceBadge({ cwd, isGlobal, onOpenInExplorer }) {
           type="button"
           onClick={handleOpen}
           className="ml-0.5 text-amber-500 hover:text-amber-800 transition-colors shrink-0"
-          title="在文件资源管理器中打开"
+          title="在访达中打开"
         >
           <ExternalLink size={10} />
         </button>
@@ -1434,7 +1427,7 @@ function WorkspaceSelector({
 
       {open && (
         <div
-          className={`absolute right-0 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden flex flex-col max-h-[480px] ${
+          className={`absolute right-0 w-72 max-w-[calc(100vw-24px)] bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden flex flex-col max-h-[480px] ${
             placement === 'up' ? 'bottom-full mb-2' : 'top-full mt-2'
           }`}
         >
@@ -1529,7 +1522,7 @@ function WorkspaceSelector({
                             onOpenInExplorer(ws.path);
                           }}
                           className="shrink-0 p-0.5 rounded text-slate-300 hover:text-slate-700 hover:bg-slate-200 transition-colors opacity-0 group-hover:opacity-100"
-                          title={`在文件资源管理器中打开 ${ws.path}`}
+                          title={`在访达中打开 ${ws.path}`}
                         >
                           <ExternalLink size={11} />
                         </button>
@@ -1564,10 +1557,10 @@ function WorkspaceSelector({
                   await onOpenInExplorer();
                 }}
                 className="w-full px-3 py-2 flex items-center gap-2 text-left text-xs text-slate-600 hover:bg-slate-100 transition-colors"
-                title="在文件资源管理器中打开当前工作空间文件夹"
+                title="在访达中打开当前工作空间文件夹"
               >
                 <ExternalLink size={12} className="shrink-0 text-slate-500" />
-                <span className="flex-1">在文件资源管理器中打开当前工作空间</span>
+                <span className="flex-1">在访达中打开当前工作空间</span>
               </button>
             )}
             <button

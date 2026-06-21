@@ -212,8 +212,15 @@ module.exports = {
       // `buildPath` here is `<out>/<app>-<platform>-<arch>/resources/app`.
       // We need to write to the sibling `resources/MinGit/`, so we
       // pop up one level.
+      //
+      // macOS / Linux ship a system `/bin/bash`, so the bundled MinGit
+      // (a Windows `bash.exe`) is meaningless there — skip it entirely so
+      // a stray `vendor/MinGit/` checkout can't bloat a mac build with an
+      // unusable Windows binary. See `resolveBashShell()` in
+      // `src/main/ipc/knowclaw.js` (non-win32 short-circuits to /bin/bash).
       const minGitSrc = path.resolve(__dirname, 'vendor', 'MinGit');
-      const minGitHasBash = fs.existsSync(path.join(minGitSrc, 'usr', 'bin', 'bash.exe'));
+      const minGitHasBash = process.platform === 'win32'
+        && fs.existsSync(path.join(minGitSrc, 'usr', 'bin', 'bash.exe'));
       if (minGitHasBash) {
         const resourcesDir = path.dirname(buildPath); // .../resources/
         const minGitDest = path.join(resourcesDir, 'MinGit');
@@ -221,10 +228,14 @@ module.exports = {
           fs.cpSync(minGitSrc, minGitDest, { recursive: true });
           console.log(`[packageAfterCopy] Bundled MinGit copied → ${minGitDest}`);
         }
-      } else {
+      } else if (process.platform === 'win32') {
         console.log(
           `[packageAfterCopy] vendor/MinGit/ not populated — packaged app will rely on system bash. ` +
           `Run \`npm run setup:mingit\` first if you want the bundled fallback.`,
+        );
+      } else {
+        console.log(
+          `[packageAfterCopy] Skipping MinGit bundle on ${process.platform} — uses system /bin/bash.`,
         );
       }
     },

@@ -148,7 +148,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
     enterRelDir,
     goParent,
   } = useExplorerEntries({ isStudy, domainOpts });
-  // Dual-pane (Windows-explorer style): the left folder tree (navigation
+  // Dual-pane (file-browser style): the left folder tree (navigation
   // pane) is always available inside a workspace; this only toggles its
   // visibility. Persisted like other UI prefs (cf. App.jsx ipm.sidebarPinned).
   const [navPaneOpen, setNavPaneOpen] = useState(() => {
@@ -201,7 +201,12 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
   // columns (tree + list + drawer) get cramped; auto-collapse the tree
   // without clobbering the user's stored preference.
   const mainColRef = useRef(null);
-  const [mainColNarrow, setMainColNarrow] = useState(false);
+  const pageRef = useRef(null);
+  // F (responsive): track real pixel widths instead of a single boolean so we
+  // can drive several layout decisions (auto-collapse tree, clamp tree width,
+  // float the sync drawer as an overlay) from one observer.
+  const [mainColW, setMainColW] = useState(null);
+  const [pageW, setPageW] = useState(null);
   const newProjectInputRef = useRef(null);
 
   // Folder tree (left navigation pane). Declared before useGhosts so the
@@ -523,21 +528,43 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
     if (!cloudEligible || !currentBound) setSyncDrawerOpen(false);
   }, [cloudEligible, currentBound, cwd.name]);
 
-  // Observe the main column width so we can auto-collapse the nav pane when
-  // the sync drawer squeezes it on a narrow window (decided value, not the
-  // stored preference).
+  // Observe both the whole page region and the main content column so we can
+  // make container-aware layout decisions (auto-collapse the nav pane, clamp
+  // its width, float the sync drawer) without clobbering stored preferences.
   useEffect(() => {
-    const el = mainColRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return undefined;
-    const ro = new ResizeObserver((obsEntries) => {
-      const w = obsEntries[0]?.contentRect?.width;
-      if (typeof w === 'number') setMainColNarrow(w < 720);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observers = [];
+    const main = mainColRef.current;
+    if (main) {
+      const ro = new ResizeObserver((obs) => {
+        const w = obs[0]?.contentRect?.width;
+        if (typeof w === 'number') setMainColW(w);
+      });
+      ro.observe(main);
+      observers.push(ro);
+    }
+    const page = pageRef.current;
+    if (page) {
+      const ro = new ResizeObserver((obs) => {
+        const w = obs[0]?.contentRect?.width;
+        if (typeof w === 'number') setPageW(w);
+      });
+      ro.observe(page);
+      observers.push(ro);
+    }
+    return () => observers.forEach((ro) => ro.disconnect());
   }, []);
-  const navPaneEffectiveOpen = navPaneOpen && !(syncDrawerOpen && mainColNarrow);
+  // When the whole region is tight, float the sync drawer over the content
+  // instead of squeezing it as a flex sibling (372px would crush the list).
+  const syncOverlay = pageW != null && pageW < 900;
+  // Auto-collapse the folder tree when the main column can't comfortably host
+  // both the tree and a readable file list. Stored `navPaneOpen` is untouched.
+  const navPaneEffectiveOpen = navPaneOpen && !(mainColW != null && mainColW < 560);
   const showNavPane = !isRoot && (isProjectCwd || isLocalCwd) && navPaneEffectiveOpen;
+  // Clamp the (user-resizable) tree width so the file list keeps a usable min.
+  const effectiveNavWidth = mainColW != null
+    ? Math.max(NAV_MIN, Math.min(navPaneWidth, mainColW - 240))
+    : navPaneWidth;
 
   // Dual-pane linkage: whenever the current directory changes (right-pane
   // double-click, breadcrumb, AI overview "进入", search nav), reveal and
@@ -966,6 +993,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
 
   return (
     <div
+      ref={pageRef}
       className="flex-1 flex h-full bg-[#f8f9fb] relative"
       onClick={closeMenu}
       onDragEnter={handlePageDragEnter}
@@ -1046,7 +1074,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
         onCloudChipClick={handleCloudChipClick}
       />
 
-      {/* Content: AI overview banner (full width) above a Windows-explorer
+      {/* Content: AI overview banner (full width) above a file-browser
           style split — left folder tree (nav pane) + right file list. */}
       <div className="flex-1 flex flex-col min-h-0">
         <AIGhostOverview
@@ -1087,7 +1115,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
             <>
             <aside
               className="shrink-0 overflow-y-auto border-r border-slate-200 bg-white/50 py-2 outline-none"
-              style={{ width: navPaneWidth }}
+              style={{ width: effectiveNavWidth }}
               role="tree"
               tabIndex={0}
               onKeyDown={handleNavKeyDown}
@@ -1216,7 +1244,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
       {/* New folder modal */}
       {newFolderOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30" onClick={() => setNewFolderOpen(false)}>
-          <div className="w-[420px] bg-white rounded-xl border border-slate-200 shadow-xl p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="w-[calc(100vw-32px)] max-w-[420px] bg-white rounded-xl border border-slate-200 shadow-xl p-5" onClick={(e) => e.stopPropagation()}>
             <div className="text-sm font-semibold text-slate-800 mb-2">新建文件夹</div>
             <div className="text-xs text-slate-500 mb-3">
               将在目录创建：{cwd.type === 'project' ? `${cwd.name}${newFolderBaseRelPath ? `/${newFolderBaseRelPath}` : ''}` : '-'}
@@ -1256,7 +1284,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
       {/* Rename modal */}
       {renameOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30" onClick={() => setRenameOpen(false)}>
-          <div className="w-[420px] bg-white rounded-xl border border-slate-200 shadow-xl p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="w-[calc(100vw-32px)] max-w-[420px] bg-white rounded-xl border border-slate-200 shadow-xl p-5" onClick={(e) => e.stopPropagation()}>
             <div className="text-sm font-semibold text-slate-800 mb-2">重命名</div>
             <div className="text-xs text-slate-500 mb-3">原名称：{renameOldName}</div>
             <input
@@ -1298,12 +1326,12 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
           onClick={() => setTemplatePickerOpen(false)}
         >
           <div
-            className="w-[520px] bg-white rounded-xl border border-slate-200 shadow-xl p-5"
+            className="w-[calc(100vw-32px)] max-w-[520px] bg-white rounded-xl border border-slate-200 shadow-xl p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="text-sm font-semibold text-slate-800 mb-1">为「{newProjectName}」选择初始结构</div>
             <div className="text-xs text-slate-500 mb-4">创建后可随时增删/重命名文件夹（系统目录除外）。</div>
-            <div className="grid grid-cols-2 gap-3 items-stretch">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-stretch">
               <button
                 type="button"
                 data-track="pm-template-default"
@@ -1356,7 +1384,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
           onClick={() => renameWorkspaceState.step !== 'busy' && closeRenameWorkspace()}
         >
           <div
-            className="w-[520px] bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden"
+            className="w-[calc(100vw-32px)] max-w-[520px] bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             {renameWorkspaceState.step === 'warning' && (
@@ -1529,6 +1557,7 @@ const ProjectManager = ({ domain = 'projects', onBackHome = null, searchNavTarge
     {cloudEligible && currentBound && (
       <SyncDrawer
         open={syncDrawerOpen}
+        overlay={syncOverlay}
         projectName={cwd.name}
         domain={normalizedDomain}
         status={syncStatus}

@@ -258,7 +258,7 @@ const EnterpriseWorkspacesView = () => {
       )}
 
       {/* ── 统计条 ── */}
-      <div className="flex gap-2.5 mt-[18px]">
+      <div className="flex flex-wrap gap-2.5 mt-[18px] [&>*]:min-w-[120px]">
         {[
           { k: '云端项目', v: <>{stats.total} <small>全企业</small></> },
           { k: '正常协作', v: stats.active },
@@ -274,21 +274,21 @@ const EnterpriseWorkspacesView = () => {
       </div>
 
       {/* ── 工具条 ── */}
-      <div className="flex items-center gap-2.5 mt-[18px] mb-3.5">
-        <div className="inline-flex rounded-[7px] p-0.5" style={{ background: '#eef0f4' }}>
+      <div className="flex items-center flex-wrap gap-2.5 gap-y-2 mt-[18px] mb-3.5">
+        <div className="inline-flex rounded-[7px] p-0.5 shrink-0 max-w-full overflow-x-auto no-scrollbar" style={{ background: '#eef0f4' }}>
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.key}
               type="button"
               onClick={() => setStatusFilter(f.key)}
-              className="px-3 py-[5px] rounded-md text-[12.5px] transition-all"
+              className="px-3 py-[5px] rounded-md text-[12.5px] transition-all shrink-0 whitespace-nowrap"
               style={statusFilter === f.key
                 ? { background: '#fff', color: '#1e293b', fontWeight: 500, boxShadow: '0 1px 2px rgba(15,23,42,0.08)' }
                 : { color: '#64748b' }}
             >{f.label} {countByStatus(f.key)}</button>
           ))}
         </div>
-        <div className="flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5" style={{ background: '#fff', border: '1px solid #e8eaf0', width: 220 }}>
+        <div className="flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 flex-1 min-w-[140px] max-w-[220px]" style={{ background: '#fff', border: '1px solid #e8eaf0' }}>
           <Search size={13} style={{ color: '#94a3b8' }} />
           <input
             value={query}
@@ -301,15 +301,15 @@ const EnterpriseWorkspacesView = () => {
         <button
           type="button"
           onClick={() => setDomainFilter((domainFilter + 1) % DOMAIN_FILTERS.length)}
-          className="px-[11px] py-1.5 rounded-[7px] text-[12.5px] transition-colors"
+          className="px-[11px] py-1.5 rounded-[7px] text-[12.5px] transition-colors shrink-0 whitespace-nowrap"
           style={{ background: '#fff', border: '1px solid #e8eaf0', color: domainFilter ? '#3e4b9c' : '#475569' }}
         >类型:{DOMAIN_FILTERS[domainFilter]}</button>
         <div className="flex-1" />
       </div>
 
       {/* ── 项目表格 ── */}
-      <div className="rounded-[10px] overflow-hidden" style={{ background: '#fff', border: '1px solid #e8eaf0' }}>
-        <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+      <div className="rounded-[10px] overflow-x-auto" style={{ background: '#fff', border: '1px solid #e8eaf0' }}>
+        <table className="w-full min-w-[720px]" style={{ borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#fbfcfd' }}>
               {[['项目', '27%'], ['Owner', '15%'], ['成员', '7%'], ['版本', '7%'], ['最近同步', '12%'], ['状态', '12%'], ['风险', '15%'], ['', '5%']].map(([h, w], i) => (
@@ -437,8 +437,8 @@ const EnterpriseWorkspacesView = () => {
       {drawer && (
         <>
           <div className="fixed inset-0 z-[80]" style={{ background: 'rgba(15,23,42,0.18)' }} onClick={() => setDrawer(null)} />
-          <aside className="fixed top-0 right-0 h-screen z-[90] bg-white flex flex-col"
-            style={{ width: 560, boxShadow: '-8px 0 40px rgba(15,23,42,0.12)' }}>
+          <aside className="fixed top-0 right-0 h-screen z-[90] bg-white flex flex-col w-[min(560px,calc(100vw-32px))]"
+            style={{ boxShadow: '-8px 0 40px rgba(15,23,42,0.12)' }}>
             <div className="px-6 pt-5">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3 min-w-0">
@@ -581,8 +581,8 @@ const EnterpriseWorkspacesView = () => {
                       <div key={v.id} className="flex items-center gap-3 py-2.5" style={{ borderBottom: '1px solid #f1f5f9' }}>
                         <span className="text-[12px] font-semibold px-2 py-0.5 rounded shrink-0"
                           style={v.type === 'milestone'
-                            ? { background: '#fef3c7', color: '#b45309', fontFamily: '"SF Mono", Consolas, monospace' }
-                            : { background: 'rgba(62,75,156,0.08)', color: '#3e4b9c', fontFamily: '"SF Mono", Consolas, monospace' }}>
+                            ? { background: '#fef3c7', color: '#b45309', fontFamily: '"SF Mono", Menlo, monospace' }
+                            : { background: 'rgba(62,75,156,0.08)', color: '#3e4b9c', fontFamily: '"SF Mono", Menlo, monospace' }}>
                           v{v.versionNumber}{v.type === 'milestone' ? ' ★' : ''}
                         </span>
                         <span className="flex-1 text-[12.5px] truncate" style={{ color: '#475569' }}>

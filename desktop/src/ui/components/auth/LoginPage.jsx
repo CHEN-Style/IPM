@@ -148,7 +148,7 @@ const LoginPage = ({ onOfflineChosen }) => {
       {/* Drag strip so the frameless window stays movable */}
       <div className="absolute top-0 left-0 right-0 h-9" style={{ WebkitAppRegion: 'drag' }} />
 
-      <div className="relative z-10 w-[360px]">
+      <div className="relative z-10 w-full max-w-[360px] px-4">
         {/* Brand */}
         <div className="flex flex-col items-center mb-8">
           <div className="w-14 h-14 rounded-xl overflow-hidden mb-4" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>

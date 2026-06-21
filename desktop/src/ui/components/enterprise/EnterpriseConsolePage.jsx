@@ -279,7 +279,7 @@ const EnterpriseConsolePage = () => {
 
   return (
     <div className="h-full overflow-y-auto" style={{ background: '#f8f9fb' }}>
-      <div className="mx-auto" style={{ maxWidth: 1080, padding: '28px 36px 60px' }}>
+      <div className="mx-auto" style={{ maxWidth: 1080, padding: '28px clamp(12px,4vw,36px) 60px' }}>
 
         {/* ── 页头 ── */}
         <div className="flex items-start justify-between">
@@ -315,7 +315,7 @@ const EnterpriseConsolePage = () => {
         </div>
 
         {/* ── 顶部 Tab ── */}
-        <nav className="flex items-center gap-[22px] mt-[22px]" style={{ borderBottom: '1px solid #e8eaf0' }}>
+        <nav className="flex items-center gap-[22px] mt-[22px] overflow-x-auto no-scrollbar" style={{ borderBottom: '1px solid #e8eaf0' }}>
           {[
             { key: 'members', label: '成员', count: members.length || null },
             { key: 'workspaces', label: '云端项目', count: org?.workspaceCount ?? null },
@@ -326,7 +326,7 @@ const EnterpriseConsolePage = () => {
             <div
               key={t.key}
               onClick={() => setActiveTab(t.key)}
-              className="flex items-center gap-1.5 pb-[11px] pt-[9px] text-[13px] cursor-pointer select-none transition-colors"
+              className="flex items-center gap-1.5 pb-[11px] pt-[9px] text-[13px] cursor-pointer select-none transition-colors shrink-0 whitespace-nowrap"
               style={activeTab === t.key
                 ? { color: '#1e293b', fontWeight: 600, borderBottom: '2px solid #3e4b9c', marginBottom: -1 }
                 : { color: '#64748b', borderBottom: '2px solid transparent', marginBottom: -1 }}
@@ -371,7 +371,7 @@ const EnterpriseConsolePage = () => {
         ) : (
           <>
             {/* ── 统计条 ── */}
-            <div className="flex gap-2.5 mt-[18px]">
+            <div className="flex flex-wrap gap-2.5 mt-[18px] [&>*]:min-w-[120px]">
               {[
                 { k: '活跃成员', v: <>{stats.active} <small>/ {stats.total}</small></> },
                 { k: '管理员', v: <>{stats.admins} <small>含 {stats.owners} 位 owner</small></> },
@@ -387,8 +387,8 @@ const EnterpriseConsolePage = () => {
             </div>
 
             {/* ── 工具条 ── */}
-            <div className="flex items-center gap-2.5 mt-[18px] mb-3.5">
-              <div className="inline-flex rounded-[7px] p-0.5" style={{ background: '#eef0f4' }}>
+            <div className="flex items-center flex-wrap gap-2.5 gap-y-2 mt-[18px] mb-3.5">
+              <div className="inline-flex rounded-[7px] p-0.5 shrink-0" style={{ background: '#eef0f4' }}>
                 {[['members', `成员`], ['invites', `邀请码 ${invites.length}`]].map(([key, label]) => (
                   <button
                     key={key}
@@ -403,7 +403,7 @@ const EnterpriseConsolePage = () => {
               </div>
               {view === 'members' && (
                 <>
-                  <div className="flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5" style={{ background: '#fff', border: '1px solid #e8eaf0', width: 220 }}>
+                  <div className="flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 flex-1 min-w-[140px] max-w-[220px]" style={{ background: '#fff', border: '1px solid #e8eaf0' }}>
                     <Search size={13} style={{ color: '#94a3b8' }} />
                     <input
                       value={query}
@@ -416,13 +416,13 @@ const EnterpriseConsolePage = () => {
                   <button
                     type="button"
                     onClick={() => setRoleFilter((roleFilter + 1) % ROLE_FILTERS.length)}
-                    className="px-[11px] py-1.5 rounded-[7px] text-[12.5px] transition-colors"
+                    className="px-[11px] py-1.5 rounded-[7px] text-[12.5px] transition-colors shrink-0 whitespace-nowrap"
                     style={{ background: '#fff', border: '1px solid #e8eaf0', color: roleFilter ? '#3e4b9c' : '#475569' }}
                   >角色:{ROLE_FILTERS[roleFilter]}</button>
                   <button
                     type="button"
                     onClick={() => setStatusFilter((statusFilter + 1) % STATUS_FILTERS.length)}
-                    className="px-[11px] py-1.5 rounded-[7px] text-[12.5px] transition-colors"
+                    className="px-[11px] py-1.5 rounded-[7px] text-[12.5px] transition-colors shrink-0 whitespace-nowrap"
                     style={{ background: '#fff', border: '1px solid #e8eaf0', color: statusFilter ? '#3e4b9c' : '#475569' }}
                   >状态:{STATUS_FILTERS[statusFilter]}</button>
                 </>
@@ -431,7 +431,7 @@ const EnterpriseConsolePage = () => {
               <button
                 type="button"
                 onClick={openInviteModal}
-                className="flex items-center gap-1.5 px-3.5 py-[7px] rounded-[7px] text-[13px] font-medium text-white transition-colors"
+                className="flex items-center gap-1.5 px-3.5 py-[7px] rounded-[7px] text-[13px] font-medium text-white transition-colors shrink-0 whitespace-nowrap"
                 style={{ background: '#3e4b9c' }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = '#34407e'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = '#3e4b9c'; }}
@@ -443,8 +443,8 @@ const EnterpriseConsolePage = () => {
             {/* ── 成员表格 ── */}
             {view === 'members' && (
               <>
-                <div className="rounded-[10px] overflow-hidden" style={{ background: '#fff', border: '1px solid #e8eaf0' }}>
-                  <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+                <div className="rounded-[10px] overflow-x-auto" style={{ background: '#fff', border: '1px solid #e8eaf0' }}>
+                  <table className="w-full min-w-[580px]" style={{ borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: '#fbfcfd' }}>
                         {['成员', '角色', '状态', '加入时间', '最近活动', ''].map((h, i) => (
@@ -527,10 +527,10 @@ const EnterpriseConsolePage = () => {
                     const usedUp = inv.usedCount >= inv.maxUses;
                     const pct = Math.min(100, Math.round((inv.usedCount / Math.max(1, inv.maxUses)) * 100));
                     return (
-                      <div key={inv.id} className="group flex items-center gap-4 px-4 py-[13px] transition-colors hover:bg-slate-50"
+                      <div key={inv.id} className="group flex flex-wrap items-center gap-3 gap-y-2 px-4 py-[13px] transition-colors hover:bg-slate-50"
                         style={{ borderBottom: '1px solid #f1f5f9', opacity: revoked ? 0.5 : 1 }}>
                         <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md text-[12.5px] font-semibold"
-                          style={{ background: '#f1f5f9', color: revoked ? '#94a3b8' : '#1e293b', fontFamily: '"SF Mono", "JetBrains Mono", Consolas, monospace', letterSpacing: '0.04em', textDecoration: revoked ? 'line-through' : 'none' }}>
+                          style={{ background: '#f1f5f9', color: revoked ? '#94a3b8' : '#1e293b', fontFamily: '"SF Mono", "JetBrains Mono", Menlo, monospace', letterSpacing: '0.04em', textDecoration: revoked ? 'line-through' : 'none' }}>
                           {inv.code}
                           {!revoked && (
                             <button type="button" title="复制" className="flex transition-colors hover:text-[#3e4b9c]" style={{ color: '#94a3b8' }}
@@ -542,8 +542,9 @@ const EnterpriseConsolePage = () => {
                         {revoked
                           ? <span className="inline-flex text-[11px] font-medium px-2 py-0.5 rounded" style={{ background: '#fef2f2', color: '#b91c1c' }}>已撤销</span>
                           : <RoleTag role={inv.role} />}
-                        <div className="flex-1 flex items-center gap-[18px] text-[12px]" style={{ color: '#64748b' }}>
-                          <div className="flex items-center gap-2" style={{ minWidth: 130 }}>
+                        <div className="flex-1 flex flex-wrap items-center gap-x-[18px] gap-y-1 text-[12px] min-w-0" style={{ color: '#64748b' }}>
+                          <div className="flex items-center gap-2 shrink-0">
+
                             <span>已用 {inv.usedCount} / {inv.maxUses}</span>
                             <div className="rounded-full overflow-hidden" style={{ width: 64, height: 4, background: '#eef0f4' }}>
                               <div className="h-full rounded-full" style={{ width: `${pct}%`, background: revoked ? '#cbd5e1' : '#3e4b9c' }} />
@@ -674,7 +675,7 @@ const EnterpriseConsolePage = () => {
             </>
           ) : (
             <div className="rounded-[9px] px-4 py-3.5 text-center mb-1" style={{ border: '1px dashed #c3c9e8', background: 'rgba(62,75,156,0.08)' }}>
-              <div className="text-[19px] font-bold" style={{ color: '#3e4b9c', fontFamily: '"SF Mono", "JetBrains Mono", Consolas, monospace', letterSpacing: '0.08em' }}>
+              <div className="text-[19px] font-bold" style={{ color: '#3e4b9c', fontFamily: '"SF Mono", "JetBrains Mono", Menlo, monospace', letterSpacing: '0.08em' }}>
                 {inviteResult.code}
               </div>
               <div className="text-[11.5px] mt-1.5" style={{ color: '#64748b' }}>

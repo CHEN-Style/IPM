@@ -54,6 +54,9 @@ const EntryTable = ({
   }, []);
   const compact = wrapWidth != null && wrapWidth < 660; // hide 类型 + 大小
   const narrow = wrapWidth != null && wrapWidth < 500; // also hide 修改时间
+  // F (responsive): below this the 名称 + 详情 two-column table can no longer
+  // host the multi-button ghost actions, so switch to a stacked card layout.
+  const card = wrapWidth != null && wrapWidth < 440;
   const visibleCols = 2 + (compact ? 0 : 2) + (narrow ? 0 : 1);
 
   // Conflict copies created by pull keep a recognizable name suffix; badge
@@ -111,6 +114,175 @@ const EntryTable = ({
     });
   });
 
+  // ── Shared per-row pieces (used by both the table and the card layout) ──
+  const IconBox = ({ e }) => (
+    <div
+      className={`p-2 rounded shrink-0 ${
+        e.kind === 'dir'
+          ? folderDecor?.(e.relPath).boxClass
+          : e.kind === 'file'
+            ? fileDecor?.(e.name).boxClass
+            : 'bg-slate-100'
+      }`}
+    >
+      {e.kind === 'dir' ? (
+        (() => {
+          const { Icon, iconClass } = folderDecor?.(e.relPath) || {};
+          const Comp = Icon || Folder;
+          return <Comp size={16} className={iconClass || 'text-slate-400'} />;
+        })()
+      ) : e.kind === 'ghost' ? (
+        <Wand2 size={16} className="text-amber-600" />
+      ) : (
+        (() => {
+          const { Icon, iconClass } = fileDecor?.(e.name) || {};
+          const Comp = Icon || Folder;
+          return <Comp size={16} className={iconClass || 'text-slate-400'} />;
+        })()
+      )}
+    </div>
+  );
+
+  const NameBlock = ({ e }) => (
+    <div className="flex items-center gap-3 min-w-0">
+      <IconBox e={e} />
+      <span className="text-sm font-medium text-slate-800 truncate" title={e.name}>{e.name}</span>
+      {(() => {
+        const badge = syncBadgeFor(e);
+        return badge ? (
+          <span className={`ml-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border whitespace-nowrap shrink-0 ${badge.className}`}>
+            {badge.label}
+          </span>
+        ) : null;
+      })()}
+      {e.kind === 'ghost' && (
+        <span className="ml-1 text-[10px] font-bold tracking-widest uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 shrink-0">
+          AI 建议
+        </span>
+      )}
+    </div>
+  );
+
+  // `wrap` lets the card layout reflow the ghost buttons instead of clipping
+  // them in a fixed-width detail column.
+  const ActionContent = ({ e, wrap }) => {
+    if (e.kind === 'ghost') {
+      return (
+        <div className={`inline-flex items-center gap-2 ${wrap ? 'flex-wrap justify-end' : ''}`}>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-emerald-600 text-white rounded hover:bg-emerald-700 transition-colors"
+            onClick={(evt) => {
+              evt.preventDefault();
+              evt.stopPropagation();
+              onAcceptGhost?.(e._ghost?.sourceRelPath);
+            }}
+            title="接受 AI 建议并移动"
+          >
+            <Check size={12} /> 接受
+          </button>
+          <div className="relative">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 rounded hover:bg-slate-50 transition-colors"
+              onClick={(evt) => {
+                evt.preventDefault();
+                evt.stopPropagation();
+                setRejectingItem(rejectingItem === e._ghost?.sourceRelPath ? null : e._ghost?.sourceRelPath);
+              }}
+              title="放弃该建议"
+            >
+              <Ban size={12} /> 放弃
+            </button>
+            {rejectingItem === e._ghost?.sourceRelPath && (
+              <RejectPopover
+                sourceRelPath={e._ghost?.sourceRelPath}
+                onConfirm={(src, feedback) => {
+                  setRejectingItem(null);
+                  onRejectGhost?.(src, { userFeedback: feedback });
+                }}
+                onCancel={() => setRejectingItem(null)}
+              />
+            )}
+          </div>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-[#3e4b9c] rounded hover:bg-[#eceef7] hover:border-[#d8dbed] transition-colors"
+            onClick={(evt) => {
+              evt.preventDefault();
+              evt.stopPropagation();
+              onViewTrace?.(e._ghost?.sourceRelPath);
+            }}
+            title="查看 AI 分类过程"
+          >
+            <Search size={12} /> 过程
+          </button>
+        </div>
+      );
+    }
+    if (e.kind === 'dir' && isProjectCwd) {
+      return (
+        <button
+          type="button"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-slate-600 bg-white border border-slate-200 rounded hover:bg-slate-50 hover:text-slate-800 transition-colors"
+          onClick={(evt) => {
+            evt.preventDefault();
+            evt.stopPropagation();
+            onOpenFolderDetail?.(e);
+          }}
+          title="查看文件夹详情"
+        >
+          <Info size={12} /> 详情
+        </button>
+      );
+    }
+    return <span className="text-[11px] text-slate-300">-</span>;
+  };
+
+  const handleDoubleClick = (e) => (evt) => {
+    // Double-click to open file via OS default app
+    if (e.kind === 'file') {
+      evt.preventDefault();
+      evt.stopPropagation();
+      onOpenFile?.(e.relPath);
+    }
+    // Ghost: open source file (always under temp/) for preview
+    if (e.kind === 'ghost') {
+      const src = e._ghost?.sourceRelPath;
+      if (!src) return;
+      evt.preventDefault();
+      evt.stopPropagation();
+      onOpenFile?.(src);
+    }
+  };
+
+  // Common interactive props shared by the table row and the card wrapper so
+  // drag/drop, context menu, click-to-enter and double-click stay identical.
+  const interactiveProps = (e) => ({
+    onContextMenu: e.kind === 'ghost' ? undefined : (evt) => onContextMenuEntry?.(evt, e),
+    onClick: () => { if (e.kind === 'dir') onEnterDir?.(e.relPath); },
+    onDoubleClick: handleDoubleClick(e),
+    title: e.kind === 'dir' ? folderTooltip(e.relPath) : undefined,
+    draggable: e.kind !== 'ghost',
+    onDragStart: e.kind === 'ghost' ? undefined : (evt) => onDragStartEntry?.(evt, e),
+    onDragEnd: e.kind === 'ghost' ? undefined : onDragEndAny,
+    onDragOver: e.kind === 'ghost' ? undefined : (evt) => onDragOverFolder?.(evt, e),
+    onDragLeave: e.kind === 'ghost' ? undefined : (evt) => onDragLeaveFolder?.(evt, e),
+    onDrop: e.kind === 'ghost' ? undefined : (evt) => onDropOnFolder?.(evt, e),
+  });
+
+  const rowHighlightCls = (e) => `${
+    e.kind === 'dir' && dragOverFolderRelPath === e.relPath ? 'ring-2 ring-[#d8dbed] bg-[#eceef7]/40' : ''
+  } ${e.kind === 'ghost' ? 'opacity-80 bg-amber-50/40 hover:bg-amber-50/60' : ''}`;
+
+  const metaText = (e) => {
+    if (e.kind === 'ghost') return '幽灵文件';
+    const parts = [getTypeLabel(e)];
+    if (e.kind !== 'dir') parts.push(fmtTime?.(e.mtimeMs));
+    if (e.kind === 'file') parts.push(fmtBytes?.(e.sizeBytes));
+    return parts.filter(Boolean).join(' · ');
+  };
+
   return (
     <div className="px-4 sm:px-8 py-4 relative" ref={wrapRef}>
       {errorText && (
@@ -118,7 +290,35 @@ const EntryTable = ({
           {errorText}
         </div>
       )}
-      <table className="w-full text-left border-separate border-spacing-y-1" style={{ tableLayout: 'fixed' }}>
+
+      {card ? (
+        /* ── Tiny: stacked card layout ── */
+        <div className="flex flex-col gap-1.5">
+          {loading && (
+            <div className="py-10 text-center text-sm text-slate-400">正在加载...</div>
+          )}
+          {!loading && filterList.map((e, eIdx) => (
+            <div
+              key={e.relPath}
+              {...interactiveProps(e)}
+              data-tour={e.kind === 'dir' && filterList.slice(0, eIdx).every((x) => x.kind !== 'dir') ? 'folder-first' : undefined}
+              className={`rounded-lg border border-slate-100 bg-white p-2.5 transition-all duration-200 hover:bg-slate-50/50 cursor-pointer ${rowHighlightCls(e)}`}
+            >
+              <NameBlock e={e} />
+              <div className="mt-1.5 pl-[44px] text-[11px] text-slate-400 truncate">{metaText(e)}</div>
+              <div className="mt-2 pl-[44px]">
+                <ActionContent e={e} wrap />
+              </div>
+            </div>
+          ))}
+          {!loading && !filterList.length && !errorText && (
+            <div className="py-10 text-center text-sm text-slate-400">
+              目录为空（右键空白处可新建文件夹/上传文件）
+            </div>
+          )}
+        </div>
+      ) : (
+        <table className="w-full text-left border-separate border-spacing-y-1" style={{ tableLayout: 'fixed' }}>
           <colgroup>
             <col />
             {!compact && <col style={{ width: 60 }} />}
@@ -147,80 +347,12 @@ const EntryTable = ({
               filterList.map((e, eIdx) => (
                 <tr
                   key={e.relPath}
-                  onContextMenu={e.kind === 'ghost' ? undefined : (evt) => onContextMenuEntry?.(evt, e)}
-                  onClick={() => {
-                    if (e.kind === 'dir') onEnterDir?.(e.relPath);
-                  }}
+                  {...interactiveProps(e)}
                   data-tour={e.kind === 'dir' && filterList.slice(0, eIdx).every((x) => x.kind !== 'dir') ? 'folder-first' : undefined}
-                  onDoubleClick={(evt) => {
-                    // Double-click to open file via OS default app
-                    if (e.kind === 'file') {
-                      evt.preventDefault();
-                      evt.stopPropagation();
-                      onOpenFile?.(e.relPath);
-                    }
-                    // Ghost: open source file (always under temp/) for preview
-                    if (e.kind === 'ghost') {
-                      const src = e._ghost?.sourceRelPath;
-                      if (!src) return;
-                      evt.preventDefault();
-                      evt.stopPropagation();
-                      onOpenFile?.(src);
-                    }
-                  }}
-                  title={e.kind === 'dir' ? folderTooltip(e.relPath) : undefined}
-                  className={`transition-all duration-200 hover:bg-slate-50/50 cursor-pointer ${
-                    e.kind === 'dir' && dragOverFolderRelPath === e.relPath ? 'ring-2 ring-[#d8dbed] bg-[#eceef7]/40' : ''
-                  } ${e.kind === 'ghost' ? 'opacity-80 bg-amber-50/40 hover:bg-amber-50/60' : ''}`}
-                  draggable={e.kind !== 'ghost'}
-                  onDragStart={e.kind === 'ghost' ? undefined : (evt) => onDragStartEntry?.(evt, e)}
-                  onDragEnd={e.kind === 'ghost' ? undefined : onDragEndAny}
-                  onDragOver={e.kind === 'ghost' ? undefined : (evt) => onDragOverFolder?.(evt, e)}
-                  onDragLeave={e.kind === 'ghost' ? undefined : (evt) => onDragLeaveFolder?.(evt, e)}
-                  onDrop={e.kind === 'ghost' ? undefined : (evt) => onDropOnFolder?.(evt, e)}
+                  className={`transition-all duration-200 hover:bg-slate-50/50 cursor-pointer ${rowHighlightCls(e)}`}
                 >
                   <td className="py-3.5 pl-4 rounded-l border-y border-transparent">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        className={`p-2 rounded shrink-0 ${
-                          e.kind === 'dir'
-                            ? folderDecor?.(e.relPath).boxClass
-                            : e.kind === 'file'
-                              ? fileDecor?.(e.name).boxClass
-                              : 'bg-slate-100'
-                        }`}
-                      >
-                        {e.kind === 'dir' ? (
-                          (() => {
-                            const { Icon, iconClass } = folderDecor?.(e.relPath) || {};
-                            const Comp = Icon || Folder;
-                            return <Comp size={16} className={iconClass || 'text-slate-400'} />;
-                          })()
-                        ) : e.kind === 'ghost' ? (
-                          <Wand2 size={16} className="text-amber-600" />
-                        ) : (
-                          (() => {
-                            const { Icon, iconClass } = fileDecor?.(e.name) || {};
-                            const Comp = Icon || Folder;
-                            return <Comp size={16} className={iconClass || 'text-slate-400'} />;
-                          })()
-                        )}
-                      </div>
-                      <span className="text-sm font-medium text-slate-800 truncate" title={e.name}>{e.name}</span>
-                      {(() => {
-                        const badge = syncBadgeFor(e);
-                        return badge ? (
-                          <span className={`ml-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border whitespace-nowrap shrink-0 ${badge.className}`}>
-                            {badge.label}
-                          </span>
-                        ) : null;
-                      })()}
-                      {e.kind === 'ghost' && (
-                        <span className="ml-1 text-[10px] font-bold tracking-widest uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 shrink-0">
-                          AI 建议
-                        </span>
-                      )}
-                    </div>
+                    <NameBlock e={e} />
                   </td>
                   {!compact && (
                     <td className="py-3.5 text-xs text-slate-500 border-y border-transparent whitespace-nowrap truncate">{getTypeLabel(e)}</td>
@@ -236,73 +368,7 @@ const EntryTable = ({
                     </td>
                   )}
                   <td className="py-3.5 text-right pr-2 rounded-r border-y border-transparent">
-                    {e.kind === 'ghost' ? (
-                      <div className="inline-flex items-center gap-2">
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-emerald-600 text-white rounded hover:bg-emerald-700 transition-colors"
-                          onClick={(evt) => {
-                            evt.preventDefault();
-                            evt.stopPropagation();
-                            onAcceptGhost?.(e._ghost?.sourceRelPath);
-                          }}
-                          title="接受 AI 建议并移动"
-                        >
-                          <Check size={12} /> 接受
-                        </button>
-                        <div className="relative">
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 rounded hover:bg-slate-50 transition-colors"
-                            onClick={(evt) => {
-                              evt.preventDefault();
-                              evt.stopPropagation();
-                              setRejectingItem(rejectingItem === e._ghost?.sourceRelPath ? null : e._ghost?.sourceRelPath);
-                            }}
-                            title="放弃该建议"
-                          >
-                            <Ban size={12} /> 放弃
-                          </button>
-                          {rejectingItem === e._ghost?.sourceRelPath && (
-                            <RejectPopover
-                              sourceRelPath={e._ghost?.sourceRelPath}
-                              onConfirm={(src, feedback) => {
-                                setRejectingItem(null);
-                                onRejectGhost?.(src, { userFeedback: feedback });
-                              }}
-                              onCancel={() => setRejectingItem(null)}
-                            />
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-[#3e4b9c] rounded hover:bg-[#eceef7] hover:border-[#d8dbed] transition-colors"
-                          onClick={(evt) => {
-                            evt.preventDefault();
-                            evt.stopPropagation();
-                            onViewTrace?.(e._ghost?.sourceRelPath);
-                          }}
-                          title="查看 AI 分类过程"
-                        >
-                          <Search size={12} /> 过程
-                        </button>
-                      </div>
-                    ) : e.kind === 'dir' && isProjectCwd ? (
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-slate-600 bg-white border border-slate-200 rounded hover:bg-slate-50 hover:text-slate-800 transition-colors"
-                        onClick={(evt) => {
-                          evt.preventDefault();
-                          evt.stopPropagation();
-                          onOpenFolderDetail?.(e);
-                        }}
-                        title="查看文件夹详情"
-                      >
-                        <Info size={12} /> 详情
-                      </button>
-                    ) : (
-                      <span className="text-[11px] text-slate-300">-</span>
-                    )}
+                    <ActionContent e={e} />
                   </td>
                 </tr>
               ))}
@@ -315,10 +381,9 @@ const EntryTable = ({
             )}
           </tbody>
         </table>
+      )}
     </div>
   );
 };
 
 export default EntryTable;
-
-

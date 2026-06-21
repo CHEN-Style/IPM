@@ -83,7 +83,7 @@ export default function KnowledgeDetailPanel({ item, isOpen, onClose, onUpdate, 
 
   const handleRemoveImage = useCallback(async (imgRelPath) => {
     if (!formData?.id || !projectName) return;
-    if (!window.confirm('确定删除这张截图？文件将被移到回收站。')) return;
+    if (!window.confirm('确定删除这张截图？文件将被移到废纸篓。')) return;
     setDeletingImage(imgRelPath);
     const api = window.ipm?.knowledge;
     const domainOpts = domain ? { domain } : {};
@@ -149,7 +149,7 @@ export default function KnowledgeDetailPanel({ item, isOpen, onClose, onUpdate, 
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/10" onClick={onClose} />
-      <div className={`fixed top-[36px] right-0 bottom-0 w-[440px] bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out border-l border-slate-200 flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+      <div className={`fixed top-[36px] right-0 bottom-0 w-[min(440px,calc(100vw-24px))] bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out border-l border-slate-200 flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
         {/* Header */}
         <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between bg-white shrink-0">
           <div className="flex-1 mr-3 min-w-0">
@@ -344,7 +344,7 @@ export default function KnowledgeDetailPanel({ item, isOpen, onClose, onUpdate, 
                   </button>
                 </div>
                 {webclipImages.length > 0 ? (
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {webclipImages.map((imgPath, idx) => {
                       const imgSrc = `ipm-file:///${imgPath.replace(/\\/g, '/')}`;
                       const relPath = (Array.isArray(webclipMeta.images) ? webclipMeta.images[idx] : null) || imgPath;

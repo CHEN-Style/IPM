@@ -67,7 +67,7 @@ export function Modal({ open, width = 440, onClose, children }) {
       style={{ background: 'rgba(15,23,42,0.32)', backdropFilter: 'blur(2px)' }}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.(); }}
     >
-      <div className="bg-white rounded-xl overflow-hidden" style={{ width, boxShadow: '0 24px 64px rgba(15,23,42,0.24)' }}>
+      <div className="bg-white rounded-xl overflow-hidden mx-4" style={{ width: '100%', maxWidth: width, boxShadow: '0 24px 64px rgba(15,23,42,0.24)' }}>
         {children}
       </div>
     </div>

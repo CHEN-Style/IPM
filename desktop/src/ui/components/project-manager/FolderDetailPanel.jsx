@@ -24,7 +24,7 @@ const FolderDetailPanel = ({
     <div className="absolute inset-0 z-[80]" onClick={onClose}>
       <div className="absolute inset-0 bg-black/30" />
       <div
-        className={`absolute top-0 right-0 h-full w-[360px] bg-slate-50 border-l border-slate-200 shadow-2xl flex flex-col transition-transform duration-200 ease-out ${
+        className={`absolute top-0 right-0 h-full w-[min(360px,calc(100vw-32px))] bg-slate-50 border-l border-slate-200 shadow-2xl flex flex-col transition-transform duration-200 ease-out ${
           visible ? 'translate-x-0' : 'translate-x-full'
         }`}
         onClick={(e) => e.stopPropagation()}

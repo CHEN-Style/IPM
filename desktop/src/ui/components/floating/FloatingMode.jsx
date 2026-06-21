@@ -362,7 +362,7 @@ const FloatingMode = ({ onBackToMain }) => {
                 <button
                   type="button"
                   className="w-9 h-9 rounded-xl border bg-slate-950/20 border-slate-800/70 text-slate-300 hover:bg-slate-800/40 transition-all flex items-center justify-center mb-1"
-                  title="回到中台 (Esc / Ctrl+Shift+Space)"
+                  title="回到中台 (Esc / ⌘⇧Space)"
                   onClick={(e) => { e.stopPropagation(); onBackToMain?.(); }}
                   data-track="float-back-to-main"
                 >

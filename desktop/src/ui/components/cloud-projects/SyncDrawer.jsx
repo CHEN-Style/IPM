@@ -60,7 +60,7 @@ function VersionRow({ status }) {
   return (
     <div className="flex items-center gap-4 mt-2 text-[11.5px] text-slate-500">
       {items.map(([k, v]) => (
-        <span key={k}>{k} <b className="font-medium text-slate-700" style={{ fontFamily: 'ui-monospace, Consolas, monospace' }}>{v}</b></span>
+        <span key={k}>{k} <b className="font-medium text-slate-700" style={{ fontFamily: 'ui-monospace, Menlo, monospace' }}>{v}</b></span>
       ))}
     </div>
   );
@@ -94,6 +94,9 @@ const DRAWER_WIDTH = 372;
 
 const SyncDrawer = ({
   open,
+  // F (responsive): when the host region is too narrow to squeeze the drawer
+  // in as a flex sibling, float it over the content with a backdrop instead.
+  overlay = false,
   projectName,
   domain,
   status,
@@ -347,19 +350,39 @@ const SyncDrawer = ({
       : pullProgress.step === 'preparing' ? '准备中…' : '')
     : '';
 
+  // In overlay mode cap the panel to the viewport so it never overflows a tiny
+  // window; the inner panel keeps a fixed width so text doesn't reflow during
+  // the width animation.
+  const panelWidth = overlay ? 'min(372px, calc(100vw - 40px))' : DRAWER_WIDTH;
+
   return (
     <>
-      {/* Squeeze layout: animated-width flex child (not a floating overlay).
-          The inner panel keeps a fixed width so text doesn't reflow while the
-          container width animates. */}
+      {/* Overlay backdrop (only when floating over the content). */}
+      {overlay && open && (
+        <div
+          className="absolute inset-0 z-40 bg-black/20"
+          onClick={onClose}
+          aria-hidden
+        />
+      )}
+      {/* Layout modes:
+          - squeeze (default): animated-width flex child, pushes the content.
+          - overlay: absolutely positioned panel that floats over the content
+            on narrow windows so the file list keeps its width. */}
       <div
-        className="h-full shrink-0 overflow-hidden"
-        style={{ width: open ? DRAWER_WIDTH : 0, transition: 'width 0.26s cubic-bezier(0.4, 0, 0.2, 1)' }}
+        className={overlay
+          ? 'absolute top-0 right-0 h-full z-50 overflow-hidden'
+          : 'h-full shrink-0 overflow-hidden'}
+        style={{
+          width: open ? panelWidth : 0,
+          transition: 'width 0.26s cubic-bezier(0.4, 0, 0.2, 1)',
+          ...(overlay ? { boxShadow: open ? '-8px 0 24px rgba(15,23,42,0.12)' : 'none' } : null),
+        }}
         aria-hidden={!open}
       >
       <aside
         className="h-full flex flex-col bg-white"
-        style={{ width: DRAWER_WIDTH, borderLeft: '1px solid #e2e4eb' }}
+        style={{ width: panelWidth, borderLeft: '1px solid #e2e4eb' }}
       >
         {/* Head */}
         <div className="flex items-center justify-between px-4 h-11 shrink-0" style={{ borderBottom: '1px solid #eef0f4' }}>
@@ -488,7 +511,7 @@ const SyncDrawer = ({
                   <div key={v.id} className="flex items-start gap-2.5 py-2" style={{ borderBottom: '1px solid #f1f5f9' }}>
                     <span
                       className="shrink-0 mt-0.5 text-[11.5px] w-9"
-                      style={{ fontFamily: 'ui-monospace, Consolas, monospace', color: isMilestone ? '#9c733e' : '#94a3b8' }}
+                      style={{ fontFamily: 'ui-monospace, Menlo, monospace', color: isMilestone ? '#9c733e' : '#94a3b8' }}
                     >
                       v{v.versionNumber}
                     </span>

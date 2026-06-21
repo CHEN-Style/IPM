@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Check,
   ChevronDown,
@@ -76,6 +76,26 @@ const AIGhostOverview = ({
 }) => {
   const [rejectingItem, setRejectingItem] = useState(null);
 
+  // F (responsive): the four-column overview grid (info + 92/120/112px) crushes
+  // the folder/preview column on a narrow container. Observe our own width and
+  // collapse the 建议/状态 columns into the info line when there isn't room.
+  const wrapRef = useRef(null);
+  const [wrapWidth, setWrapWidth] = useState(null);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver((obs) => {
+      const w = obs[0]?.contentRect?.width;
+      if (typeof w === 'number') setWrapWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [show]);
+  const narrow = wrapWidth != null && wrapWidth < 560;
+  const gridCls = narrow
+    ? 'grid-cols-[minmax(0,1fr)_auto]'
+    : 'grid-cols-[minmax(0,1.1fr)_92px_120px_112px]';
+
   if (!show) return null;
 
   const queuedCount = pipelineQueued?.length || 0;
@@ -97,7 +117,7 @@ const AIGhostOverview = ({
         : '同步中';
 
   return (
-    <div className="px-4 sm:px-8 pt-3">
+    <div className="px-4 sm:px-8 pt-3" ref={wrapRef}>
       <div className="border-y border-zinc-200 bg-[#fcfcfc]">
         <div className="min-h-[43px] px-3 sm:px-4 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
           <button
@@ -178,10 +198,10 @@ const AIGhostOverview = ({
 
         {overviewOpen && hasGroups ? (
           <div className="border-t border-zinc-100">
-            <div className="h-[30px] px-3 sm:px-4 grid grid-cols-[minmax(0,1.1fr)_92px_120px_112px] items-center gap-3 text-[11.5px] text-zinc-400 border-b border-zinc-100">
+            <div className={`h-[30px] px-3 sm:px-4 grid ${gridCls} items-center gap-3 text-[11.5px] text-zinc-400 border-b border-zinc-100`}>
               <div>目标文件夹 / 预览</div>
-              <div>建议</div>
-              <div>状态</div>
+              {!narrow && <div>建议</div>}
+              {!narrow && <div>状态</div>}
               <div />
             </div>
 
@@ -191,7 +211,7 @@ const AIGhostOverview = ({
               const rest = Math.max(0, g.items.length - preview.length);
               return (
                 <div key={g.folderRelPath}>
-                  <div className="group min-h-[43px] px-3 sm:px-4 grid grid-cols-[minmax(0,1.1fr)_92px_120px_112px] items-center gap-3 border-b border-zinc-100 hover:bg-zinc-50 transition-colors">
+                  <div className={`group min-h-[43px] px-3 sm:px-4 grid ${gridCls} items-center gap-3 border-b border-zinc-100 hover:bg-zinc-50 transition-colors`}>
                     <button
                       type="button"
                       className="min-w-0 flex items-center gap-2 text-left"
@@ -205,17 +225,27 @@ const AIGhostOverview = ({
                           {preview.join('，')}
                           {rest ? ` 等 +${rest}` : ''}
                         </span>
+                        {narrow && (
+                          <span className="flex items-center gap-1.5 text-[11px] text-[#5e6ad2] mt-0.5">
+                            <StatusDot tone="active" />
+                            {g.items.length} 个 · 待确认
+                          </span>
+                        )}
                       </span>
                     </button>
-                    <div>
-                      <span className="inline-flex items-center h-[22px] px-2 rounded-full border border-zinc-200 bg-white text-xs text-zinc-600">
-                        {g.items.length} 个
-                      </span>
-                    </div>
-                    <div className="inline-flex items-center gap-1.5 text-xs text-[#5e6ad2]">
-                      <StatusDot tone="active" />
-                      待确认
-                    </div>
+                    {!narrow && (
+                      <div>
+                        <span className="inline-flex items-center h-[22px] px-2 rounded-full border border-zinc-200 bg-white text-xs text-zinc-600">
+                          {g.items.length} 个
+                        </span>
+                      </div>
+                    )}
+                    {!narrow && (
+                      <div className="inline-flex items-center gap-1.5 text-xs text-[#5e6ad2]">
+                        <StatusDot tone="active" />
+                        待确认
+                      </div>
+                    )}
                     <div className="justify-self-end flex items-center gap-1">
                       <ActionIconButton title="进入文件夹" onClick={() => onEnterFolder?.(g.folderRelPath)}>
                         <ExternalLink size={14} />
@@ -234,17 +264,25 @@ const AIGhostOverview = ({
                       {g.items.map((it) => (
                         <div
                           key={it.sourceRelPath}
-                          className="group min-h-[38px] pl-12 pr-3 sm:pr-4 grid grid-cols-[minmax(0,1.1fr)_92px_120px_112px] items-center gap-3 border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 transition-colors"
+                          className={`group min-h-[38px] pl-12 pr-3 sm:pr-4 grid ${gridCls} items-center gap-3 border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 transition-colors`}
                         >
                           <div className="min-w-0">
                             <div className="text-[12.5px] font-medium text-zinc-700 truncate">{it.fileName || it.sourceRelPath}</div>
                             <div className="text-[11px] text-zinc-400 truncate">{it.sourceRelPath}</div>
+                            {narrow && (
+                              <span className="flex items-center gap-1.5 text-[11px] text-[#5e6ad2] mt-0.5">
+                                <StatusDot tone="active" />
+                                temp · {it.confidence != null ? formatConfidence(it.confidence) : '待确认'}
+                              </span>
+                            )}
                           </div>
-                          <div className="text-xs text-zinc-400">temp</div>
-                          <div className="inline-flex items-center gap-1.5 text-xs text-[#5e6ad2]">
-                            <StatusDot tone="active" />
-                            {it.confidence != null ? formatConfidence(it.confidence) : '待确认'}
-                          </div>
+                          {!narrow && <div className="text-xs text-zinc-400">temp</div>}
+                          {!narrow && (
+                            <div className="inline-flex items-center gap-1.5 text-xs text-[#5e6ad2]">
+                              <StatusDot tone="active" />
+                              {it.confidence != null ? formatConfidence(it.confidence) : '待确认'}
+                            </div>
+                          )}
                           <div className="justify-self-end flex items-center gap-1 relative">
                             <ActionIconButton title="接受该文件" tone="primary" onClick={() => onAcceptItem?.(it.sourceRelPath)}>
                               <Check size={14} strokeWidth={2.2} />

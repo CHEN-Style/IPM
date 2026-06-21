@@ -106,7 +106,7 @@ const SyncPreviewModal = ({ projectName, domain, onClose, onPushed }) => {
 
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center" style={{ background: 'rgba(15,23,42,0.45)' }}>
-      <div className="w-[560px] max-h-[80vh] rounded-2xl flex flex-col overflow-hidden" style={{ background: '#fff', boxShadow: '0 20px 60px rgba(15,23,42,0.25)' }}>
+      <div className="w-[min(560px,calc(100vw-32px))] max-h-[80vh] rounded-2xl flex flex-col overflow-hidden" style={{ background: '#fff', boxShadow: '0 20px 60px rgba(15,23,42,0.25)' }}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid #eef0f4' }}>
           <div className="flex items-center gap-2.5">

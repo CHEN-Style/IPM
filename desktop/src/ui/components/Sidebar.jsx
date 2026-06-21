@@ -280,9 +280,10 @@ const Sidebar = ({
         requestExpand();
       }}
     >
-      {/* ── Logo / workspace (top area is drag zone for frameless window) ── */}
+      {/* ── Logo / workspace ── top area is a drag zone for the frameless
+          window AND leaves room for the macOS traffic lights (top-left). */}
       <div
-        className={isCollapsed ? 'px-3 pt-[42px] pb-5' : 'px-5 pt-[42px] pb-6'}
+        className={isCollapsed ? 'px-3 pt-[48px] pb-5' : 'px-5 pt-[48px] pb-6'}
         style={{ WebkitAppRegion: 'drag' }}
       >
         <div className="relative" ref={menuAnchorRef}>
@@ -474,7 +475,7 @@ const Sidebar = ({
             type="button"
             className="w-10 h-10 rounded-md flex items-center justify-center cursor-pointer"
             style={{ background: '#1a1a1a', border: '1px solid #2a2a2a' }}
-            title="搜索 (Ctrl+K)"
+            title="搜索 (⌘K)"
             onClick={() => { onCollapsedChange?.(false); setTimeout(() => searchInputRef.current?.focus(), 350); }}
             data-sidebar-nav-direct="1"
           >
@@ -569,7 +570,7 @@ const Sidebar = ({
             border: '1px solid #2a2a2a',
             color: '#a3a3a3',
           }}
-          title="切换到悬浮窗 (Ctrl+Shift+Space)"
+          title="切换到悬浮窗 (⌘⇧Space)"
           data-track="sidebar-open-floating-bottom"
         >
           <Layers size={13} />

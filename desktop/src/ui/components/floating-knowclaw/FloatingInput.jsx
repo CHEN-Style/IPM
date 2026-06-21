@@ -182,7 +182,7 @@ const FloatingInput = forwardRef(function FloatingInput({
               marginRight: 3,
             }}
             // No autoFocus: the floating window blurs aggressively
-            // (setAlwaysOnTop's screen-saver level) and stealing
+            // (setAlwaysOnTop's floating level) and stealing
             // focus on every mount thrashes the user's keyboard
             // focus in other apps. The user clicks/Tabs into the
             // textarea when they want to type.

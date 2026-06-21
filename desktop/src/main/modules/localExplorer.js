@@ -22,10 +22,13 @@ const normalizeAbsDirPath = (p) => {
   const raw = String(p || '').trim();
   if (!raw) return '';
   const abs = path.resolve(raw);
-  const root = path.parse(abs).root;
-  if (abs === root) return abs;
-  return abs.replace(/[\\/]+$/, '');
+  if (abs === '/') return abs; // keep POSIX root "/"
+  return abs.replace(/\/+$/, ''); // only `/` is a path separator on macOS
 };
+
+// macOS preserves case and (on case-sensitive volumes) is case-significant,
+// so we only fold case for whitelist comparison on Windows.
+const pathKey = (abs) => (process.platform === 'win32' ? abs.toLowerCase() : abs);
 
 const resolveInside = (baseDir, unsafeRelPath) => {
   const rel = String(unsafeRelPath ?? '');
@@ -91,7 +94,7 @@ const getAllowedRoots = (statePath) => {
   for (const p of arr) {
     const abs = normalizeAbsDirPath(p);
     if (!abs) continue;
-    const key = abs.toLowerCase();
+    const key = pathKey(abs);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(abs);
@@ -103,7 +106,7 @@ const assertRootAllowedOrThrow = (statePath, rootPath) => {
   const rootAbs = normalizeAbsDirPath(rootPath);
   if (!rootAbs) throw new Error('rootPath 不能为空');
   const allowed = getAllowedRoots(statePath);
-  if (!allowed.some((p) => p.toLowerCase() === rootAbs.toLowerCase())) {
+  if (!allowed.some((p) => pathKey(p) === pathKey(rootAbs))) {
     throw new Error('该本地文件夹未被导入或已取消关联');
   }
   if (!fs.existsSync(rootAbs) || !fs.statSync(rootAbs).isDirectory()) {

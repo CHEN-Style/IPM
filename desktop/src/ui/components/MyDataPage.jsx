@@ -54,10 +54,10 @@ const MyDataPage = ({ section = 'home', onSectionChange, stats, onNavigate, sear
   return (
     <div className="flex-1 flex flex-col h-full" style={{ background: '#f8f9fb' }}>
       <div className="flex-1 overflow-y-auto">
-        <div className="w-full px-8 xl:px-10 pt-4 pb-8 xl:pt-5 xl:pb-10">
+        <div className="w-full px-4 sm:px-6 xl:px-10 pt-4 pb-8 xl:pt-5 xl:pb-10">
 
           {/* ── Topbar ── */}
-          <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-8">
             <div>
               <div className="flex items-baseline gap-2.5">
                 <h1 className="text-xl font-bold tracking-tight" style={{ color: '#252a38', letterSpacing: '-0.02em' }}>{greeting}</h1>
@@ -136,7 +136,7 @@ const MyDataPage = ({ section = 'home', onSectionChange, stats, onNavigate, sear
 
             {/* Data overview */}
             <Panel title="数据概览">
-              <div className="grid grid-cols-4 gap-3 mb-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                 <DataCell value={totalItems || '—'} label="总文件" />
                 <DataCell value={totalActive || '—'} label="活跃案件" />
                 <DataCell value={stats?.study?.count ?? '—'} label="学习主题" />
@@ -261,7 +261,7 @@ const MiniChart = () => {
           />
         ))}
       </div>
-      <div className="flex gap-4 mt-2.5">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2.5">
         <div className="flex items-center gap-1.5 text-[11px]" style={{ color: '#6e7389' }}>
           <span className="w-[7px] h-[7px] rounded-sm" style={{ background: ACCENT }} /> 文件活动
         </div>

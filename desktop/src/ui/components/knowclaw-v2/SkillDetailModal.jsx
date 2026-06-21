@@ -162,8 +162,8 @@ const SkillDetailModal = ({ skill, onClose, cwd }) => {
                   type="button"
                   onClick={() => window.ipm.knowclaw.openInExplorer(skill.baseDir)}
                   className="ml-1 h-5 w-5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
-                  title="在文件管理器中打开技能目录"
-                  aria-label="在文件管理器中打开"
+                  title="在访达中打开技能目录"
+                  aria-label="在访达中打开"
                 >
                   <ExternalLink size={11} />
                 </button>

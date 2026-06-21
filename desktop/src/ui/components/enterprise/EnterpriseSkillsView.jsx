@@ -379,7 +379,7 @@ const EnterpriseSkillsView = () => {
       )}
 
       {/* ── 统计条 ── */}
-      <div className="flex gap-2.5 mt-[18px]">
+      <div className="flex flex-wrap gap-2.5 mt-[18px] [&>*]:min-w-[120px]">
         {[
           { k: '技能总数', v: <>{stats.total} <small>全状态</small></> },
           { k: '待审核', v: <span style={stats.pending ? { color: '#b45309' } : undefined}>{stats.pending} {stats.pending > 0 && <small>需处理</small>}</span> },
@@ -395,21 +395,21 @@ const EnterpriseSkillsView = () => {
       </div>
 
       {/* ── 工具条 ── */}
-      <div className="flex items-center gap-2.5 mt-[18px] mb-3.5">
-        <div className="inline-flex rounded-[7px] p-0.5" style={{ background: '#eef0f4' }}>
+      <div className="flex items-center flex-wrap gap-2.5 gap-y-2 mt-[18px] mb-3.5">
+        <div className="inline-flex rounded-[7px] p-0.5 shrink-0 max-w-full overflow-x-auto no-scrollbar" style={{ background: '#eef0f4' }}>
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.key}
               type="button"
               onClick={() => setStatusFilter(f.key)}
-              className="px-3 py-[5px] rounded-md text-[12.5px] transition-all"
+              className="px-3 py-[5px] rounded-md text-[12.5px] transition-all shrink-0 whitespace-nowrap"
               style={statusFilter === f.key
                 ? { background: '#fff', color: '#1e293b', fontWeight: 500, boxShadow: '0 1px 2px rgba(15,23,42,0.08)' }
                 : { color: '#64748b' }}
             >{f.label} {countByStatus(f.key)}</button>
           ))}
         </div>
-        <div className="flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5" style={{ background: '#fff', border: '1px solid #e8eaf0', width: 220 }}>
+        <div className="flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 flex-1 min-w-[140px] max-w-[220px]" style={{ background: '#fff', border: '1px solid #e8eaf0' }}>
           <Search size={13} style={{ color: '#94a3b8' }} />
           <input
             value={query}
@@ -423,7 +423,7 @@ const EnterpriseSkillsView = () => {
         <button
           type="button"
           onClick={loadList}
-          className="flex items-center gap-1.5 px-3 py-[7px] rounded-[7px] text-[12.5px] transition-colors hover:bg-slate-50"
+          className="flex items-center gap-1.5 px-3 py-[7px] rounded-[7px] text-[12.5px] transition-colors hover:bg-slate-50 shrink-0 whitespace-nowrap"
           style={SECONDARY_BTN}
         >
           <RefreshCw size={12} />刷新
@@ -431,8 +431,8 @@ const EnterpriseSkillsView = () => {
       </div>
 
       {/* ── 技能表格 ── */}
-      <div className="rounded-[10px] overflow-hidden" style={{ background: '#fff', border: '1px solid #e8eaf0' }}>
-        <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+      <div className="rounded-[10px] overflow-x-auto" style={{ background: '#fff', border: '1px solid #e8eaf0' }}>
+        <table className="w-full min-w-[720px]" style={{ borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#fbfcfd' }}>
               {[['技能', '28%'], ['状态', '10%'], ['最新版本', '10%'], ['提交人', '13%'], ['安装', '10%'], ['可见范围', '11%'], ['更新时间', '13%'], ['', '5%']].map(([h, w], i) => (
@@ -566,8 +566,8 @@ const EnterpriseSkillsView = () => {
       {drawer && (
         <>
           <div className="fixed inset-0 z-[80]" style={{ background: 'rgba(15,23,42,0.18)' }} onClick={() => setDrawer(null)} />
-          <aside className="fixed top-0 right-0 h-screen z-[90] bg-white flex flex-col"
-            style={{ width: 560, boxShadow: '-8px 0 40px rgba(15,23,42,0.12)' }}>
+          <aside className="fixed top-0 right-0 h-screen z-[90] bg-white flex flex-col w-[min(560px,calc(100vw-32px))]"
+            style={{ boxShadow: '-8px 0 40px rgba(15,23,42,0.12)' }}>
             <div className="px-6 pt-5">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3 min-w-0">

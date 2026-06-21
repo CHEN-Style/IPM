@@ -173,7 +173,7 @@ const EnterpriseOverviewView = () => {
   return (
     <div className="mt-[18px]">
       {/* ── 统计条 ── */}
-      <div className="flex gap-2.5">
+      <div className="flex flex-wrap gap-2.5 [&>*]:min-w-[120px]">
         <StatCard label="活跃成员" value={stats?.members?.active ?? 0} hint={`/ ${stats?.members?.total ?? 0}`} />
         <StatCard label="云端项目" value={stats?.workspaces?.active ?? 0} hint={`/ ${stats?.workspaces?.total ?? 0}`} />
         <StatCard label="技能(已发布)" value={stats?.skills?.approved ?? 0} hint={`安装 ${stats?.skills?.installs ?? 0}`} />
@@ -181,7 +181,7 @@ const EnterpriseOverviewView = () => {
       </div>
 
       {/* ── 次级统计 ── */}
-      <div className="flex gap-2.5 mt-2.5">
+      <div className="flex flex-wrap gap-2.5 mt-2.5 [&>*]:min-w-[120px]">
         <StatCard label="管理员" value={(stats?.members?.byRole?.owner ?? 0) + (stats?.members?.byRole?.admin ?? 0)} hint={`含 ${stats?.members?.byRole?.owner ?? 0} 位 owner`} />
         <StatCard label="版本提交" value={stats?.versions?.total ?? 0} />
         <StatCard label="待审技能" value={stats?.skills?.pending_review ?? 0} tone={stats?.skills?.pending_review ? '#b45309' : undefined} />

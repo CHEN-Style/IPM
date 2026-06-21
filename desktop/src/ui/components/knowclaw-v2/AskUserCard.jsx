@@ -373,7 +373,7 @@ export default function AskUserCard({ message, onReply, onCancel, onSkip }) {
                         }
                       }}
                       disabled={answered}
-                      placeholder="请输入你的答案…（Ctrl/⌘+Enter 提交）"
+                      placeholder="请输入你的答案…（⌘+Enter 提交）"
                       rows={2}
                       spellCheck={false}
                       className={`w-full resize-y rounded-md border px-2 py-1.5 text-[12.5px] leading-snug transition-colors focus:outline-none focus:ring-1 ${

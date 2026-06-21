@@ -313,11 +313,12 @@ const App = () => {
             setSidebarCollapsed(true);
           }}
         >
-          {/* Top drag strip — also prevents content from overlapping window-control overlay.
-              G1.1c: 在右侧（系统 caption controls 之前）放一个「切换到悬浮窗」按钮，
-              使中台 → 悬浮的入口与悬浮窗左上角的「回中台」对称可见。 */}
+          {/* Top drag strip for the macOS hiddenInset title bar.
+              G1.1c: 在右侧放一个「切换到悬浮窗」按钮，使中台 → 悬浮的入口
+              与悬浮窗左上角的「回中台」对称可见。macOS 的窗口控制（交通灯）
+              在左上角，由 Sidebar 顶部 padding 让位，这里无需为右侧控制留白。 */}
           <div
-            className="h-[36px] shrink-0 w-full flex items-center justify-end pr-[140px]"
+            className="h-[40px] shrink-0 w-full flex items-center justify-end px-4"
             style={{ WebkitAppRegion: 'drag', background: '#f8f9fb' }}
           >
             <button
@@ -329,7 +330,7 @@ const App = () => {
                 }
                 setUiMode('floating');
               }}
-              title="切换到悬浮窗 (Ctrl+Shift+Space)"
+              title="切换到悬浮窗 (⌘⇧Space)"
               style={{ WebkitAppRegion: 'no-drag' }}
               className="h-7 w-7 rounded-md hover:bg-slate-200/60 flex items-center justify-center text-slate-500 hover:text-slate-700 transition-colors"
               data-track="titlebar-open-floating"

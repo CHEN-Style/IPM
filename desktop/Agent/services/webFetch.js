@@ -60,7 +60,7 @@ const POST_LOAD_IDLE_MS = 800;
 const MAX_CONCURRENT_RENDERS = 2;
 const DEFAULT_VIEWPORT = { width: 1280, height: 900 };
 const CHROME_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 let inflight = 0;

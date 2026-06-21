@@ -37,9 +37,9 @@ import { defineTool } from '@earendil-works/pi-coding-agent';
  * Run a short command synchronously and return its stdout. Catches *all*
  * errors and returns `null` on failure. We intentionally swallow stderr
  * for the model-facing payload — the version probes are noisy on missing
- * binaries (Windows pops up a "command not found" stderr line), and the
- * structured `available: false` flag is the signal the model actually
- * needs.
+ * binaries (a missing binary emits a "command not found" stderr line),
+ * and the structured `available: false` flag is the signal the model
+ * actually needs.
  *
  * `timeout` is hardcoded short on purpose: this is a probe, not a heavy
  * subprocess. If a probe hangs we'd rather report "unknown" than block
@@ -53,7 +53,6 @@ function runCapture(cmd) {
     const out = execSync(cmd, {
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 4_000,
-      windowsHide: true,
       shell: true, // we pass plain `binary --version` style strings
       encoding: 'utf-8',
     });
@@ -66,9 +65,8 @@ function runCapture(cmd) {
 /**
  * Probe a CLI binary by running `<bin> <versionArg>` and returning
  * `{ available, version, raw }`. `available` is true iff the command
- * exited 0 AND produced non-empty stdout — this rules out the common
- * Windows case where a missing binary still spawns a shell with empty
- * output.
+ * exited 0 AND produced non-empty stdout — this rules out the case
+ * where a missing binary still spawns a shell with empty output.
  *
  * @param {string} bin
  * @param {string} [versionArg='--version']
@@ -91,9 +89,9 @@ function probeBinary(bin, versionArg = '--version') {
 }
 
 /**
- * Probe a Python package via `python -c "import x; print(x.__version__)"`.
- * Tries `python` first, falls back to `python3` because Windows users
- * vary on which name is on PATH.
+ * Probe a Python package via `python3 -c "import x; print(x.__version__)"`.
+ * Tries `python3` first, falls back to `python` (macOS ships `python3`;
+ * some environments only expose `python`).
  *
  * @param {string} pkg
  * @returns {{ installed: boolean, version: string | null }}
@@ -111,15 +109,11 @@ try:
 except Exception:
   sys.exit(1)
 `;
-  // Pass via -c with single quotes. On Windows cmd.exe doesn't grok
-  // single quotes, but execSync({ shell: true }) on Windows actually
-  // uses cmd.exe; however our preferred interpreter is Git Bash via
-  // pi's bash tool, NOT here. For this probe we call python directly
-  // — both POSIX shells and cmd.exe accept double-quoted strings, so
-  // wrap with double quotes and escape any embedded double quotes.
-  // (The code above has none, so this is a no-op today.)
+  // Pass via -c with the code flattened onto one line. We wrap in double
+  // quotes (accepted by every POSIX shell) and escape any embedded
+  // double quotes. (The code above has none, so this is a no-op today.)
   const escaped = code.replace(/"/g, '\\"').replace(/\r?\n/g, '; ');
-  for (const bin of ['python', 'python3']) {
+  for (const bin of ['python3', 'python']) {
     const out = runCapture(`${bin} -c "${escaped}"`);
     if (out !== null) return { installed: true, version: out || null };
   }
@@ -144,7 +138,7 @@ function probeNodePackage(pkg) {
   // cwd the IPC layer set on the AgentSession.
   const cwd = process.cwd();
   const code = `try{const p=require.resolve('${pkg}/package.json',{paths:[${JSON.stringify(cwd)}]});const v=require(p).version;process.stdout.write(v||'');}catch(_){process.exit(1)}`;
-  // Avoid newlines so the cmd.exe quoting doesn't trip over them.
+  // Keep the snippet on one line so shell quoting stays simple.
   const out = runCapture(`node -e "${code.replace(/"/g, '\\"')}"`);
   if (out === null) return { installed: false, version: null };
   return { installed: true, version: out || null };
@@ -194,15 +188,15 @@ export function buildEnvTools() {
         platform: process.platform,
         cwd: process.cwd(),
         interpreters: {
-          python: probeBinary('python', '--version').available
-            ? probeBinary('python', '--version')
-            : probeBinary('python3', '--version'),
+          python: probeBinary('python3', '--version').available
+            ? probeBinary('python3', '--version')
+            : probeBinary('python', '--version'),
           node: probeBinary('node', '--version'),
         },
         managers: {
-          pip: probeBinary('pip', '--version').available
-            ? probeBinary('pip', '--version')
-            : probeBinary('pip3', '--version'),
+          pip: probeBinary('pip3', '--version').available
+            ? probeBinary('pip3', '--version')
+            : probeBinary('pip', '--version'),
           npm: probeBinary('npm', '--version'),
           pnpm: probeBinary('pnpm', '--version'),
           yarn: probeBinary('yarn', '--version'),

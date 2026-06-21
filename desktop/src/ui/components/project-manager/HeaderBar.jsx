@@ -231,8 +231,9 @@ const HeaderBar = ({
         )}
       </div>
 
-      {/* Row 2: Action bar */}
-      <div className="px-4 sm:px-6 pb-3 flex items-center gap-2 flex-wrap">
+      {/* Row 2: Action bar. flex-wrap + gap-y keeps the buttons readable when
+          they wrap onto multiple lines on a narrow window. */}
+      <div className="px-4 sm:px-6 pb-3 flex items-center gap-2 gap-y-2 flex-wrap">
         {/* Left group: navigation + search */}
         {showGoParent && (
           <button
@@ -255,9 +256,10 @@ const HeaderBar = ({
           </button>
         )}
 
-        {/* In-project search */}
+        {/* In-project search. Shrinkable so it never forces the action row to
+            overflow; it still grows on focus when there is room. */}
         {!isRoot && (
-          <div className="relative shrink-0" ref={pWrapRef}>
+          <div className="relative shrink min-w-[120px] max-w-[200px]" ref={pWrapRef}>
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" size={12} style={{ color: pFocused ? '#64748b' : '#94a3b8' }} />
               <input
@@ -268,7 +270,7 @@ const HeaderBar = ({
                 onFocus={() => setPFocused(true)}
                 onKeyDown={handlePKeyDown}
                 placeholder="搜索文件..."
-                className="h-8 w-36 focus:w-48 pl-7 pr-6 rounded-lg border text-xs transition-all focus:outline-none"
+                className="h-8 w-full sm:w-36 sm:focus:w-48 pl-7 pr-6 rounded-lg border text-xs transition-all focus:outline-none"
                 style={{
                   background: pFocused ? '#fff' : '#f8f9fb',
                   borderColor: pFocused ? '#3e4b9c66' : '#e2e4eb',
@@ -285,7 +287,7 @@ const HeaderBar = ({
             </div>
 
             {pOpen && (
-              <div className="absolute left-0 mt-1 w-80 rounded-xl shadow-xl overflow-hidden z-50" style={{ background: '#fff', border: '1px solid #e2e4eb' }}>
+              <div className="absolute left-0 mt-1 w-80 max-w-[calc(100vw-32px)] rounded-xl shadow-xl overflow-hidden z-50" style={{ background: '#fff', border: '1px solid #e2e4eb' }}>
                 <div className="overflow-y-auto" style={{ maxHeight: '52vh' }} ref={pListRef}>
                   {pLoading && pResults.length === 0 && (
                     <div className="px-3 py-5 text-center text-[12px] text-slate-400">
@@ -331,7 +333,7 @@ const HeaderBar = ({
         {/* Spacer to push right group */}
         <div className="flex-1" />
 
-        {/* Right group: nav-pane toggle (Windows-explorer style), filter, actions.
+        {/* Right group: nav-pane toggle (file-browser style), filter, actions.
             The toggle only makes sense inside a workspace (the all-projects
             root has no folder tree). */}
         {!isRoot && (

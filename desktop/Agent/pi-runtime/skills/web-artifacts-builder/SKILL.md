@@ -95,7 +95,7 @@ bash "$KNOWCLAW_SKILLS_DIR/web-artifacts-builder/scripts/bundle-artifact.sh"
 
 ### Step 4: 交付给用户
 
-把 `<工作空间>/<my-app>/bundle.html` 的绝对路径告诉用户，引导其用浏览器打开。如果用户希望直接看到效果，调用 KnowClaw 的"在文件管理器中打开工作空间"按钮（标题栏右侧那个外部链接图标）。
+把 `<工作空间>/<my-app>/bundle.html` 的绝对路径告诉用户，引导其用浏览器打开。如果用户希望直接看到效果，调用 KnowClaw 的"在访达中打开工作空间"按钮（标题栏右侧那个外部链接图标）。
 
 ### Step 5: 测试 / 可视化（可选）
 

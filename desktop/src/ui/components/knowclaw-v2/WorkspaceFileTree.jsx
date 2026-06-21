@@ -28,7 +28,7 @@
 //   - Highlight files marked "new" / "edited" by `recentTouchedFiles`
 //     for 5 seconds with an amber background + dot indicator. The
 //     hook prunes those entries on a 1s tick so the highlight fades.
-//   - Footer toolbar: refresh button + "在资源管理器中打开" the
+//   - Footer toolbar: refresh button + "在访达中打开" the
 //     current cwd.
 //
 // Layout: fixed-width drawer (`w-72`) — wide enough for nested paths
@@ -479,7 +479,7 @@ const WorkspaceFileTree = ({
 
   return (
     <aside
-      className={`w-72 shrink-0 h-full flex flex-col border-l border-slate-100 bg-slate-50/50 relative ${
+      className={`w-[min(288px,40vw)] shrink-0 h-full flex flex-col border-l border-slate-100 bg-slate-50/50 relative ${
         showRootDropOverlay ? 'ring-2 ring-inset ring-blue-300' : ''
       }`}
       onDragOver={handlePanelDragOver}
@@ -554,7 +554,7 @@ const WorkspaceFileTree = ({
 
         {truncated && (
           <div className="mt-2 px-4 text-[10px] text-amber-600 italic leading-relaxed">
-            （已达到 500 项上限，部分文件未列出。请使用搜索或访问资源管理器查看完整内容。）
+            （已达到 500 项上限，部分文件未列出。请使用搜索或访问访达查看完整内容。）
           </div>
         )}
       </div>
@@ -582,10 +582,10 @@ const WorkspaceFileTree = ({
             type="button"
             onClick={() => onOpenFolder?.()}
             className="flex-1 flex items-center justify-center gap-1.5 h-7 rounded-md text-[11px] text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors"
-            title="在资源管理器中打开当前工作空间"
+            title="在访达中打开当前工作空间"
           >
             <ExternalLink size={11} />
-            <span>在资源管理器中打开</span>
+            <span>在访达中打开</span>
           </button>
         </div>
       )}

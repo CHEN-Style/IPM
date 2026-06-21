@@ -2065,7 +2065,7 @@ function repositionBubble() {
   });
 }
 
-// G1.0/G1.1 全局切换：Ctrl+Shift+Space / 托盘单击 / 标题栏按钮共享此函数。
+// G1.0/G1.1 全局切换：⌘⇧Space（CommandOrControl+Shift+Space）/ 托盘单击 / 标题栏按钮共享此函数。
 // 逻辑：若悬浮窗存在且可见 → 切到中台（隐藏悬浮）；否则 → 切到悬浮（隐藏中台）。
 const toggleFloatingAndMain = () => {
   const fwAlive = floatingWindow && !floatingWindow.isDestroyed();
@@ -2641,14 +2641,14 @@ app.whenReady().then(() => {
   // cache. Reuses the Map populated by `startClipboardWatcher()` above.
   registerClipboardIpc({ ipcMain, clipboardImageCache });
 
-  // G1.0 全局快捷键：Ctrl+Shift+Space 双向切换悬浮 / 中台
+  // G1.0 全局快捷键：⌘⇧Space（CommandOrControl+Shift+Space）双向切换悬浮 / 中台
   try {
     const ok = globalShortcut.register('CommandOrControl+Shift+Space', () => {
       try { toggleFloatingAndMain(); } catch (err) {
         console.warn('[IPM] toggle on shortcut failed:', err?.message || err);
       }
     });
-    if (!ok) console.warn('[IPM] failed to register Ctrl+Shift+Space (key may be in use)');
+    if (!ok) console.warn('[IPM] failed to register CommandOrControl+Shift+Space (key may be in use)');
   } catch (err) {
     console.warn('[IPM] globalShortcut.register error:', err?.message || err);
   }
